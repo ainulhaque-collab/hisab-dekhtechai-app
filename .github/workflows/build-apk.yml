@@ -45,6 +45,7 @@ jobs:
 
       - name: Build Android APK
         run: |
+          export JAVA_HOME=$(dirname $(dirname $(readlink -f $(which java))))
           yes | $ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager --licenses || true
           cd android
           gradle wrapper --gradle-version 8.13
