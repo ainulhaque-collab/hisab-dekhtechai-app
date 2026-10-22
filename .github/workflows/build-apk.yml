@@ -29,26 +29,25 @@ jobs:
       - name: Build Web Application
         run: npm run build
 
-      - name: Setup Java 21
+      - name: Setup Java 17
         uses: actions/setup-java@v4
         with:
           distribution: 'temurin'
-          java-version: '21'
+          java-version: '17'
 
-      - name: Setup Gradle
+      - name: Setup Gradle 8.13
         uses: gradle/actions/setup-gradle@v4
         with:
-          gradle-version: '8.11.1'
+          gradle-version: '8.13'
 
       - name: Sync Capacitor Android
         run: npx cap sync android
 
       - name: Build Android APK
         run: |
+          yes | $ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager --licenses || true
           cd android
-          if [ ! -f "gradlew" ]; then
-            gradle wrapper
-          fi
+          gradle wrapper --gradle-version 8.13
           chmod +x gradlew
           ./gradlew assembleDebug --no-daemon --stacktrace
 
