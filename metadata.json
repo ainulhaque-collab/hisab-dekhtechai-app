@@ -1,0 +1,6 @@
+{
+  "name": "Hisab DekhteChai",
+  "description": "হিসাব দেখতে চাই — আপনার সব হিসাব, এক জায়গায়। Offline-first personal & small business financial ledger with balanced double-entry journal and Google Drive sync.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

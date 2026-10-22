@@ -1,0 +1,10 @@
+{
+	"appId": "com.hisabdekhtechai.app",
+	"appName": "হিসাব দেখতে চাই (Hisab DekhteChai)",
+	"webDir": "dist",
+	"server": {
+		"androidScheme": "https",
+		"cleartext": false
+	},
+	"android": {}
+}
