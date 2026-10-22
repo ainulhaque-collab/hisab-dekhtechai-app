@@ -4,7 +4,7 @@ buildscript {
         mavenCentral()
     }
     dependencies {
-        classpath 'com.android.tools.build:gradle:8.2.1'
+        classpath 'com.android.tools.build:gradle:8.13.0'
         classpath 'com.google.gms:google-services:4.4.1'
     }
 }
@@ -14,6 +14,12 @@ allprojects {
         google()
         mavenCentral()
     }
+}
+
+ext {
+    compileSdkVersion = 36
+    targetSdkVersion = 36
+    minSdkVersion = 24
 }
 
 task clean(type: Delete) {
