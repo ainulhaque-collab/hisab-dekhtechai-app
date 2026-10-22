@@ -6,9 +6,9 @@ import {
   paisaToDecimalString,
   formatBDT,
   toBengaliDigits,
-  fromBengaliDigits,
   addPaisa,
-  subPaisa
+  subPaisa,
+  normalizeNumericAmountInput
 } from '../domain/money';
 import {
   buildIncomeJournal,
@@ -42,6 +42,20 @@ test('Money domain: integer paisa conversion and exact math', () => {
   const b = toPaisa('200.20'); // 20020
   assert.equal(addPaisa(a, b), 30030n);
   assert.equal(subPaisa(b, a), 10010n);
+});
+
+test('Money domain: normalizeNumericAmountInput converts Bengali digits to English and strips invalid characters', () => {
+  // Bengali numerals converted directly to English
+  assert.equal(normalizeNumericAmountInput('৫০০'), '500');
+  assert.equal(normalizeNumericAmountInput('১২৫০.৫০'), '1250.50');
+  assert.equal(normalizeNumericAmountInput('০.৭৫'), '0.75');
+
+  // English input preserved
+  assert.equal(normalizeNumericAmountInput('250.00'), '250.00');
+
+  // Invalid characters, letters, and extra dots filtered out
+  assert.equal(normalizeNumericAmountInput('৳ 500 abc'), '500');
+  assert.equal(normalizeNumericAmountInput('12.34.56'), '12.34');
 });
 
 test('Double-entry journal: Income transaction balance invariant', () => {

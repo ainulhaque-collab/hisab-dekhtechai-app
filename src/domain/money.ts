@@ -144,3 +144,61 @@ export function addPaisa(a: Paisa, b: Paisa): Paisa {
 export function subPaisa(a: Paisa, b: Paisa): Paisa {
   return a - b;
 }
+
+/**
+ * Normalizes user input in amount field:
+ * - Automatically converts Bengali numerals (০-৯) to English digits (0-9)
+ * - Removes any letters, special symbols, or spaces
+ * - Allows only numeric digits and at most one decimal point
+ * - Limits decimal places to at most 2 digits
+ */
+export function normalizeNumericAmountInput(input: string): string {
+  if (!input) return '';
+  const ascii = fromBengaliDigits(input);
+
+  let result = '';
+  let hasDecimal = false;
+  let decimalCount = 0;
+
+  for (const ch of ascii) {
+    if (ch >= '0' && ch <= '9') {
+      if (hasDecimal) {
+        if (decimalCount < 2) {
+          result += ch;
+          decimalCount++;
+        }
+      } else {
+        result += ch;
+      }
+    } else if ((ch === '.' || ch === ',') && !hasDecimal) {
+      result += '.';
+      hasDecimal = true;
+    }
+  }
+
+  return result;
+}
+
+/**
+ * Parses dual-language titles formatted like "Cash in Hand (নগদ টাকা)" or "ব্যক্তিগত (Personal)"
+ * and returns the appropriate language name according to user preference.
+ */
+export function formatAccountTitle(name: string, locale: 'en' | 'bn' = 'en'): string {
+  if (!name) return '';
+  const match = name.match(/^(.*?)\s*\((.*?)\)$/);
+  if (match) {
+    const part1 = match[1].trim();
+    const part2 = match[2].trim();
+    const part1HasBengali = /[\u0980-\u09FF]/.test(part1);
+    const part2HasBengali = /[\u0980-\u09FF]/.test(part2);
+
+    if (locale === 'bn') {
+      if (part1HasBengali) return part1;
+      if (part2HasBengali) return part2;
+    } else {
+      if (!part1HasBengali) return part1;
+      if (!part2HasBengali) return part2;
+    }
+  }
+  return name;
+}

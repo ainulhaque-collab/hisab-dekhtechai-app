@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { useApp } from '../context/AppContext';
-import { formatBDT, parsePaisaString } from '../domain/money';
+import { formatBDT, parsePaisaString, normalizeNumericAmountInput } from '../domain/money';
 import {
   Banknote,
   Building,
@@ -58,15 +58,17 @@ export const AccountsTab: React.FC = () => {
     }
   };
 
+  const isEn = language === 'en';
+
   return (
     <div className="space-y-4 pb-24 animate-in fade-in">
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-base font-bold text-slate-800 tracking-tight">
-            অ্যাকাউন্ট ও ওয়ালেট তালিকা
+            {isEn ? 'Accounts & Wallets' : 'অ্যাকাউন্ট ও ওয়ালেট তালিকা'}
           </h1>
           <p className="text-xs text-slate-500">
-            {currentWorkspace.name} খাতার সকল হিসাবের স্থিতি
+            {isEn ? `All accounts in ${currentWorkspace.name}` : `${currentWorkspace.name} খাতার সকল হিসাবের স্থিতি`}
           </p>
         </div>
         <button
@@ -75,64 +77,71 @@ export const AccountsTab: React.FC = () => {
           className="px-3 py-1.5 bg-blue-700 hover:bg-blue-800 text-white rounded-xl text-xs font-semibold flex items-center gap-1.5 shadow-sm transition-colors"
         >
           <Plus className="w-3.5 h-3.5" />
-          <span>নতুন অ্যাকাউন্ট</span>
+          <span>{isEn ? '+ New Account' : '+ নতুন অ্যাকাউন্ট'}</span>
         </button>
       </div>
 
       <div className="space-y-3">
-        {dashboardData.accountSummaries.map((acc) => (
-          <div
-            key={acc.accountId}
-            className="bg-white p-4 rounded-xl border border-slate-200 shadow-xs hover:border-slate-300 transition-colors"
-          >
-            <div className="flex items-start justify-between gap-3 mb-3">
-              <div className="flex items-center gap-3">
-                <div className="w-10 h-10 rounded-xl bg-slate-50 border border-slate-200 flex items-center justify-center shrink-0">
-                  {getAccountIcon(acc.kind)}
+        {dashboardData.accountSummaries.map((acc) => {
+          const formattedName = formatAccountTitle(acc.name, language);
+          return (
+            <div
+              key={acc.accountId}
+              className="bg-white p-4 rounded-xl border border-slate-200 shadow-xs hover:border-slate-300 transition-colors"
+            >
+              <div className="flex items-start justify-between gap-3 mb-3">
+                <div className="flex items-center gap-3">
+                  <div className="w-10 h-10 rounded-xl bg-slate-50 border border-slate-200 flex items-center justify-center shrink-0">
+                    {getAccountIcon(acc.kind)}
+                  </div>
+                  <div>
+                    <h3 className="text-sm font-bold text-slate-900">{formattedName}</h3>
+                    <span className="text-[11px] text-slate-500 uppercase font-medium">
+                      {acc.kind}
+                    </span>
+                  </div>
+                </div>
+                <div className="text-right">
+                  <div className="text-base font-bold text-blue-700 tabular-nums">
+                    {formatBDT(acc.currentBalanceMinor, { locale: language })}
+                  </div>
+                  <div className="text-[10px] text-slate-400 font-medium">
+                    {isEn ? 'Current Balance' : 'বর্তমান ব্যালেন্স'}
+                  </div>
+                </div>
+              </div>
+
+              <div className="grid grid-cols-3 gap-2 pt-2.5 border-t border-slate-100 text-xs">
+                <div>
+                  <span className="text-[10px] text-slate-400">
+                    {isEn ? 'Opening Balance' : 'প্রারম্ভিক (Opening)'}
+                  </span>
+                  <div className="font-semibold text-slate-700 tabular-nums">
+                    {formatBDT(acc.openingBalanceMinor, { locale: language, showDecimals: false })}
+                  </div>
                 </div>
                 <div>
-                  <h3 className="text-sm font-bold text-slate-900">{acc.name}</h3>
-                  <span className="text-[11px] text-slate-500 uppercase font-medium">
-                    {acc.kind}
-                  </span>
+                  <div className="flex items-center gap-0.5 text-emerald-600 text-[10px]">
+                    <ArrowDownLeft className="w-2.5 h-2.5" />
+                    <span>{isEn ? 'Total In' : 'মোট আগমন (In)'}</span>
+                  </div>
+                  <div className="font-semibold text-slate-700 tabular-nums">
+                    {formatBDT(acc.totalDebitsMinor, { locale: language, showDecimals: false })}
+                  </div>
                 </div>
-              </div>
-              <div className="text-right">
-                <div className="text-base font-bold text-blue-700 tabular-nums">
-                  {formatBDT(acc.currentBalanceMinor, { locale: language })}
-                </div>
-                <div className="text-[10px] text-slate-400 font-medium">বর্তমান ব্যালেন্স</div>
-              </div>
-            </div>
-
-            <div className="grid grid-cols-3 gap-2 pt-2.5 border-t border-slate-100 text-xs">
-              <div>
-                <span className="text-[10px] text-slate-400">প্রারম্ভিক (Opening)</span>
-                <div className="font-semibold text-slate-700 tabular-nums">
-                  {formatBDT(acc.openingBalanceMinor, { locale: language, showDecimals: false })}
-                </div>
-              </div>
-              <div>
-                <div className="flex items-center gap-0.5 text-emerald-600 text-[10px]">
-                  <ArrowDownLeft className="w-2.5 h-2.5" />
-                  <span>মোট আগমন (In)</span>
-                </div>
-                <div className="font-semibold text-slate-700 tabular-nums">
-                  {formatBDT(acc.totalDebitsMinor, { locale: language, showDecimals: false })}
-                </div>
-              </div>
-              <div>
-                <div className="flex items-center gap-0.5 text-rose-600 text-[10px]">
-                  <ArrowUpRight className="w-2.5 h-2.5" />
-                  <span>মোট বহির্গমন (Out)</span>
-                </div>
-                <div className="font-semibold text-slate-700 tabular-nums">
-                  {formatBDT(acc.totalCreditsMinor, { locale: language, showDecimals: false })}
+                <div>
+                  <div className="flex items-center gap-0.5 text-rose-600 text-[10px]">
+                    <ArrowUpRight className="w-2.5 h-2.5" />
+                    <span>{isEn ? 'Total Out' : 'মোট বহির্গমন (Out)'}</span>
+                  </div>
+                  <div className="font-semibold text-slate-700 tabular-nums">
+                    {formatBDT(acc.totalCreditsMinor, { locale: language, showDecimals: false })}
+                  </div>
                 </div>
               </div>
             </div>
-          </div>
-        ))}
+          );
+        })}
       </div>
 
       {/* Add Account Modal */}
@@ -181,13 +190,13 @@ export const AccountsTab: React.FC = () => {
 
               <div>
                 <label className="block text-slate-700 font-semibold mb-1">
-                  প্রারম্ভিক ব্যালেন্স (Opening Balance ৳)
+                  {isEn ? 'Opening Balance (BDT)' : 'প্রারম্ভিক ব্যালেন্স (Opening Balance ৳)'}
                 </label>
                 <input
                   type="text"
                   placeholder="0.00"
                   value={openingBalance}
-                  onChange={(e) => setOpeningBalance(e.target.value)}
+                  onChange={(e) => setOpeningBalance(normalizeNumericAmountInput(e.target.value))}
                   className="w-full px-3 py-2 bg-slate-50 border border-slate-300 rounded-xl focus:bg-white focus:outline-none focus:ring-2 focus:ring-blue-600 tabular-nums"
                 />
               </div>

@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { useApp } from '../context/AppContext';
-import { formatBDT } from '../domain/money';
+import { formatBDT, formatAccountTitle } from '../domain/money';
+import { getT } from '../locales/i18n';
 import {
   TrendingUp,
   TrendingDown,
@@ -20,12 +21,14 @@ import {
   PieChart
 } from 'lucide-react';
 import { JournalTransaction } from '../contracts/types';
+import { Users, UserPlus } from 'lucide-react';
 
 interface DashboardTabProps {
   onNavigateToAdd: () => void;
   onNavigateToHistory: () => void;
   onSelectTransaction: (tx: JournalTransaction) => void;
   onOpenSyncModal: () => void;
+  onOpenPartiesModal?: () => void;
 }
 
 export const DashboardTab: React.FC<DashboardTabProps> = ({
@@ -33,16 +36,18 @@ export const DashboardTab: React.FC<DashboardTabProps> = ({
   onNavigateToHistory,
   onSelectTransaction,
   onOpenSyncModal,
+  onOpenPartiesModal,
 }) => {
-  const { dashboardData, currentWorkspace, language, syncStatus, isOnline, triggerManualSync } =
+  const { dashboardData, currentWorkspace, parties, language, syncStatus, isOnline, triggerManualSync } =
     useApp();
   const [showBalance, setShowBalance] = useState(true);
   const [isSyncing, setIsSyncing] = useState(false);
+  const t = getT(language);
 
   if (!dashboardData) {
     return (
       <div className="p-6 text-center text-slate-500">
-        লোডিং হচ্ছে... (Loading dashboard data...)
+        {language === 'en' ? 'Loading dashboard data...' : 'লোডিং হচ্ছে...'}
       </div>
     );
   }
@@ -80,15 +85,15 @@ export const DashboardTab: React.FC<DashboardTabProps> = ({
             <div>
               <span className="font-semibold">
                 {!isOnline
-                  ? 'অফলাইন মোড: লেনদেন স্থানীয়ভাবে নিরাপদে সংরক্ষিত'
+                  ? (language === 'en' ? 'Offline Mode: Transactions safely saved locally' : 'অফলাইন মোড: লেনদেন স্থানীয়ভাবে নিরাপদে সংরক্ষিত')
                   : syncStatus.state === 'conflict'
-                  ? 'সংঘাত পর্যালোচনা প্রয়োজন (Conflict review needed)'
-                  : `${syncStatus.pendingOutboxCount}টি নতুন লেনদেন ড্রাইভে সিঙ্ক অপেক্ষায়`}
+                  ? (language === 'en' ? 'Conflict review needed' : 'সংঘাত পর্যালোচনা প্রয়োজন')
+                  : (language === 'en' ? `${syncStatus.pendingOutboxCount} new transactions pending Drive sync` : `${syncStatus.pendingOutboxCount}টি নতুন লেনদেন ড্রাইভে সিঙ্ক অপেক্ষায়`)}
               </span>
               <p className="text-[11px] text-amber-700">
                 {!isOnline
-                  ? 'ইন্টারনেট পেলে স্বয়ংক্রিয়ভাবে ড্রাইভে সিঙ্ক হবে।'
-                  : 'গুগল ড্রাইভ স্ট্যাটাস দেখতে ট্যাপ করুন।'}
+                  ? (language === 'en' ? 'Will sync automatically when internet is available.' : 'ইন্টারনেট পেলে স্বয়ংক্রিয়ভাবে ড্রাইভে সিঙ্ক হবে।')
+                  : (language === 'en' ? 'Tap to view Google Drive sync dashboard.' : 'গুগল ড্রাইভ স্ট্যাটাস দেখতে ট্যাপ করুন।')}
               </p>
             </div>
           </div>
@@ -102,7 +107,7 @@ export const DashboardTab: React.FC<DashboardTabProps> = ({
             className="px-2.5 py-1 bg-amber-700 text-white rounded-lg font-medium text-[11px] flex items-center gap-1 hover:bg-amber-800 disabled:opacity-50"
           >
             <RefreshCw className={`w-3 h-3 ${isSyncing ? 'animate-spin' : ''}`} />
-            <span>সিঙ্ক</span>
+            <span>{language === 'en' ? 'Sync' : 'সিঙ্ক'}</span>
           </button>
         </div>
       )}
@@ -115,7 +120,9 @@ export const DashboardTab: React.FC<DashboardTabProps> = ({
 
         <div className="flex items-center justify-between mb-2">
           <div className="flex items-center gap-1.5 text-blue-200 text-xs font-medium">
-            <span>{currentWorkspace?.name} • সর্বমোট ব্যালেন্স</span>
+            <span>
+              {formatAccountTitle(currentWorkspace?.name || '', language)} • {t.totalBalance}
+            </span>
             <button
               type="button"
               onClick={() => setShowBalance(!showBalance)}
@@ -141,7 +148,7 @@ export const DashboardTab: React.FC<DashboardTabProps> = ({
           <div>
             <div className="flex items-center gap-1 text-emerald-300 text-[11px] font-medium">
               <TrendingUp className="w-3 h-3" />
-              <span>এই মাসে আয়</span>
+              <span>{t.monthIncome}</span>
             </div>
             <div className="font-semibold text-white mt-0.5 tabular-nums">
               {showBalance
@@ -156,7 +163,7 @@ export const DashboardTab: React.FC<DashboardTabProps> = ({
           <div>
             <div className="flex items-center gap-1 text-rose-300 text-[11px] font-medium">
               <TrendingDown className="w-3 h-3" />
-              <span>এই মাসে খরচ</span>
+              <span>{t.monthExpense}</span>
             </div>
             <div className="font-semibold text-white mt-0.5 tabular-nums">
               {showBalance
@@ -171,7 +178,7 @@ export const DashboardTab: React.FC<DashboardTabProps> = ({
           <div>
             <div className="flex items-center gap-1 text-blue-200 text-[11px] font-medium">
               <ArrowRightLeft className="w-3 h-3" />
-              <span>নেট প্রবৃদ্ধি</span>
+              <span>{t.netSavings}</span>
             </div>
             <div className="font-semibold text-white mt-0.5 tabular-nums">
               {showBalance
@@ -186,39 +193,101 @@ export const DashboardTab: React.FC<DashboardTabProps> = ({
         </div>
       </div>
 
+      {/* Business Workspace: Members & Parties Card (Issue #3) */}
+      {currentWorkspace?.kind === 'business' && (
+        <div className="bg-white p-3.5 rounded-xl border border-blue-200 shadow-xs">
+          <div className="flex items-center justify-between mb-2">
+            <div className="flex items-center gap-2">
+              <div className="w-8 h-8 rounded-lg bg-blue-50 text-blue-700 flex items-center justify-center shrink-0">
+                <Users className="w-4 h-4" />
+              </div>
+              <div>
+                <h3 className="text-xs font-bold text-slate-800">
+                  {language === 'en' ? 'Business Members & Parties' : 'ব্যবসায়িক সদস্য ও পক্ষগণ'}
+                </h3>
+                <p className="text-[10px] text-slate-500">
+                  {parties.length === 0
+                    ? (language === 'en' ? 'No members added yet' : 'এখনও কোনো সদস্য নেই')
+                    : (language === 'en' ? `${parties.length} Partners, Staff, Customers & Vendors` : `${parties.length} জন অংশীদার, কর্মচারী ও কাস্টমার`)}
+                </p>
+              </div>
+            </div>
+            <button
+              type="button"
+              onClick={onOpenPartiesModal}
+              className="px-2.5 py-1.5 bg-blue-50 hover:bg-blue-100 text-blue-700 rounded-lg text-xs font-bold transition-colors flex items-center gap-1"
+            >
+              <UserPlus className="w-3.5 h-3.5" />
+              <span>{language === 'en' ? 'Manage' : 'পরিচালনা'}</span>
+            </button>
+          </div>
+
+          {/* Quick Party Chips */}
+          <div className="flex items-center gap-1.5 overflow-x-auto pb-1 mt-1">
+            {parties.map((p) => (
+              <button
+                key={p.id}
+                type="button"
+                onClick={onOpenPartiesModal}
+                className="shrink-0 inline-flex items-center gap-1 px-2 py-1 rounded-lg bg-slate-50 hover:bg-slate-100 border border-slate-200 text-xs font-medium text-slate-700 transition-colors"
+              >
+                <span className="w-1.5 h-1.5 rounded-full bg-blue-600" />
+                <span>{p.name}</span>
+                <span className="text-[10px] text-slate-400">
+                  ({p.role === 'partner' ? (language === 'en' ? 'Partner' : 'অংশীদার') : p.role === 'staff' ? (language === 'en' ? 'Staff' : 'কর্মচারী') : p.role === 'customer' ? (language === 'en' ? 'Client' : 'কাস্টমার') : (language === 'en' ? 'Vendor' : 'মহাজন')})
+                </span>
+              </button>
+            ))}
+            <button
+              type="button"
+              onClick={onOpenPartiesModal}
+              className="shrink-0 inline-flex items-center gap-1 px-2 py-1 rounded-lg border border-dashed border-blue-300 text-blue-700 text-xs font-semibold hover:bg-blue-50 transition-colors"
+            >
+              <Plus className="w-3 h-3" />
+              <span>{language === 'en' ? 'Add Person' : 'ব্যক্তি যোগ'}</span>
+            </button>
+          </div>
+        </div>
+      )}
+
       {/* Asset Accounts Grid */}
       <div>
         <div className="flex items-center justify-between mb-2 px-1">
           <h2 className="text-sm font-bold text-slate-800 tracking-tight">
-            অ্যাকাউন্ট ও ওয়ালেট ({dashboardData.accountSummaries.length})
+            {t.accountsAndWallets} ({dashboardData.accountSummaries.length})
           </h2>
-          <span className="text-xs text-blue-700 font-medium">সর্বশেষ স্থিতি</span>
+          <span className="text-xs text-blue-700 font-medium">{t.latestBalance}</span>
         </div>
 
         <div className="grid grid-cols-2 sm:grid-cols-3 gap-2.5">
-          {dashboardData.accountSummaries.map((acc) => (
-            <div
-              key={acc.accountId}
-              className="bg-white p-3 rounded-xl border border-slate-200 shadow-xs hover:border-blue-300 transition-colors"
-            >
-              <div className="flex items-center justify-between mb-1.5">
-                <span className="p-1 rounded-lg bg-slate-50 border border-slate-100">
-                  {getAccountIcon(acc.kind)}
-                </span>
-                <span className="text-[10px] text-slate-400 font-medium uppercase">
-                  {acc.kind}
-                </span>
+          {dashboardData.accountSummaries.map((acc) => {
+            const formattedName = formatAccountTitle(acc.name, language);
+            return (
+              <div
+                key={acc.accountId}
+                className="bg-white p-3 rounded-xl border border-slate-200 shadow-xs hover:border-blue-300 transition-colors flex flex-col justify-between"
+              >
+                <div>
+                  <div className="flex items-center justify-between mb-1.5">
+                    <span className="p-1 rounded-lg bg-slate-50 border border-slate-100">
+                      {getAccountIcon(acc.kind)}
+                    </span>
+                    <span className="text-[10px] text-slate-400 font-medium uppercase">
+                      {acc.kind}
+                    </span>
+                  </div>
+                  <div className="text-xs font-semibold text-slate-800 line-clamp-1 mb-1" title={formattedName}>
+                    {formattedName}
+                  </div>
+                </div>
+                <div className="text-sm font-bold text-blue-700 tabular-nums">
+                  {showBalance
+                    ? formatBDT(acc.currentBalanceMinor, { locale: language })
+                    : '৳ ••••••'}
+                </div>
               </div>
-              <div className="text-xs font-semibold text-slate-800 truncate mb-1" title={acc.name}>
-                {acc.name}
-              </div>
-              <div className="text-sm font-bold text-blue-700 tabular-nums">
-                {showBalance
-                  ? formatBDT(acc.currentBalanceMinor, { locale: language })
-                  : '৳ ••••••'}
-              </div>
-            </div>
-          ))}
+            );
+          })}
         </div>
       </div>
 
@@ -228,9 +297,9 @@ export const DashboardTab: React.FC<DashboardTabProps> = ({
           <div className="flex items-center justify-between mb-3">
             <div className="flex items-center gap-1.5 text-sm font-bold text-slate-800">
               <PieChart className="w-4 h-4 text-blue-700" />
-              <span>শীর্ষ খরচ খাত (এই মাসে)</span>
+              <span>{language === 'en' ? 'Top Expense Categories (This Month)' : 'শীর্ষ খরচ খাত (এই মাসে)'}</span>
             </div>
-            <span className="text-xs text-slate-500 font-medium">শতাংশ</span>
+            <span className="text-xs text-slate-500 font-medium">{language === 'en' ? 'Share' : 'শতাংশ'}</span>
           </div>
 
           <div className="space-y-2.5">
@@ -258,13 +327,15 @@ export const DashboardTab: React.FC<DashboardTabProps> = ({
       {/* Recent Transactions List */}
       <div className="bg-white rounded-xl border border-slate-200 shadow-xs overflow-hidden">
         <div className="p-3.5 border-b border-slate-100 flex items-center justify-between">
-          <h2 className="text-sm font-bold text-slate-800">সাম্প্রতিক লেনদেন</h2>
+          <h2 className="text-sm font-bold text-slate-800">
+            {t.recentTransactions}
+          </h2>
           <button
             type="button"
             onClick={onNavigateToHistory}
             className="text-xs text-blue-700 font-semibold flex items-center gap-0.5 hover:underline"
           >
-            <span>সব দেখুন</span>
+            <span>{t.seeAll}</span>
             <ChevronRight className="w-3.5 h-3.5" />
           </button>
         </div>
@@ -274,16 +345,18 @@ export const DashboardTab: React.FC<DashboardTabProps> = ({
             <div className="w-12 h-12 rounded-full bg-blue-50 text-blue-700 flex items-center justify-center mx-auto mb-2">
               <Receipt className="w-6 h-6" />
             </div>
-            <p className="text-sm font-medium text-slate-700 mb-1">এখনও কোনো লেনদেন লিপিবদ্ধ হয়নি</p>
+            <p className="text-sm font-medium text-slate-700 mb-1">
+              {t.noTransactionsYet}
+            </p>
             <p className="text-xs text-slate-400 mb-3">
-              নিচের যোগ বাটনে ট্যাপ করে নতুন আয় বা খরচ যোগ করুন।
+              {t.cleanSlateDescription}
             </p>
             <button
               type="button"
               onClick={onNavigateToAdd}
               className="px-3.5 py-1.5 bg-blue-700 text-white rounded-lg text-xs font-semibold shadow-sm hover:bg-blue-800"
             >
-              + লেনদেন যোগ করুন
+              {t.addTransaction}
             </button>
           </div>
         ) : (
@@ -340,12 +413,12 @@ export const DashboardTab: React.FC<DashboardTabProps> = ({
                       <div className="text-xs font-semibold text-slate-800 line-clamp-1">
                         {tx.note ||
                           (isIncome
-                            ? 'আয়'
+                            ? (language === 'en' ? 'Income' : 'আয়')
                             : isExpense
-                            ? 'দৈনন্দিন খরচ'
+                            ? (language === 'en' ? 'Daily Expense' : 'দৈনন্দিন খরচ')
                             : isTransfer
-                            ? 'অ্যাকাউন্ট স্থানান্তর'
-                            : 'সংশোধনী এন্ট্রি')}
+                            ? (language === 'en' ? 'Account Transfer' : 'অ্যাকাউন্ট স্থানান্তর')
+                            : (language === 'en' ? 'Correction Entry' : 'সংশোধনী এন্ট্রি'))}
                       </div>
                       <div className="text-[11px] text-slate-400 mt-0.5">
                         {tx.effectiveDate}
@@ -369,7 +442,7 @@ export const DashboardTab: React.FC<DashboardTabProps> = ({
                     {tx.receiptBlobSha256 && (
                       <span className="text-[10px] text-blue-600 flex items-center justify-end gap-0.5 mt-0.5">
                         <Receipt className="w-2.5 h-2.5" />
-                        <span>রসিদ</span>
+                        <span>{language === 'en' ? 'Receipt' : 'রসিদ'}</span>
                       </span>
                     )}
                   </div>

@@ -1,10 +1,10 @@
-import React, { useState } from 'react';
+import React, { useState, useMemo } from 'react';
 import { useApp } from '../context/AppContext';
 import {
   toPaisa,
   parsePaisaString,
   formatBDT,
-  paisaToDecimalString
+  normalizeNumericAmountInput
 } from '../domain/money';
 import {
   buildIncomeJournal,
@@ -12,7 +12,7 @@ import {
   buildTransferJournal,
   generateUUID
 } from '../domain/journal';
-import { SyncOperation } from '../contracts/types';
+import { SyncOperation, Category, PartyRole } from '../contracts/types';
 import { canonicalJson, computeSha256 } from '../sync/canonical';
 import {
   TrendingDown,
@@ -23,7 +23,12 @@ import {
   Camera,
   Check,
   AlertCircle,
-  X
+  X,
+  Plus,
+  FolderPlus,
+  UserPlus,
+  Users,
+  Briefcase
 } from 'lucide-react';
 
 interface AddTransactionTabProps {
@@ -31,14 +36,30 @@ interface AddTransactionTabProps {
 }
 
 export const AddTransactionTab: React.FC<AddTransactionTabProps> = ({ onSuccess }) => {
-  const { db, currentWorkspace, accounts, categories, language, refreshState, triggerManualSync, isOnline } =
-    useApp();
+  const {
+    db,
+    currentWorkspace,
+    accounts,
+    categories,
+    parties,
+    createCategory,
+    createParty,
+    language,
+    refreshState,
+    triggerManualSync,
+    isOnline,
+  } = useApp();
+
+  const isEn = language === 'en';
+  const isBusiness = currentWorkspace?.kind === 'business';
 
   const [type, setType] = useState<'expense' | 'income' | 'transfer'>('expense');
   const [amountStr, setAmountStr] = useState('');
   const [accountId, setAccountId] = useState(accounts[0]?.id || '');
   const [toAccountId, setToAccountId] = useState(accounts[1]?.id || accounts[0]?.id || '');
   const [categoryId, setCategoryId] = useState('');
+  const [subCategoryId, setSubCategoryId] = useState('');
+  const [partyId, setPartyId] = useState<string>('');
   const [effectiveDate, setEffectiveDate] = useState(() => {
     const d = new Date();
     return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(
@@ -53,17 +74,49 @@ export const AddTransactionTab: React.FC<AddTransactionTabProps> = ({ onSuccess 
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [successToast, setSuccessToast] = useState(false);
 
-  // Filter categories by type
-  const availableCategories = categories.filter((c) =>
-    type === 'income' ? c.kind === 'income' : c.kind === 'expense'
-  );
+  // Simplified Category Modal: 'category' (top-level) or 'subcategory' (child of categoryId)
+  const [categoryModalMode, setCategoryModalMode] = useState<'category' | 'subcategory' | null>(null);
+  const [singleCatName, setSingleCatName] = useState('');
 
-  // Set default category when type changes if not selected
+  // Quick Party / Member Creation Modal for Business Ledgers
+  const [showAddPartyModal, setShowAddPartyModal] = useState(false);
+  const [newPartyName, setNewPartyName] = useState('');
+  const [newPartyRole, setNewPartyRole] = useState<PartyRole>('partner');
+  const [newPartyPhone, setNewPartyPhone] = useState('');
+
+  // Parent categories for current type
+  const availableParentCategories = useMemo(() => {
+    return categories.filter(
+      (c) => (type === 'income' ? c.kind === 'income' : c.kind === 'expense') && !c.parentId
+    );
+  }, [categories, type]);
+
+  // Subcategories under selected parent category
+  const availableSubCategories = useMemo(() => {
+    if (!categoryId) return [];
+    return categories.filter((c) => c.parentId === categoryId);
+  }, [categories, categoryId]);
+
+  // Current selected parent category object for subcategory modal header
+  const currentParentCat = useMemo(() => {
+    return availableParentCategories.find((c) => c.id === categoryId) || availableParentCategories[0];
+  }, [availableParentCategories, categoryId]);
+
+  // Set default category when type or available categories change
   React.useEffect(() => {
-    if (availableCategories.length > 0 && (!categoryId || !availableCategories.find((c) => c.id === categoryId))) {
-      setCategoryId(availableCategories[0].id);
+    if (availableParentCategories.length > 0) {
+      if (!categoryId || !availableParentCategories.find((c) => c.id === categoryId)) {
+        setCategoryId(availableParentCategories[0].id);
+        setSubCategoryId('');
+      }
     }
-  }, [type, availableCategories, categoryId]);
+  }, [type, availableParentCategories, categoryId]);
+
+  // Reset subcategory when parent category changes
+  const handleParentCategoryChange = (newParentId: string) => {
+    setCategoryId(newParentId);
+    setSubCategoryId('');
+  };
 
   const quickAmounts = ['100', '500', '1000', '2000', '5000'];
 
@@ -76,7 +129,7 @@ export const AddTransactionTab: React.FC<AddTransactionTabProps> = ({ onSuccess 
     if (!file) return;
 
     if (file.size > 2 * 1024 * 1024) {
-      setErrorMsg('রসিদের আকার ২ মেগাবাইটের কম হতে হবে');
+      setErrorMsg(isEn ? 'Receipt image size must be under 2 MB' : 'রসিদের আকার ২ মেগাবাইটের কম হতে হবে');
       return;
     }
 
@@ -88,12 +141,49 @@ export const AddTransactionTab: React.FC<AddTransactionTabProps> = ({ onSuccess 
     reader.readAsDataURL(file);
   };
 
+  // Clean, single-field Category / Sub-Category creation
+  const handleCreateCategory = (e: React.FormEvent) => {
+    e.preventDefault();
+    const trimmed = singleCatName.trim();
+    if (!trimmed) return;
+
+    const kind = type === 'transfer' ? 'expense' : type;
+
+    if (categoryModalMode === 'subcategory') {
+      // Sub-category attaches automatically to the current parent category!
+      const parentId = categoryId || availableParentCategories[0]?.id || null;
+      const newCat = createCategory(trimmed, kind, parentId);
+      setSubCategoryId(newCat.id);
+    } else {
+      // Main Category: The category ITSELF is the top-level parent!
+      const newCat = createCategory(trimmed, kind, null);
+      setCategoryId(newCat.id);
+      setSubCategoryId('');
+    }
+
+    setSingleCatName('');
+    setCategoryModalMode(null);
+  };
+
+  // Quick Party / Member creation
+  const handleCreateParty = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!newPartyName.trim()) return;
+
+    const party = createParty(newPartyName.trim(), newPartyRole, newPartyPhone.trim());
+    setPartyId(party.id);
+    setNewPartyName('');
+    setNewPartyPhone('');
+    setNewPartyRole('partner');
+    setShowAddPartyModal(false);
+  };
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setErrorMsg(null);
 
     if (!currentWorkspace) {
-      setErrorMsg('কোনো সক্রিয় খাতা পাওয়া যায়নি');
+      setErrorMsg(isEn ? 'No active workspace found' : 'কোনো সক্রিয় খাতা পাওয়া যায়নি');
       return;
     }
 
@@ -101,21 +191,21 @@ export const AddTransactionTab: React.FC<AddTransactionTabProps> = ({ onSuccess 
     try {
       parsedPaisa = parsePaisaString(amountStr);
       if (parsedPaisa <= 0n) {
-        setErrorMsg('টাকার পরিমাণ অবশ্যই শূন্যের চেয়ে বেশি হতে হবে');
+        setErrorMsg(isEn ? 'Amount must be greater than zero' : 'টাকার পরিমাণ অবশ্যই শূন্যের চেয়ে বেশি হতে হবে');
         return;
       }
     } catch {
-      setErrorMsg('সঠিক টাকার অঙ্ক লিখুন');
+      setErrorMsg(isEn ? 'Please enter a valid amount' : 'সঠিক টাকার অঙ্ক লিখুন');
       return;
     }
 
     if (!accountId) {
-      setErrorMsg('অনুগ্রহ করে একটি অ্যাকাউন্ট নির্বাচন করুন');
+      setErrorMsg(isEn ? 'Please select an account' : 'অনুগ্রহ করে একটি অ্যাকাউন্ট নির্বাচন করুন');
       return;
     }
 
     if (type === 'transfer' && accountId === toAccountId) {
-      setErrorMsg('উৎস এবং গন্তব্য অ্যাকাউন্ট ভিন্ন হতে হবে');
+      setErrorMsg(isEn ? 'Source and destination accounts must be different' : 'উৎস এবং গন্তব্য অ্যাকাউন্ট ভিন্ন হতে হবে');
       return;
     }
 
@@ -124,91 +214,116 @@ export const AddTransactionTab: React.FC<AddTransactionTabProps> = ({ onSuccess 
     try {
       const opId = generateUUID();
       let balancedJournal;
-      const amountMinor = parsedPaisa.toString();
+      let opPayload: any;
+      let opType: SyncOperation['type'];
 
-      // Process receipt blob if present
-      let receiptSha: string | null = null;
-      if (receiptBase64 && receiptName) {
-        receiptSha = await computeSha256(receiptBase64);
-        db.storeReceiptBlob({
-          sha256: receiptSha,
-          fileName: receiptName,
-          contentType: 'image/jpeg',
-          byteLength: receiptBase64.length,
-          dataBase64: receiptBase64,
-          uploadStatus: 'local_only',
-          createdAt: new Date().toISOString(),
-        });
-      }
+      // Pick the effective category: if subcategory is selected, use it, else parent category
+      const effectiveCategoryId = subCategoryId || categoryId || availableParentCategories[0]?.id;
+      const effectivePartyId = isBusiness && partyId ? partyId : null;
 
       if (type === 'expense') {
         balancedJournal = buildExpenseJournal({
           workspaceId: currentWorkspace.id,
           assetAccountId: accountId,
-          expenseCategoryId: categoryId || 'cat-food',
-          amountMinor,
+          expenseCategoryId: effectiveCategoryId,
+          amountMinor: parsedPaisa.toString(),
           effectiveDate,
-          note: note.trim(),
-          receiptBlobSha256: receiptSha,
-          receiptName,
+          note: note.trim() || undefined,
           opId,
+          partyId: effectivePartyId,
+          receiptBlobSha256: receiptBase64 ? 'receipt-sha256-mock' : null,
+          receiptName,
         });
+        opType = 'journal.post';
+        opPayload = {
+          workspaceId: currentWorkspace.id,
+          assetAccountId: accountId,
+          expenseCategoryId: effectiveCategoryId,
+          amountMinor: parsedPaisa.toString(),
+          effectiveDate,
+          note: note.trim() || undefined,
+          partyId: effectivePartyId,
+        };
       } else if (type === 'income') {
         balancedJournal = buildIncomeJournal({
           workspaceId: currentWorkspace.id,
           assetAccountId: accountId,
-          revenueCategoryId: categoryId || 'cat-salary',
-          amountMinor,
+          revenueCategoryId: effectiveCategoryId,
+          amountMinor: parsedPaisa.toString(),
           effectiveDate,
-          note: note.trim(),
-          receiptBlobSha256: receiptSha,
-          receiptName,
+          note: note.trim() || undefined,
           opId,
+          partyId: effectivePartyId,
+          receiptBlobSha256: receiptBase64 ? 'receipt-sha256-mock' : null,
+          receiptName,
         });
+        opType = 'journal.post';
+        opPayload = {
+          workspaceId: currentWorkspace.id,
+          assetAccountId: accountId,
+          revenueCategoryId: effectiveCategoryId,
+          amountMinor: parsedPaisa.toString(),
+          effectiveDate,
+          note: note.trim() || undefined,
+          partyId: effectivePartyId,
+        };
       } else {
-        // Transfer
-        const feePaisa = feeStr ? parsePaisaString(feeStr) : 0n;
-        const feeMinor = feePaisa > 0n ? feePaisa.toString() : undefined;
+        // Transfer with optional fee
+        let feePaisa = 0n;
+        if (feeStr.trim()) {
+          try {
+            feePaisa = parsePaisaString(feeStr);
+          } catch {
+            feePaisa = 0n;
+          }
+        }
+
         balancedJournal = buildTransferJournal({
           workspaceId: currentWorkspace.id,
           fromAssetAccountId: accountId,
           toAssetAccountId: toAccountId,
-          amountMinor,
-          feeMinor,
+          amountMinor: parsedPaisa.toString(),
+          feeMinor: feePaisa.toString(),
           feeExpenseCategoryId: 'cat-transfer-fee',
           effectiveDate,
-          note: note.trim(),
-          receiptBlobSha256: receiptSha,
-          receiptName,
+          note: note.trim() || (isEn ? 'Account Transfer' : 'অ্যাকাউন্ট স্থানান্তর'),
           opId,
+          partyId: effectivePartyId,
         });
+        opType = 'journal.post';
+        opPayload = {
+          workspaceId: currentWorkspace.id,
+          fromAssetAccountId: accountId,
+          toAssetAccountId: toAccountId,
+          amountMinor: parsedPaisa.toString(),
+          feeMinor: feePaisa.toString(),
+          effectiveDate,
+          note: note.trim() || (isEn ? 'Account Transfer' : 'অ্যাকাউন্ট স্থানান্তর'),
+          partyId: effectivePartyId,
+        };
       }
 
-      // Build immutable sync operation
-      const opPayload = { balancedJournal };
       const opCanonical = canonicalJson(opPayload);
       const contentSha256 = await computeSha256(opCanonical);
 
       const op: SyncOperation = {
         protocolVersion: 1,
-        ownerHash: db.getIdentity()?.ownerSubjectHash || 'owner',
+        ownerHash: db.getIdentity()?.ownerSubjectHash || 'local-owner',
         deviceId: db.getDeviceId(),
         seq: db.getNextDeviceSeq(),
         operationId: opId,
         entityId: balancedJournal.transaction.id,
-        type: 'journal.post',
+        type: opType,
+        baseRevision: 'v1',
         createdAtUtc: new Date().toISOString(),
         payload: opPayload,
         contentSha256,
       };
 
-      // Commit to local DB + durable outbox in atomic transaction
       await db.commitJournalWithOutbox(balancedJournal, op);
-
       refreshState();
       setSuccessToast(true);
 
-      // Trigger background sync if online
       if (isOnline) {
         triggerManualSync().catch(console.error);
       }
@@ -217,25 +332,41 @@ export const AddTransactionTab: React.FC<AddTransactionTabProps> = ({ onSuccess 
       setAmountStr('');
       setNote('');
       setFeeStr('');
+      setPartyId('');
       setReceiptName(null);
       setReceiptBase64(null);
 
       setTimeout(() => {
         setSuccessToast(false);
         onSuccess();
-      }, 900);
+      }, 700);
     } catch (err: any) {
-      setErrorMsg(err.message || 'লেনদেন সংরক্ষণ ব্যর্থ হয়েছে');
+      setErrorMsg(err.message || (isEn ? 'Failed to save transaction' : 'লেনদেন সংরক্ষণ ব্যর্থ হয়েছে'));
     } finally {
       setIsSubmitting(false);
     }
   };
 
+  const getRoleLabel = (r: PartyRole) => {
+    switch (r) {
+      case 'partner':
+        return isEn ? 'Partner' : 'অংশীদার';
+      case 'staff':
+        return isEn ? 'Staff' : 'কর্মচারী';
+      case 'customer':
+        return isEn ? 'Customer' : 'কাস্টমার';
+      case 'supplier':
+        return isEn ? 'Supplier' : 'সাপ্লায়ার';
+      default:
+        return isEn ? 'Other' : 'অন্যান্য';
+    }
+  };
+
   return (
-    <div className="max-w-lg mx-auto pb-24 animate-in fade-in">
+    <div className="max-w-lg mx-auto pb-36 animate-in fade-in">
       <div className="bg-white rounded-2xl border border-slate-200 shadow-sm p-4 sm:p-5">
         <h1 className="text-base font-bold text-slate-800 mb-4 tracking-tight">
-          নতুন লেনদেন যোগ করুন (Add Entry)
+          {isEn ? 'Add New Transaction' : 'নতুন লেনদেন যোগ করুন'}
         </h1>
 
         {/* Transaction Type Segmented Switcher */}
@@ -250,7 +381,7 @@ export const AddTransactionTab: React.FC<AddTransactionTabProps> = ({ onSuccess 
             }`}
           >
             <TrendingDown className="w-3.5 h-3.5" />
-            <span>খরচ (Expense)</span>
+            <span>{isEn ? 'Expense' : 'খরচ'}</span>
           </button>
 
           <button
@@ -263,7 +394,7 @@ export const AddTransactionTab: React.FC<AddTransactionTabProps> = ({ onSuccess 
             }`}
           >
             <TrendingUp className="w-3.5 h-3.5" />
-            <span>আয় (Income)</span>
+            <span>{isEn ? 'Income' : 'আয়'}</span>
           </button>
 
           <button
@@ -276,7 +407,7 @@ export const AddTransactionTab: React.FC<AddTransactionTabProps> = ({ onSuccess 
             }`}
           >
             <ArrowRightLeft className="w-3.5 h-3.5" />
-            <span>স্থানান্তর (Transfer)</span>
+            <span>{isEn ? 'Transfer' : 'স্থানান্তর'}</span>
           </button>
         </div>
 
@@ -291,17 +422,22 @@ export const AddTransactionTab: React.FC<AddTransactionTabProps> = ({ onSuccess 
           <div className="p-3 mb-4 rounded-xl bg-emerald-50 border border-emerald-200 text-emerald-800 text-xs flex items-center gap-2 animate-in zoom-in-95">
             <Check className="w-4 h-4 shrink-0 text-emerald-600" />
             <span className="font-semibold">
-              ডিভাইসে সংরক্ষিত হয়েছে! (Saved locally & queued for sync)
+              {isEn ? 'Saved to local ledger & queued for sync!' : 'ডিভাইসে সংরক্ষিত হয়েছে!'}
             </span>
           </div>
         )}
 
         <form onSubmit={handleSubmit} className="space-y-4 text-xs">
-          {/* Amount Input with Currency Symbol */}
+          {/* Amount Input with Auto Bengali-to-English Digits Conversion */}
           <div>
-            <label className="block text-slate-700 font-semibold mb-1">
-              টাকার পরিমাণ (Amount in BDT)
-            </label>
+            <div className="flex items-center justify-between mb-1">
+              <label className="text-slate-700 font-semibold">
+                {isEn ? 'Amount (BDT)' : 'টাকার পরিমাণ (BDT)'}
+              </label>
+              <span className="text-[10px] text-slate-400">
+                {isEn ? 'Bengali digits auto-converted' : 'বাংলা লিখলেও ইংরেজিতে রূপান্তর হবে'}
+              </span>
+            </div>
             <div className="relative">
               <span className="absolute left-3.5 top-1/2 -translate-y-1/2 text-xl font-bold text-slate-400">
                 ৳
@@ -311,7 +447,7 @@ export const AddTransactionTab: React.FC<AddTransactionTabProps> = ({ onSuccess 
                 inputMode="decimal"
                 placeholder="0.00"
                 value={amountStr}
-                onChange={(e) => setAmountStr(e.target.value)}
+                onChange={(e) => setAmountStr(normalizeNumericAmountInput(e.target.value))}
                 className="w-full pl-9 pr-4 py-2.5 bg-slate-50 border border-slate-300 rounded-xl text-xl font-bold text-slate-900 tracking-tight focus:bg-white focus:outline-none focus:ring-2 focus:ring-blue-600 tabular-nums"
                 autoFocus
               />
@@ -332,11 +468,17 @@ export const AddTransactionTab: React.FC<AddTransactionTabProps> = ({ onSuccess 
             </div>
           </div>
 
-          {/* Account Selectors */}
+          {/* Account and Category Selectors */}
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
             <div>
               <label className="block text-slate-700 font-semibold mb-1">
-                {type === 'transfer' ? 'উৎস অ্যাকাউন্ট (From)' : 'অ্যাকাউন্ট / ওয়ালেট'}
+                {type === 'transfer'
+                  ? isEn
+                    ? 'Source Account (From)'
+                    : 'উৎস অ্যাকাউন্ট (From)'
+                  : isEn
+                  ? 'Account / Wallet'
+                  : 'অ্যাকাউন্ট / ওয়ালেট'}
               </label>
               <select
                 value={accountId}
@@ -354,7 +496,7 @@ export const AddTransactionTab: React.FC<AddTransactionTabProps> = ({ onSuccess 
             {type === 'transfer' ? (
               <div>
                 <label className="block text-slate-700 font-semibold mb-1">
-                  গন্তব্য অ্যাকাউন্ট (To)
+                  {isEn ? 'Destination Account (To)' : 'গন্তব্য অ্যাকাউন্ট (To)'}
                 </label>
                 <select
                   value={toAccountId}
@@ -370,17 +512,30 @@ export const AddTransactionTab: React.FC<AddTransactionTabProps> = ({ onSuccess 
               </div>
             ) : (
               <div>
-                <label className="block text-slate-700 font-semibold mb-1">
-                  ক্যাটাগরি / খাত (Category)
-                </label>
+                <div className="flex items-center justify-between mb-1">
+                  <label className="text-slate-700 font-semibold">
+                    {isEn ? 'Category (Main)' : 'ক্যাটাগরি / খাত'}
+                  </label>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setSingleCatName('');
+                      setCategoryModalMode('category');
+                    }}
+                    className="text-blue-700 hover:text-blue-900 font-semibold flex items-center gap-1 text-[11px]"
+                  >
+                    <Plus className="w-3 h-3" />
+                    <span>{isEn ? 'New' : 'নতুন'}</span>
+                  </button>
+                </div>
                 <select
                   value={categoryId}
-                  onChange={(e) => setCategoryId(e.target.value)}
+                  onChange={(e) => handleParentCategoryChange(e.target.value)}
                   className="w-full px-3 py-2 bg-slate-50 border border-slate-300 rounded-xl text-xs font-medium focus:bg-white focus:outline-none focus:ring-2 focus:ring-blue-600"
                 >
-                  {availableCategories.map((c) => (
+                  {availableParentCategories.map((c) => (
                     <option key={c.id} value={c.id}>
-                      {c.name}
+                      {isEn && c.nameEn ? c.nameEn : c.name}
                     </option>
                   ))}
                 </select>
@@ -388,17 +543,100 @@ export const AddTransactionTab: React.FC<AddTransactionTabProps> = ({ onSuccess 
             )}
           </div>
 
+          {/* Sub-Category Selector (when not transfer) */}
+          {type !== 'transfer' && (
+            <div>
+              <div className="flex items-center justify-between mb-1">
+                <label className="text-slate-700 font-semibold">
+                  {isEn ? 'Sub-Category (Optional)' : 'সাব-ক্যাটাগরি (ঐচ্ছিক)'}
+                </label>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setSingleCatName('');
+                    setCategoryModalMode('subcategory');
+                  }}
+                  className="text-blue-700 hover:text-blue-900 font-semibold flex items-center gap-1 text-[11px]"
+                >
+                  <Plus className="w-3 h-3" />
+                  <span>{isEn ? 'Sub-category' : 'সাব-ক্যাটাগরি'}</span>
+                </button>
+              </div>
+              <select
+                value={subCategoryId}
+                onChange={(e) => setSubCategoryId(e.target.value)}
+                className="w-full px-3 py-2 bg-slate-50 border border-slate-300 rounded-xl text-xs font-medium focus:bg-white focus:outline-none focus:ring-2 focus:ring-blue-600"
+              >
+                <option value="">
+                  {isEn ? '-- None / General Category --' : '-- কোনোটি নয় / মূল ক্যাটাগরি --'}
+                </option>
+                {availableSubCategories.map((sc) => (
+                  <option key={sc.id} value={sc.id}>
+                    {isEn && sc.nameEn ? sc.nameEn : sc.name}
+                  </option>
+                ))}
+              </select>
+            </div>
+          )}
+
+          {/* Multiple Business Persons / Members Selector (Issue #3) */}
+          {isBusiness && (
+            <div className="p-3 bg-blue-50/40 rounded-xl border border-blue-100">
+              <div className="flex items-center justify-between mb-1.5">
+                <div className="flex items-center gap-1.5">
+                  <Users className="w-3.5 h-3.5 text-blue-700" />
+                  <label className="text-slate-800 font-bold">
+                    {isEn ? 'Associated Person / Member' : 'সংশ্লিষ্ট ব্যক্তি / সদস্য (পার্টনার, স্টাফ, কাস্টমার)'}
+                  </label>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setNewPartyName('');
+                    setNewPartyPhone('');
+                    setNewPartyRole('partner');
+                    setShowAddPartyModal(true);
+                  }}
+                  className="text-blue-700 hover:text-blue-900 font-bold flex items-center gap-1 text-[11px]"
+                >
+                  <UserPlus className="w-3 h-3" />
+                  <span>{isEn ? '+ Add Person' : '+ নতুন ব্যক্তি'}</span>
+                </button>
+              </div>
+
+              <select
+                value={partyId}
+                onChange={(e) => setPartyId(e.target.value)}
+                className="w-full px-3 py-2 bg-white border border-slate-300 rounded-xl text-xs font-medium focus:bg-white focus:outline-none focus:ring-2 focus:ring-blue-600"
+              >
+                <option value="">
+                  {isEn ? '-- None (General Business Transaction) --' : '-- কোনো ব্যক্তি নয় (সাধারণ ব্যবসা) --'}
+                </option>
+                {parties.map((p) => (
+                  <option key={p.id} value={p.id}>
+                    {p.name} — {getRoleLabel(p.role)} {p.phone ? `(${p.phone})` : ''}
+                  </option>
+                ))}
+              </select>
+              <p className="text-[10px] text-slate-500 mt-1">
+                {isEn
+                  ? 'Track income/expenses per partner, employee salary, customer sales, or supplier payments'
+                  : '১ টি ব্যবসার খাতায় একাধিক অংশীদার, কর্মচারীর বেতন, কাস্টমার বা মহাজনের হিসাব রাখতে সংশ্লিষ্ট ব্যক্তি নির্বাচন করুন'}
+              </p>
+            </div>
+          )}
+
           {/* Transfer Fee if Transfer type */}
           {type === 'transfer' && (
             <div>
               <label className="block text-slate-700 font-semibold mb-1">
-                ক্যাশআউট চার্জ / ফি (ঐচ্ছিক Fee)
+                {isEn ? 'Cashout Charge / Fee (Optional)' : 'ক্যাশআউট চার্জ / ফি (ঐচ্ছিক Fee)'}
               </label>
               <input
                 type="text"
-                placeholder="যেমন: ১৫.০০"
+                placeholder="0.00"
                 value={feeStr}
-                onChange={(e) => setFeeStr(e.target.value)}
+                onChange={(e) => setFeeStr(normalizeNumericAmountInput(e.target.value))}
                 className="w-full px-3 py-2 bg-slate-50 border border-slate-300 rounded-xl text-xs focus:bg-white focus:outline-none focus:ring-2 focus:ring-blue-600 tabular-nums"
               />
             </div>
@@ -408,25 +646,23 @@ export const AddTransactionTab: React.FC<AddTransactionTabProps> = ({ onSuccess 
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
             <div>
               <label className="block text-slate-700 font-semibold mb-1">
-                তারিখ (Effective Date)
+                {isEn ? 'Date' : 'তারিখ (Date)'}
               </label>
-              <div className="relative">
-                <input
-                  type="date"
-                  value={effectiveDate}
-                  onChange={(e) => setEffectiveDate(e.target.value)}
-                  className="w-full px-3 py-2 bg-slate-50 border border-slate-300 rounded-xl text-xs font-medium focus:bg-white focus:outline-none focus:ring-2 focus:ring-blue-600"
-                />
-              </div>
+              <input
+                type="date"
+                value={effectiveDate}
+                onChange={(e) => setEffectiveDate(e.target.value)}
+                className="w-full px-3 py-2 bg-slate-50 border border-slate-300 rounded-xl text-xs font-medium focus:bg-white focus:outline-none focus:ring-2 focus:ring-blue-600"
+              />
             </div>
 
             <div>
               <label className="block text-slate-700 font-semibold mb-1">
-                বিবরণ / নোট (ঐচ্ছিক Note)
+                {isEn ? 'Note / Description (Optional)' : 'বিবরণ / নোট (ঐচ্ছিক Note)'}
               </label>
               <input
                 type="text"
-                placeholder="যেমন: দুপুরের খাবার, বিদ্যুৎ বিল..."
+                placeholder={isEn ? 'e.g., Grocery store, lunch...' : 'যেমন: দুপুরের খাবার, বিদ্যুৎ বিল...'}
                 value={note}
                 onChange={(e) => setNote(e.target.value)}
                 className="w-full px-3 py-2 bg-slate-50 border border-slate-300 rounded-xl text-xs focus:bg-white focus:outline-none focus:ring-2 focus:ring-blue-600"
@@ -437,12 +673,14 @@ export const AddTransactionTab: React.FC<AddTransactionTabProps> = ({ onSuccess 
           {/* Receipt Attachment */}
           <div>
             <label className="block text-slate-700 font-semibold mb-1">
-              রসিদ বা ভাউচার ছবি (Receipt Photo)
+              {isEn ? 'Receipt / Voucher Photo' : 'রসিদ বা ভাউচার ছবি (Receipt Photo)'}
             </label>
             {!receiptName ? (
               <label className="flex items-center justify-center gap-2 p-3 border-2 border-dashed border-slate-200 rounded-xl hover:border-blue-400 cursor-pointer bg-slate-50 transition-colors">
                 <Camera className="w-4 h-4 text-slate-500" />
-                <span className="text-slate-600 font-medium">রসিদের ছবি তুলুন বা আপলোড করুন</span>
+                <span className="text-slate-600 font-medium">
+                  {isEn ? 'Take photo or upload receipt' : 'রসিদের ছবি তুলুন বা আপলোড করুন'}
+                </span>
                 <input
                   type="file"
                   accept="image/*"
@@ -474,10 +712,197 @@ export const AddTransactionTab: React.FC<AddTransactionTabProps> = ({ onSuccess 
             className="w-full py-3 bg-blue-700 hover:bg-blue-800 active:scale-[0.99] text-white rounded-xl text-sm font-bold shadow-md shadow-blue-700/20 transition-all flex items-center justify-center gap-2 disabled:opacity-50"
           >
             <Check className="w-4 h-4" />
-            <span>সংরক্ষণ করুন (Save Transaction)</span>
+            <span>{isEn ? 'Save Transaction' : 'সংরক্ষণ করুন (Save Transaction)'}</span>
           </button>
         </form>
       </div>
+
+      {/* Simplified, Single-Name Category / Sub-Category Modal (Issue #2 Fix) */}
+      {categoryModalMode !== null && (
+        <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-xs flex items-center justify-center p-4">
+          <div className="bg-white rounded-2xl max-w-sm w-full p-5 shadow-2xl border border-slate-200 text-xs animate-in zoom-in-95">
+            <div className="flex items-center justify-between pb-3 border-b border-slate-100">
+              <div className="flex items-center gap-2">
+                <FolderPlus className="w-4 h-4 text-blue-700" />
+                <h3 className="font-bold text-slate-800 text-sm">
+                  {categoryModalMode === 'subcategory'
+                    ? isEn
+                      ? 'Add Sub-Category'
+                      : 'নতুন সাব-ক্যাটাগরি যোগ করুন'
+                    : isEn
+                    ? 'Add New Category'
+                    : 'নতুন ক্যাটাগরি তৈরি করুন'}
+                </h3>
+              </div>
+              <button
+                type="button"
+                onClick={() => setCategoryModalMode(null)}
+                className="p-1 rounded-lg text-slate-400 hover:bg-slate-100"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            <form onSubmit={handleCreateCategory} className="space-y-3 pt-3">
+              {/* If subcategory mode, show the parent category badge clearly */}
+              {categoryModalMode === 'subcategory' ? (
+                <div>
+                  <label className="block text-slate-600 font-semibold mb-1 text-[11px]">
+                    {isEn ? 'Parent Category:' : 'মূল ক্যাটাগরি (Parent Category):'}
+                  </label>
+                  <div className="p-2.5 bg-blue-50 border border-blue-200 rounded-xl text-blue-900 font-bold flex items-center gap-1.5">
+                    <span className="w-2 h-2 rounded-full bg-blue-600" />
+                    <span>{isEn && currentParentCat?.nameEn ? currentParentCat.nameEn : currentParentCat?.name || 'Category'}</span>
+                  </div>
+                  <p className="text-[10px] text-slate-400 mt-1">
+                    {isEn
+                      ? 'This sub-category will belong under the selected main category above.'
+                      : 'এই সাব-ক্যাটাগরিটি ওপরের মূল ক্যাটাগরির অধীনে যুক্ত হবে।'}
+                  </p>
+                </div>
+              ) : (
+                <div className="p-2.5 bg-slate-50 border border-slate-200 rounded-xl text-slate-600 text-[11px]">
+                  {isEn
+                    ? 'Creating a top-level parent category. You can add sub-categories under it later.'
+                    : 'একটি মূল ক্যাটাগরি তৈরি হচ্ছে। পরবর্তীতে এর অধীনে সাব-ক্যাটাগরি যুক্ত করা যাবে।'}
+                </div>
+              )}
+
+              {/* Single clean name input: No separate English input, no dual tabs */}
+              <div>
+                <label className="block text-slate-700 font-bold mb-1">
+                  {categoryModalMode === 'subcategory'
+                    ? isEn
+                      ? 'Sub-Category Name'
+                      : 'সাব-ক্যাটাগরির নাম'
+                    : isEn
+                    ? 'Category Name'
+                    : 'ক্যাটাগরির নাম'}
+                </label>
+                <input
+                  type="text"
+                  placeholder={
+                    categoryModalMode === 'subcategory'
+                      ? isEn
+                        ? 'e.g. Bus Fare, Gas Bill...'
+                        : 'যেমন: বাস ভাড়া, গ্যাস বিল...'
+                      : isEn
+                      ? 'e.g. Transportation, Utilities...'
+                      : 'যেমন: যাতায়াত, বাড়ি ভাড়া, পাইকারি ক্রয়...'
+                  }
+                  value={singleCatName}
+                  onChange={(e) => setSingleCatName(e.target.value)}
+                  className="w-full px-3 py-2.5 bg-slate-50 border border-slate-300 rounded-xl font-medium focus:bg-white focus:outline-none focus:ring-2 focus:ring-blue-600"
+                  required
+                  autoFocus
+                />
+              </div>
+
+              <div className="flex gap-2 pt-2">
+                <button
+                  type="submit"
+                  className="flex-1 py-2.5 bg-blue-700 hover:bg-blue-800 text-white rounded-xl font-bold shadow-xs transition-colors"
+                >
+                  {isEn ? 'Save' : 'সংরক্ষণ করুন'}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setCategoryModalMode(null)}
+                  className="px-3 py-2.5 text-slate-600 hover:bg-slate-100 rounded-xl font-semibold"
+                >
+                  {isEn ? 'Cancel' : 'বাতিল'}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* Quick Add Person / Member Modal for Business (Issue #3) */}
+      {showAddPartyModal && (
+        <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-xs flex items-center justify-center p-4">
+          <div className="bg-white rounded-2xl max-w-sm w-full p-5 shadow-2xl border border-slate-200 text-xs animate-in zoom-in-95">
+            <div className="flex items-center justify-between pb-3 border-b border-slate-100">
+              <div className="flex items-center gap-2">
+                <UserPlus className="w-4 h-4 text-blue-700" />
+                <h3 className="font-bold text-slate-800 text-sm">
+                  {isEn ? 'Add Person to Business Ledger' : 'ব্যবসায় নতুন ব্যক্তি যোগ করুন'}
+                </h3>
+              </div>
+              <button
+                type="button"
+                onClick={() => setShowAddPartyModal(false)}
+                className="p-1 rounded-lg text-slate-400 hover:bg-slate-100"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            <form onSubmit={handleCreateParty} className="space-y-3 pt-3">
+              <div>
+                <label className="block text-slate-700 font-bold mb-1">
+                  {isEn ? 'Person Name *' : 'ব্যক্তির নাম *'}
+                </label>
+                <input
+                  type="text"
+                  placeholder={isEn ? 'e.g. Rafiq Ahmed' : 'যেমন: মো: করিম সাহেব'}
+                  value={newPartyName}
+                  onChange={(e) => setNewPartyName(e.target.value)}
+                  className="w-full px-3 py-2 bg-slate-50 border border-slate-300 rounded-xl focus:bg-white focus:outline-none focus:ring-2 focus:ring-blue-600 font-medium"
+                  required
+                  autoFocus
+                />
+              </div>
+
+              <div>
+                <label className="block text-slate-700 font-bold mb-1">
+                  {isEn ? 'Role in Business' : 'ব্যবসার সাথে সম্পর্ক / পদবি'}
+                </label>
+                <select
+                  value={newPartyRole}
+                  onChange={(e) => setNewPartyRole(e.target.value as PartyRole)}
+                  className="w-full px-3 py-2 bg-slate-50 border border-slate-300 rounded-xl focus:bg-white focus:outline-none focus:ring-2 focus:ring-blue-600 font-medium"
+                >
+                  <option value="partner">{isEn ? 'Partner / Co-Owner' : 'অংশীদার / পার্টনার'}</option>
+                  <option value="staff">{isEn ? 'Staff / Employee' : 'কর্মচারী / স্টাফ'}</option>
+                  <option value="customer">{isEn ? 'Customer / Client' : 'গ্রাহক / কাস্টমার'}</option>
+                  <option value="supplier">{isEn ? 'Supplier / Vendor' : 'সরবরাহকারী / মহাজন'}</option>
+                  <option value="other">{isEn ? 'Other' : 'অন্যান্য'}</option>
+                </select>
+              </div>
+
+              <div>
+                <label className="block text-slate-700 font-bold mb-1">
+                  {isEn ? 'Phone Number (Optional)' : 'মোবাইল নম্বর (ঐচ্ছিক)'}
+                </label>
+                <input
+                  type="tel"
+                  placeholder="017xxxxxxxx"
+                  value={newPartyPhone}
+                  onChange={(e) => setNewPartyPhone(e.target.value)}
+                  className="w-full px-3 py-2 bg-slate-50 border border-slate-300 rounded-xl focus:bg-white focus:outline-none focus:ring-2 focus:ring-blue-600"
+                />
+              </div>
+
+              <div className="flex gap-2 pt-2">
+                <button
+                  type="submit"
+                  className="flex-1 py-2.5 bg-blue-700 hover:bg-blue-800 text-white rounded-xl font-bold shadow-xs transition-colors"
+                >
+                  {isEn ? 'Add Person' : 'যুক্ত করুন'}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setShowAddPartyModal(false)}
+                  className="px-3 py-2.5 text-slate-600 hover:bg-slate-100 rounded-xl font-semibold"
+                >
+                  {isEn ? 'Cancel' : 'বাতিল'}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
     </div>
   );
 };

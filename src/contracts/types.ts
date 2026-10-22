@@ -72,6 +72,20 @@ export interface JournalLine {
   categoryId?: UUID | null;
 }
 
+export type PartyRole = 'partner' | 'staff' | 'customer' | 'supplier' | 'other';
+
+export interface BusinessParty {
+  id: UUID;
+  workspaceId: UUID;
+  name: string;
+  phone?: string;
+  role: PartyRole;
+  openingBalanceMinor: PaisaString;
+  notes?: string;
+  archivedAt?: string | null;
+  createdAt: string;
+}
+
 export interface JournalTransaction {
   id: UUID;
   workspaceId: UUID;
@@ -79,6 +93,7 @@ export interface JournalTransaction {
   effectiveDate: string; // YYYY-MM-DD in Asia/Dhaka
   occurredAtUtc: string; // ISO-8601 UTC
   note?: string;
+  partyId?: UUID | null; // Associated person/party in business workspace
   reversalOf?: UUID | null; // Pointer to original transaction if reversal/correction
   createdOpId: UUID; // Operation UUID that produced this transaction
   lines: JournalLine[];
@@ -101,8 +116,12 @@ export type SyncOperationType =
   | 'category.create'
   | 'category.update'
   | 'category.archive'
+  | 'party.create'
+  | 'party.update'
+  | 'party.archive'
   | 'journal.post'
   | 'journal.correct'
+  | 'journal.delete'
   | 'budget.set'
   | 'recurring.rule.create'
   | 'recurring.rule.update'

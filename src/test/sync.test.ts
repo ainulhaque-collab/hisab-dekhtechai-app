@@ -129,8 +129,8 @@ test('Two-device offline concurrent sync and eventual convergence', async () => 
 
   assert.equal(cashA?.currentBalanceMinor, cashB?.currentBalanceMinor, 'Consolidated balances must exactly match across devices');
 
-  // Net movement: +90000 - 35000 = +55000 paisa (৳550.00). Starting balance ৳15,000 = 1500000 paisa -> 1555000 paisa
-  assert.equal(cashA?.currentBalanceMinor, '1555000');
+  // Net movement: +90000 - 35000 = +55000 paisa (৳550.00). Clean slate starting balance 0 paisa -> 55000 paisa
+  assert.equal(cashA?.currentBalanceMinor, '55000');
 });
 
 test('Idempotency: Re-syncing duplicate batches never duplicates transactions', async () => {

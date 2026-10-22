@@ -17,6 +17,7 @@ import { ConflictModal } from './components/ConflictModal';
 import { SnapshotModal } from './components/SnapshotModal';
 import { SettingsModal } from './components/SettingsModal';
 import { AuthModal } from './components/AuthModal';
+import { PartiesModal } from './components/PartiesModal';
 import { JournalTransaction } from './contracts/types';
 
 function MainApp() {
@@ -29,6 +30,7 @@ function MainApp() {
   const [isSnapshotModalOpen, setIsSnapshotModalOpen] = useState(false);
   const [isSettingsModalOpen, setIsSettingsModalOpen] = useState(false);
   const [isAuthModalOpen, setIsAuthModalOpen] = useState(false);
+  const [isPartiesModalOpen, setIsPartiesModalOpen] = useState(false);
 
   const handleSelectTransactionFromDashboard = (tx: JournalTransaction) => {
     setSelectedTx(tx);
@@ -52,6 +54,7 @@ function MainApp() {
             onNavigateToHistory={() => setActiveTab('history')}
             onSelectTransaction={handleSelectTransactionFromDashboard}
             onOpenSyncModal={() => setIsSyncModalOpen(true)}
+            onOpenPartiesModal={() => setIsPartiesModalOpen(true)}
           />
         )}
 
@@ -107,6 +110,11 @@ function MainApp() {
       <AuthModal
         isOpen={isAuthModalOpen}
         onClose={() => setIsAuthModalOpen(false)}
+      />
+
+      <PartiesModal
+        isOpen={isPartiesModalOpen}
+        onClose={() => setIsPartiesModalOpen(false)}
       />
     </div>
   );

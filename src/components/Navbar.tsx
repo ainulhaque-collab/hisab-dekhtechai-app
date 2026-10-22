@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import { useApp, SIMULATED_DEVICES } from '../context/AppContext';
+import { formatAccountTitle } from '../domain/money';
 import {
   Wallet,
   ChevronDown,
@@ -13,7 +14,8 @@ import {
   Settings,
   Plus,
   ShieldCheck,
-  Database
+  Database,
+  Globe
 } from 'lucide-react';
 
 interface NavbarProps {
@@ -39,6 +41,7 @@ export const Navbar: React.FC<NavbarProps> = ({
     triggerManualSync,
     createWorkspace,
     language,
+    setLanguage,
     conflicts,
   } = useApp();
 
@@ -133,19 +136,21 @@ export const Navbar: React.FC<NavbarProps> = ({
                 <div>
                   <div className="flex items-center gap-1">
                     <span className="font-bold text-slate-900 text-sm tracking-tight leading-none">
-                      {currentWorkspace?.name || 'হিসাব দেখতে চাই'}
+                      {formatAccountTitle(currentWorkspace?.name || '', language) || (language === 'bn' ? 'হিসাব দেখতে চাই' : 'Hisab DekhteChai')}
                     </span>
                     <ChevronDown className="w-3.5 h-3.5 text-slate-500" />
                   </div>
                   <span className="text-[11px] text-blue-700 font-medium">
-                    {currentWorkspace?.kind === 'personal' ? 'ব্যক্তিগত খাতা' : 'ব্যবসায়িক খাতা'}
+                    {currentWorkspace?.kind === 'personal'
+                      ? (language === 'bn' ? 'ব্যক্তিগত খাতা' : 'Personal Ledger')
+                      : (language === 'bn' ? 'ব্যবসার খাতা' : 'Business Ledger')}
                   </span>
                 </div>
               </button>
 
               {/* Workspace Dropdown */}
               {showWorkspaceMenu && (
-                <div className="absolute left-0 mt-1.5 w-64 bg-white rounded-xl shadow-xl border border-slate-200 py-1 z-50 animate-in fade-in slide-in-from-top-1">
+                <div className="absolute left-0 mt-1.5 w-64 bg-white rounded-xl shadow-xl border border-slate-200 py-1 z-50 animate-in fade-in slide-from-top-1">
                   <div className="px-3 py-1.5 text-xs font-semibold text-slate-500 uppercase tracking-wider border-b border-slate-100">
                     {language === 'bn' ? 'হিসাব খাতা / ওয়ার্কস্পেস' : 'Workspaces'}
                   </div>
@@ -163,8 +168,12 @@ export const Navbar: React.FC<NavbarProps> = ({
                           : 'text-slate-700'
                       }`}
                     >
-                      <span>{ws.name}</span>
-                      <span className="text-xs text-slate-400 capitalize">{ws.kind}</span>
+                      <span>{formatAccountTitle(ws.name, language)}</span>
+                      <span className="text-xs text-slate-400 capitalize">
+                        {ws.kind === 'personal'
+                          ? (language === 'bn' ? 'ব্যক্তিগত' : 'Personal')
+                          : (language === 'bn' ? 'ব্যবসা' : 'Business')}
+                      </span>
                     </button>
                   ))}
 
@@ -182,7 +191,7 @@ export const Navbar: React.FC<NavbarProps> = ({
                       <form onSubmit={handleCreateWorkspaceSubmit} className="p-2.5 bg-slate-50">
                         <input
                           type="text"
-                          placeholder="খাতার নাম (যেমন: বাড়ি নির্মাণ)"
+                          placeholder={language === 'bn' ? 'খাতার নাম (যেমন: বাড়ি নির্মাণ)' : 'Workspace name (e.g., Home)'}
                           value={newWsName}
                           onChange={(e) => setNewWsName(e.target.value)}
                           className="w-full px-2.5 py-1.5 text-sm bg-white border border-slate-300 rounded-lg mb-2 focus:outline-none focus:ring-2 focus:ring-blue-600"
@@ -196,7 +205,7 @@ export const Navbar: React.FC<NavbarProps> = ({
                               checked={newWsKind === 'personal'}
                               onChange={() => setNewWsKind('personal')}
                             />
-                            <span>ব্যক্তিগত</span>
+                            <span>{language === 'bn' ? 'ব্যক্তিগত' : 'Personal'}</span>
                           </label>
                           <label className="flex items-center gap-1 cursor-pointer">
                             <input
@@ -205,7 +214,7 @@ export const Navbar: React.FC<NavbarProps> = ({
                               checked={newWsKind === 'business'}
                               onChange={() => setNewWsKind('business')}
                             />
-                            <span>ব্যবসা</span>
+                            <span>{language === 'bn' ? 'ব্যবসা' : 'Business'}</span>
                           </label>
                         </div>
                         <div className="flex gap-2">
@@ -213,14 +222,14 @@ export const Navbar: React.FC<NavbarProps> = ({
                             type="submit"
                             className="flex-1 px-2 py-1 bg-blue-700 text-white rounded text-xs font-semibold"
                           >
-                            তৈরি করুন
+                            {language === 'bn' ? 'তৈরি করুন' : 'Create'}
                           </button>
                           <button
                             type="button"
                             onClick={() => setIsCreatingWorkspace(false)}
                             className="px-2 py-1 text-slate-600 rounded text-xs hover:bg-slate-200"
                           >
-                            বাতিল
+                            {language === 'bn' ? 'বাতিল' : 'Cancel'}
                           </button>
                         </div>
                       </form>
@@ -253,10 +262,12 @@ export const Navbar: React.FC<NavbarProps> = ({
               {showDeviceMenu && (
                 <div className="absolute right-0 mt-1.5 w-60 bg-white rounded-xl shadow-xl border border-slate-200 py-1 z-50">
                   <div className="px-3 py-1.5 text-xs font-semibold text-slate-500 uppercase tracking-wider border-b border-slate-100">
-                    মাল্টি-ডিভাইস সিমুলেটর (Device Switcher)
+                    {language === 'bn' ? 'মাল্টি-ডিভাইস সিমুলেটর' : 'Multi-Device Simulator'}
                   </div>
                   <p className="px-3 py-1 text-[11px] text-slate-500">
-                    ভিন্ন ফোনে অফলাইন এন্ট্রি ও গুগল ড্রাইভ টু-ওয়ে সিঙ্ক পরীক্ষা করুন:
+                    {language === 'bn'
+                      ? 'ভিন্ন ফোনে অফলাইন এন্ট্রি ও গুগল ড্রাইভ টু-ওয়ে সিঙ্ক পরীক্ষা করুন:'
+                      : 'Test offline entry & Google Drive two-way sync across devices:'}
                   </p>
                   {SIMULATED_DEVICES.map((dev) => (
                     <button
@@ -282,13 +293,13 @@ export const Navbar: React.FC<NavbarProps> = ({
                       </div>
                       {dev.id === currentDevice.id && (
                         <span className="text-[10px] bg-blue-700 text-white px-1.5 py-0.5 rounded">
-                          চলমান
+                          {language === 'bn' ? 'চলমান' : 'Active'}
                         </span>
                       )}
                     </button>
                   ))}
                   <div className="border-t border-slate-100 px-3 py-1.5 bg-slate-50 text-[11px] text-slate-500 flex items-center justify-between">
-                    <span>নেটওয়ার্ক স্টেট:</span>
+                    <span>{language === 'bn' ? 'নেটওয়ার্ক স্টেট:' : 'Network State:'}</span>
                     <button
                       type="button"
                       onClick={() => setIsOnline(!isOnline)}
@@ -296,7 +307,9 @@ export const Navbar: React.FC<NavbarProps> = ({
                         isOnline ? 'bg-emerald-100 text-emerald-800' : 'bg-red-100 text-red-800'
                       }`}
                     >
-                      {isOnline ? 'অনলাইন (Online)' : 'অফলাইন (Airplane)'}
+                      {isOnline
+                        ? (language === 'bn' ? 'অনলাইন (Online)' : 'Online')
+                        : (language === 'bn' ? 'অফলাইন (Airplane)' : 'Offline')}
                     </button>
                   </div>
                 </div>
@@ -331,17 +344,45 @@ export const Navbar: React.FC<NavbarProps> = ({
               type="button"
               onClick={onOpenSnapshotModal}
               className="p-1.5 rounded-lg text-slate-600 hover:text-blue-700 hover:bg-slate-100 transition-colors"
-              title="ডাটাবেজ ব্যাকআপ ও রিকভারি স্ন্যাপশট"
+              title={language === 'en' ? 'Database Snapshots & Recovery' : 'ডাটাবেজ ব্যাকআপ ও রিকভারি স্ন্যাপশট'}
             >
               <Database className="w-4 h-4" />
             </button>
+
+            {/* Segmented Language Switcher: US English <-> বাংলা */}
+            <div className="flex items-center rounded-lg border border-slate-300 bg-slate-100 p-0.5 text-[11px] font-bold shadow-2xs">
+              <button
+                type="button"
+                onClick={() => setLanguage('en')}
+                className={`px-1.5 py-0.5 rounded-md transition-all ${
+                  language === 'en'
+                    ? 'bg-blue-700 text-white shadow-2xs'
+                    : 'text-slate-600 hover:text-slate-900'
+                }`}
+                title="US English"
+              >
+                EN
+              </button>
+              <button
+                type="button"
+                onClick={() => setLanguage('bn')}
+                className={`px-1.5 py-0.5 rounded-md transition-all ${
+                  language === 'bn'
+                    ? 'bg-blue-700 text-white shadow-2xs'
+                    : 'text-slate-600 hover:text-slate-900'
+                }`}
+                title="বাংলা"
+              >
+                বাং
+              </button>
+            </div>
 
             {/* Settings & Profile */}
             <button
               type="button"
               onClick={onOpenSettingsModal}
               className="p-1.5 rounded-lg text-slate-600 hover:text-blue-700 hover:bg-slate-100 transition-colors"
-              title="সেটিংস ও নিরাপত্তা"
+              title={language === 'en' ? 'Settings & Security' : 'সেটিংস ও নিরাপত্তা'}
             >
               <Settings className="w-4 h-4" />
             </button>

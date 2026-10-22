@@ -41,6 +41,7 @@ export const SyncModal: React.FC<SyncModalProps> = ({
     triggerManualSync,
     conflicts,
     userProfile,
+    language,
   } = useApp();
 
   const [isSyncing, setIsSyncing] = useState(false);
@@ -71,17 +72,19 @@ export const SyncModal: React.FC<SyncModalProps> = ({
 
   return (
     <div className="fixed inset-0 z-50 bg-black/50 backdrop-blur-xs flex items-center justify-center p-4">
-      <div className="bg-white rounded-2xl max-w-lg w-full p-5 shadow-2xl border border-slate-200 text-xs animate-in zoom-in-95 max-h-[90vh] overflow-y-auto">
-        <div className="flex items-center justify-between pb-3 border-b border-slate-100">
+      <div className="bg-white rounded-2xl max-w-lg w-full p-5 shadow-2xl border border-slate-200 text-xs animate-in zoom-in-95 max-h-[90vh] overflow-y-auto relative">
+        <div className="sticky top-0 bg-white/95 backdrop-blur-xs z-20 flex items-center justify-between pb-3 border-b border-slate-100 -mt-1 pt-1">
           <div className="flex items-center gap-2">
             <Cloud className="w-5 h-5 text-blue-700" />
             <div>
-              <h2 className="text-sm font-bold text-slate-800">গুগল ড্রাইভ সিঙ্ক ড্যাশবোর্ড</h2>
+              <h2 className="text-sm font-bold text-slate-800">
+                {language === 'en' ? 'Google Drive Sync Dashboard' : 'গুগল ড্রাইভ সিঙ্ক ড্যাশবোর্ড'}
+              </h2>
               <div className="text-[10px] text-slate-500 font-medium">
                 {userProfile?.accessToken && userProfile.accessToken.startsWith('ya29.') ? (
-                  <span className="text-emerald-700 font-semibold">● লাইভ গুগল ড্রাইভ REST API সক্রিয়</span>
+                  <span className="text-emerald-700 font-semibold">● {language === 'en' ? 'Live Google Drive REST API Active' : 'লাইভ গুগল ড্রাইভ REST API সক্রিয়'}</span>
                 ) : (
-                  <span className="text-blue-700 font-semibold">● মাল্টি-ডিভাইস টেস্ট মোড সক্রিয়</span>
+                  <span className="text-blue-700 font-semibold">● {language === 'en' ? 'Multi-Device Test Mode Active' : 'মাল্টি-ডিভাইস টেস্ট মোড সক্রিয়'}</span>
                 )}
               </div>
             </div>
@@ -320,6 +323,57 @@ export const SyncModal: React.FC<SyncModalProps> = ({
                 429 রেইট লিমিট
               </button>
             </div>
+          </div>
+
+          {/* Google Cloud OAuth Setup Helper */}
+          <div className="p-3.5 bg-blue-50/70 rounded-xl border border-blue-200 space-y-2 text-xs">
+            <h3 className="font-bold text-blue-900 flex items-center gap-1.5">
+              <HardDrive className="w-3.5 h-3.5 text-blue-700" />
+              <span>{language === 'en' ? 'Google Cloud OAuth Setup Helper' : 'গুগল ক্লাউড ও-অথ সেটআপ সহায়ক'}</span>
+            </h3>
+            <p className="text-[11px] text-slate-600 leading-relaxed">
+              {language === 'en'
+                ? 'Add this origin to "Authorized JavaScript origins" in your Google Cloud Console Web OAuth Client:'
+                : 'গুগল ক্লাউড কনসোলের Web OAuth ক্লায়েন্টে নিচের Origin যুক্ত করুন:'}
+            </p>
+            <div className="flex items-center gap-1.5 bg-white p-2 rounded-lg border border-blue-200">
+              <code className="text-[11px] font-mono text-blue-900 break-all select-all flex-1">
+                {typeof window !== 'undefined' ? window.location.origin : 'http://localhost:3000'}
+              </code>
+              <button
+                type="button"
+                onClick={() => {
+                  if (typeof navigator !== 'undefined' && navigator.clipboard) {
+                    navigator.clipboard.writeText(window.location.origin);
+                  }
+                }}
+                className="px-2 py-1 bg-blue-700 hover:bg-blue-800 text-white rounded text-[11px] font-semibold shrink-0"
+              >
+                {language === 'en' ? 'Copy Origin' : 'কপি করুন'}
+              </button>
+            </div>
+            <div className="p-2 bg-white/80 rounded-lg border border-blue-100 text-[10px] text-slate-600 space-y-1">
+              <div>
+                <strong className="text-blue-900">Android APK Note:</strong> Package:{' '}
+                <code className="bg-slate-100 px-1 py-0.5 rounded font-mono text-blue-700">com.hisabdekhtechai.app</code>
+              </div>
+              <div className="text-slate-500">
+                {language === 'en'
+                  ? 'For native Android phone usage, create an Android OAuth Client with your signing SHA-1 in Google Cloud Console.'
+                  : 'মোবাইলে APK দিয়ে চালাতে Google Cloud Console-এ একটি Android Client তৈরি করে SHA-1 যুক্ত করুন।'}
+              </div>
+            </div>
+          </div>
+
+          {/* Bottom Close Button */}
+          <div className="pt-2">
+            <button
+              type="button"
+              onClick={onClose}
+              className="w-full py-2.5 bg-slate-100 hover:bg-slate-200 text-slate-700 font-semibold rounded-xl text-xs transition-colors"
+            >
+              {language === 'en' ? 'Close' : 'বন্ধ করুন'}
+            </button>
           </div>
         </div>
       </div>

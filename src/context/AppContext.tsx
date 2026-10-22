@@ -18,7 +18,9 @@ import {
   Budget,
   RecurringRule,
   DashboardData,
-  UUID
+  UUID,
+  BusinessParty,
+  PartyRole
 } from '../contracts/types';
 
 export interface DeviceProfile {
@@ -44,6 +46,7 @@ interface AppContextType {
   workspaces: Workspace[];
   accounts: Account[];
   categories: Category[];
+  parties: BusinessParty[];
   transactions: JournalTransaction[];
   dashboardData: DashboardData | null;
   conflicts: ConflictRecord[];
@@ -58,6 +61,13 @@ interface AppContextType {
   refreshState: () => void;
   triggerManualSync: () => Promise<void>;
   createWorkspace: (name: string, kind: 'personal' | 'business') => Workspace;
+  createCategory: (name: string, kind: Category['kind'], parentId?: UUID | null, nameEn?: string) => Category;
+  deleteCategory: (id: UUID) => void;
+  createParty: (name: string, role: PartyRole, phone?: string, notes?: string) => BusinessParty;
+  deleteParty: (id: UUID) => void;
+  editParty: (id: UUID, updates: Partial<Pick<BusinessParty, 'name' | 'phone' | 'role' | 'notes'>>) => void;
+  deleteTransaction: (id: UUID, reason?: string) => Promise<void>;
+  editTransaction: (id: UUID, cmd: any) => Promise<void>;
 }
 
 const AppContext = createContext<AppContextType | null>(null);
@@ -90,6 +100,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   const [workspaces, setWorkspaces] = useState<Workspace[]>([]);
   const [accounts, setAccounts] = useState<Account[]>([]);
   const [categories, setCategories] = useState<Category[]>([]);
+  const [parties, setParties] = useState<BusinessParty[]>([]);
   const [transactions, setTransactions] = useState<JournalTransaction[]>([]);
   const [dashboardData, setDashboardData] = useState<DashboardData | null>(null);
   const [conflicts, setConflicts] = useState<ConflictRecord[]>([]);
@@ -98,7 +109,20 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   const [syncStatus, setSyncStatus] = useState<SyncStatusInfo>(() => sync.getStatus());
   const [userProfile, setUserProfile] = useState<GoogleUserProfile | null>(() => auth.getProfile());
   const [isOnline, setIsOnlineState] = useState<boolean>(true);
-  const [language, setLanguage] = useState<'bn' | 'en'>('bn');
+  const [language, setLanguageState] = useState<'bn' | 'en'>(() => {
+    if (typeof localStorage !== 'undefined') {
+      const saved = localStorage.getItem('hisab_language');
+      if (saved === 'bn' || saved === 'en') return saved;
+    }
+    return 'en'; // Default US English
+  });
+
+  const setLanguage = (lang: 'bn' | 'en') => {
+    setLanguageState(lang);
+    if (typeof localStorage !== 'undefined') {
+      localStorage.setItem('hisab_language', lang);
+    }
+  };
 
   // Initialize and refresh state from current device DB
   const refreshState = () => {
@@ -112,6 +136,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       }
       setAccounts(db.getAccounts(activeWs.id));
       setCategories(db.getCategories(activeWs.id));
+      setParties(db.getParties(activeWs.id));
       setTransactions(db.getTransactions(activeWs.id));
       setDashboardData(db.getDashboardData(activeWs.id));
       setBudgets(db.getBudgets(activeWs.id));
@@ -171,6 +196,54 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     return ws;
   };
 
+  const createCategory = (
+    name: string,
+    kind: Category['kind'],
+    parentId?: UUID | null,
+    nameEn?: string
+  ) => {
+    const cat = db.createCategory(currentWorkspaceId, name, kind, parentId, nameEn);
+    refreshState();
+    return cat;
+  };
+
+  const deleteCategory = (id: UUID) => {
+    db.deleteCategory(id);
+    refreshState();
+  };
+
+  const createParty = (name: string, role: PartyRole, phone?: string, notes?: string) => {
+    const p = db.createParty(currentWorkspaceId, name, role, phone, notes);
+    refreshState();
+    return p;
+  };
+
+  const deleteParty = (id: UUID) => {
+    db.deleteParty(id);
+    refreshState();
+  };
+
+  const editParty = (id: UUID, updates: Partial<Pick<BusinessParty, 'name' | 'phone' | 'role' | 'notes'>>) => {
+    db.editParty(id, updates);
+    refreshState();
+  };
+
+  const deleteTransaction = async (id: UUID, reason?: string) => {
+    await db.deleteTransaction(id, reason);
+    refreshState();
+    if (isOnline) {
+      triggerManualSync().catch(console.error);
+    }
+  };
+
+  const editTransaction = async (id: UUID, cmd: any) => {
+    await db.editTransaction(id, cmd);
+    refreshState();
+    if (isOnline) {
+      triggerManualSync().catch(console.error);
+    }
+  };
+
   const currentWorkspace = useMemo(() => {
     return workspaces.find((w) => w.id === currentWorkspaceId) || workspaces[0] || null;
   }, [workspaces, currentWorkspaceId]);
@@ -188,6 +261,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         workspaces,
         accounts,
         categories,
+        parties,
         transactions,
         dashboardData,
         conflicts,
@@ -202,6 +276,13 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         refreshState,
         triggerManualSync,
         createWorkspace,
+        createCategory,
+        deleteCategory,
+        createParty,
+        deleteParty,
+        editParty,
+        deleteTransaction,
+        editTransaction,
       }}
     >
       {children}

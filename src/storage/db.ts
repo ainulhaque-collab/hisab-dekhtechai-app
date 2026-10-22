@@ -22,10 +22,17 @@ import {
   LocalSnapshot,
   AccountBalanceSummary,
   DashboardData,
-  PaisaString
+  PaisaString,
+  BusinessParty,
+  PartyRole
 } from '../contracts/types';
 import { toPaisa, addPaisa, subPaisa, paisaToDecimalString } from '../domain/money';
-import { generateUUID } from '../domain/journal';
+import {
+  generateUUID,
+  buildReversalJournal,
+  buildExpenseJournal,
+  buildIncomeJournal,
+} from '../domain/journal';
 import { canonicalJson, computeSha256 } from '../sync/canonical';
 
 export const CURRENT_SCHEMA_VERSION = 3;
@@ -46,6 +53,7 @@ export interface DatabaseState {
   workspaces: Map<UUID, Workspace>;
   accounts: Map<UUID, Account>;
   categories: Map<UUID, Category>;
+  parties: Map<UUID, BusinessParty>;
   journalTransactions: Map<UUID, JournalTransaction>;
   journalLines: Map<UUID, JournalLine>;
   syncOperations: Map<UUID, SyncOperation>;
@@ -90,6 +98,7 @@ export class LocalDatabase {
       workspaces: new Map(),
       accounts: new Map(),
       categories: new Map(),
+      parties: new Map(),
       journalTransactions: new Map(),
       journalLines: new Map(),
       syncOperations: new Map(),
@@ -123,7 +132,7 @@ export class LocalDatabase {
         },
       ],
       preferences: new Map<string, any>([
-        ['language', 'bn'],
+        ['language', 'en'],
         ['theme', 'light'],
         ['pin_lock_enabled', false],
         ['pin_hash', ''],
@@ -226,73 +235,85 @@ export class LocalDatabase {
     };
     this.state.workspaces.set(wsBusiness.id, wsBusiness);
 
-    // Default Personal Accounts
+    // Default Personal Accounts (Clean slate: 0 opening balance)
     const accCash: Account = {
       id: 'acc-cash-1',
       workspaceId: wsPersonalId,
-      name: 'নগদ ক্যাশ (Cash in Hand)',
+      name: 'Cash in Hand (নগদ ক্যাশ)',
       kind: 'cash',
-      openingBalanceMinor: '1500000', // ৳15,000.00
+      openingBalanceMinor: '0',
       createdAt: now,
     };
     const accBkash: Account = {
       id: 'acc-bkash-1',
       workspaceId: wsPersonalId,
-      name: 'বিকাশ (bKash Personal)',
+      name: 'bKash (বিকাশ একাউন্ট)',
       kind: 'bkash',
-      accountNumberMasked: '017****1234',
-      openingBalanceMinor: '525000', // ৳5,250.00
+      accountNumberMasked: '',
+      openingBalanceMinor: '0',
       createdAt: now,
     };
     const accBank: Account = {
       id: 'acc-bank-1',
       workspaceId: wsPersonalId,
-      name: 'ইসলামী ব্যাংক (IBBL Account)',
+      name: 'Bank Account (ব্যাংক হিসাব)',
       kind: 'bank',
-      accountNumberMasked: '2050****789',
-      openingBalanceMinor: '4500000', // ৳45,000.00
+      accountNumberMasked: '',
+      openingBalanceMinor: '0',
       createdAt: now,
     };
     this.state.accounts.set(accCash.id, accCash);
     this.state.accounts.set(accBkash.id, accBkash);
     this.state.accounts.set(accBank.id, accBank);
 
-    // Default Business Accounts
+    // Default Business Accounts (Clean slate: 0 opening balance)
     const accBizCash: Account = {
       id: 'acc-biz-cash',
       workspaceId: wsBusinessId,
-      name: 'দোকানের ক্যাশ ড্রয়ার (Till Cash)',
+      name: 'Cash Drawer (দোকানের ক্যাশ)',
       kind: 'cash',
-      openingBalanceMinor: '2500000', // ৳25,000.00
+      openingBalanceMinor: '0',
       createdAt: now,
     };
     const accBizBkash: Account = {
       id: 'acc-biz-bkash',
       workspaceId: wsBusinessId,
-      name: 'বিকাশ মার্চেন্ট (bKash Merchant)',
+      name: 'bKash Merchant (মার্চেন্ট)',
       kind: 'bkash',
-      accountNumberMasked: '018****9988',
-      openingBalanceMinor: '1200000', // ৳12,000.00
+      accountNumberMasked: '',
+      openingBalanceMinor: '0',
       createdAt: now,
     };
     this.state.accounts.set(accBizCash.id, accBizCash);
     this.state.accounts.set(accBizBkash.id, accBizBkash);
 
-    // Default Categories
+    // Default Categories with Sub-categories
     const categories: Array<Omit<Category, 'workspaceId'> & { workspaceId?: UUID }> = [
       // Personal Expenses
       { id: 'cat-food', kind: 'expense', name: 'খাবার ও রেস্তোরাঁ', nameEn: 'Food & Dining', icon: 'Utensils', color: '#EF4444' },
+      { id: 'cat-food-restaurant', parentId: 'cat-food', kind: 'expense', name: 'রেস্তোরাঁ ও ডাইনিং', nameEn: 'Restaurant & Dining', icon: 'Utensils', color: '#EF4444' },
+      { id: 'cat-food-snacks', parentId: 'cat-food', kind: 'expense', name: 'চা ও নাশতা', nameEn: 'Tea & Snacks', icon: 'Coffee', color: '#EF4444' },
+
       { id: 'cat-groceries', kind: 'expense', name: 'কাঁচাবাজার ও মুদি', nameEn: 'Groceries', icon: 'ShoppingCart', color: '#F97316' },
-      { id: 'cat-transport', kind: 'expense', name: 'যাতায়াত ও ভাড়া', nameEn: 'Transport', icon: 'Bus', color: '#3B82F6' },
+      { id: 'cat-groc-veg', parentId: 'cat-groceries', kind: 'expense', name: 'শাকসবজি ও ফলমূল', nameEn: 'Vegetables & Fruits', icon: 'Apple', color: '#F97316' },
+      { id: 'cat-groc-fish', parentId: 'cat-groceries', kind: 'expense', name: 'মাছ, মাংস ও চাল-ডাল', nameEn: 'Meat, Fish & Rice', icon: 'Package', color: '#F97316' },
+
+      { id: 'cat-transport', kind: 'expense', name: 'যাতায়াত ও ভাড়া', nameEn: 'Transport & Commute', icon: 'Bus', color: '#3B82F6' },
+      { id: 'cat-transport-bus', parentId: 'cat-transport', kind: 'expense', name: 'বাস / রিকশা ভাড়া', nameEn: 'Bus & Rickshaw', icon: 'Bus', color: '#3B82F6' },
+      { id: 'cat-transport-fuel', parentId: 'cat-transport', kind: 'expense', name: 'বাইক / গাড়ির জ্বালানি', nameEn: 'Fuel & Gas', icon: 'Fuel', color: '#3B82F6' },
+
       { id: 'cat-utility', kind: 'expense', name: 'বিদ্যুৎ ও গ্যাস বিল', nameEn: 'Utility Bills', icon: 'Zap', color: '#EAB308' },
-      { id: 'cat-medical', kind: 'expense', name: 'ওষুধ ও চিকিৎসা', nameEn: 'Medical', icon: 'HeartPulse', color: '#EC4899' },
+      { id: 'cat-medical', kind: 'expense', name: 'ওষুধ ও চিকিৎসা', nameEn: 'Medical & Healthcare', icon: 'HeartPulse', color: '#EC4899' },
       { id: 'cat-rent', kind: 'expense', name: 'বাসা ভাড়া', nameEn: 'House Rent', icon: 'Home', color: '#8B5CF6' },
+
       // Personal Income
-      { id: 'cat-salary', kind: 'income', name: 'মাসিক বেতন', nameEn: 'Salary', icon: 'Briefcase', color: '#10B981' },
+      { id: 'cat-salary', kind: 'income', name: 'মাসিক বেতন', nameEn: 'Monthly Salary', icon: 'Briefcase', color: '#10B981' },
       { id: 'cat-freelance', kind: 'income', name: 'ফ্রিল্যান্সিং ও বোনাস', nameEn: 'Freelance & Bonus', icon: 'Laptop', color: '#06B6D4' },
-      { id: 'cat-investment', kind: 'income', name: 'বিনিয়োগ ও লভ্যাংশ', nameEn: 'Investments', icon: 'TrendingUp', color: '#14B8A6' },
+      { id: 'cat-investment', kind: 'income', name: 'বিনিয়োগ ও লভ্যাংশ', nameEn: 'Investments & Profit', icon: 'TrendingUp', color: '#14B8A6' },
+
       // Transfer Fees
       { id: 'cat-transfer-fee', kind: 'expense', name: 'ক্যাশআউট চার্জ ও ব্যাংক ফি', nameEn: 'Transfer & Cashout Fee', icon: 'Percent', color: '#64748B' },
+
       // Business Categories
       { id: 'cat-biz-sales', kind: 'income', name: 'পণ্য বিক্রয়', nameEn: 'Sales Revenue', icon: 'Store', color: '#10B981', workspaceId: wsBusinessId },
       { id: 'cat-biz-purchase', kind: 'expense', name: 'মাল ক্রয় ও স্টক', nameEn: 'Stock Purchase', icon: 'Package', color: '#F97316', workspaceId: wsBusinessId },
@@ -308,17 +329,27 @@ export class LocalDatabase {
       this.state.categories.set(fullCat.id, fullCat);
     }
 
-    // Default Budgets
-    const budgetFood: Budget = {
-      id: 'bgt-food',
-      workspaceId: wsPersonalId,
-      categoryId: 'cat-food',
-      period: 'monthly',
-      limitMinor: '1000000', // ৳10,000.00
-      alertThresholds: [80, 100],
-      updatedAt: now,
+    // Default Business Parties (Partners, Staff, Suppliers, Customers)
+    const partyPartner: BusinessParty = {
+      id: 'party-partner-1',
+      workspaceId: wsBusinessId,
+      name: 'করিম সাহেব (পার্টনার)',
+      role: 'partner',
+      phone: '01711-000000',
+      openingBalanceMinor: '0',
+      createdAt: now,
     };
-    this.state.budgets.set(budgetFood.id, budgetFood);
+    const partyStaff: BusinessParty = {
+      id: 'party-staff-1',
+      workspaceId: wsBusinessId,
+      name: 'রাশেদ (কর্মচারী)',
+      role: 'staff',
+      phone: '01811-000000',
+      openingBalanceMinor: '0',
+      createdAt: now,
+    };
+    this.state.parties.set(partyPartner.id, partyPartner);
+    this.state.parties.set(partyStaff.id, partyStaff);
   }
 
   // --- Transactions and Atomic Commits ---
@@ -434,13 +465,17 @@ export class LocalDatabase {
     workspaceId: UUID,
     name: string,
     kind: Category['kind'],
+    parentId: UUID | null = null,
+    nameEn?: string,
     icon = 'Tag',
     color = '#3B82F6'
   ): Category {
     const cat: Category = {
       id: generateUUID(),
       workspaceId,
+      parentId,
       name,
+      nameEn: nameEn || name,
       kind,
       icon,
       color,
@@ -448,6 +483,266 @@ export class LocalDatabase {
     this.state.categories.set(cat.id, cat);
     this.persist();
     return cat;
+  }
+
+  public getSubCategories(workspaceId: UUID, parentId: UUID): Category[] {
+    return Array.from(this.state.categories.values()).filter(
+      (c) => c.workspaceId === workspaceId && c.parentId === parentId && !c.archivedAt
+    );
+  }
+
+  public deleteCategory(categoryId: UUID): void {
+    const cat = this.state.categories.get(categoryId);
+    if (cat) {
+      cat.archivedAt = new Date().toISOString();
+      this.persist();
+    }
+  }
+
+  public editCategory(
+    categoryId: UUID,
+    name: string,
+    nameEn?: string,
+    parentId?: UUID | null
+  ): void {
+    const cat = this.state.categories.get(categoryId);
+    if (cat) {
+      cat.name = name;
+      if (nameEn !== undefined) cat.nameEn = nameEn;
+      if (parentId !== undefined) cat.parentId = parentId;
+      this.persist();
+    }
+  }
+
+  // --- Business Parties / Persons Engine ---
+
+  public createParty(
+    workspaceId: UUID,
+    name: string,
+    role: PartyRole = 'other',
+    phone = '',
+    notes = '',
+    openingBalanceMinor = '0'
+  ): BusinessParty {
+    const id = generateUUID();
+    const party: BusinessParty = {
+      id,
+      workspaceId,
+      name,
+      phone,
+      role,
+      openingBalanceMinor,
+      notes,
+      createdAt: new Date().toISOString(),
+    };
+    this.state.parties.set(id, party);
+    this.persist();
+    return party;
+  }
+
+  public getParties(workspaceId: UUID): BusinessParty[] {
+    return Array.from(this.state.parties.values()).filter(
+      (p) => p.workspaceId === workspaceId && !p.archivedAt
+    );
+  }
+
+  public getParty(id: UUID): BusinessParty | undefined {
+    return this.state.parties.get(id);
+  }
+
+  public editParty(
+    id: UUID,
+    updates: Partial<Pick<BusinessParty, 'name' | 'phone' | 'role' | 'notes'>>
+  ): void {
+    const p = this.state.parties.get(id);
+    if (p) {
+      if (updates.name !== undefined) p.name = updates.name;
+      if (updates.phone !== undefined) p.phone = updates.phone;
+      if (updates.role !== undefined) p.role = updates.role;
+      if (updates.notes !== undefined) p.notes = updates.notes;
+      this.persist();
+    }
+  }
+
+  public deleteParty(id: UUID): void {
+    const p = this.state.parties.get(id);
+    if (p) {
+      p.archivedAt = new Date().toISOString();
+      this.persist();
+    }
+  }
+
+  public getPartyTransactions(partyId: UUID): JournalTransaction[] {
+    return Array.from(this.state.journalTransactions.values()).filter(
+      (t) => t.partyId === partyId && !(t as any).isDeleted
+    );
+  }
+
+  /**
+   * Deletes (voids/reverses) a transaction cleanly using balanced double-entry accounting.
+   */
+  public async deleteTransaction(txId: UUID, reason = 'User deleted transaction'): Promise<void> {
+    const tx = this.state.journalTransactions.get(txId);
+    if (!tx) {
+      throw new Error(`Transaction ${txId} not found`);
+    }
+
+    const opId = generateUUID();
+    const reversalBalanced = buildReversalJournal(tx, opId, reason);
+
+    // Save reversal in local state
+    this.state.journalTransactions.set(reversalBalanced.transaction.id, {
+      ...reversalBalanced.transaction,
+      createdOpId: opId,
+      lines: reversalBalanced.lines,
+    });
+    for (const line of reversalBalanced.lines) {
+      this.state.journalLines.set(line.id, line);
+    }
+
+    // Mark original transaction as deleted/voided
+    (tx as any).isDeleted = true;
+
+    // Queue sync operation in durable outbox
+    const payload = {
+      originalTransactionId: tx.id,
+      reversalTransactionId: reversalBalanced.transaction.id,
+      reason,
+    };
+    const op: SyncOperation = {
+      protocolVersion: 1,
+      ownerHash: this.getIdentity()?.ownerSubjectHash || 'owner',
+      deviceId: this.getDeviceId(),
+      seq: this.getNextDeviceSeq(),
+      operationId: opId,
+      entityId: tx.id,
+      type: 'journal.delete',
+      baseRevision: 'v1',
+      createdAtUtc: new Date().toISOString(),
+      payload,
+      contentSha256: await computeSha256(canonicalJson(payload)),
+    };
+
+    this.state.syncOperations.set(opId, op);
+    this.state.syncOutbox.set(opId, {
+      opId,
+      uploadedStatus: 'pending',
+      retryCount: 0,
+      createdAt: new Date().toISOString(),
+    });
+    this.state.appliedOperations.add(opId);
+
+    await this.persist();
+  }
+
+  /**
+   * Edits an existing transaction: voids the previous one and posts the replacement.
+   */
+  public async editTransaction(
+    originalId: UUID,
+    cmd: {
+      amountMinor: string;
+      effectiveDate: string;
+      assetAccountId: UUID;
+      categoryId: UUID;
+      note?: string;
+      partyId?: UUID | null;
+      reason?: string;
+    }
+  ): Promise<void> {
+    const origTx = this.state.journalTransactions.get(originalId);
+    if (!origTx) throw new Error(`Transaction ${originalId} not found`);
+
+    const opId = generateUUID();
+    const effectivePartyId = cmd.partyId !== undefined ? cmd.partyId : origTx.partyId || null;
+
+    // 1. Build reversal journal
+    const reversalBalanced = buildReversalJournal(
+      origTx,
+      opId,
+      cmd.reason || 'User corrected transaction'
+    );
+
+    // 2. Build replacement transaction
+    let replacementBalanced: BalancedJournal;
+    if (origTx.transactionType === 'income') {
+      replacementBalanced = buildIncomeJournal({
+        workspaceId: origTx.workspaceId,
+        assetAccountId: cmd.assetAccountId,
+        revenueCategoryId: cmd.categoryId,
+        amountMinor: cmd.amountMinor,
+        effectiveDate: cmd.effectiveDate,
+        note: cmd.note,
+        partyId: effectivePartyId,
+        opId,
+      });
+    } else {
+      replacementBalanced = buildExpenseJournal({
+        workspaceId: origTx.workspaceId,
+        assetAccountId: cmd.assetAccountId,
+        expenseCategoryId: cmd.categoryId,
+        amountMinor: cmd.amountMinor,
+        effectiveDate: cmd.effectiveDate,
+        note: cmd.note,
+        partyId: effectivePartyId,
+        opId,
+      });
+    }
+
+    // Save reversal
+    this.state.journalTransactions.set(reversalBalanced.transaction.id, {
+      ...reversalBalanced.transaction,
+      createdOpId: opId,
+      lines: reversalBalanced.lines,
+    });
+    for (const line of reversalBalanced.lines) {
+      this.state.journalLines.set(line.id, line);
+    }
+
+    // Save replacement
+    this.state.journalTransactions.set(replacementBalanced.transaction.id, {
+      ...replacementBalanced.transaction,
+      createdOpId: opId,
+      lines: replacementBalanced.lines,
+    });
+    for (const line of replacementBalanced.lines) {
+      this.state.journalLines.set(line.id, line);
+    }
+
+    // Mark original
+    (origTx as any).isReplacedBy = replacementBalanced.transaction.id;
+
+    // Queue sync operation
+    const payload = {
+      originalTransactionId: origTx.id,
+      reversalBalanced,
+      replacementBalanced,
+      note: cmd.note,
+    };
+    const op: SyncOperation = {
+      protocolVersion: 1,
+      ownerHash: this.getIdentity()?.ownerSubjectHash || 'owner',
+      deviceId: this.getDeviceId(),
+      seq: this.getNextDeviceSeq(),
+      operationId: opId,
+      entityId: origTx.id,
+      type: 'journal.correct',
+      baseRevision: 'v1',
+      createdAtUtc: new Date().toISOString(),
+      payload,
+      contentSha256: await computeSha256(canonicalJson(payload)),
+    };
+
+    this.state.syncOperations.set(opId, op);
+    this.state.syncOutbox.set(opId, {
+      opId,
+      uploadedStatus: 'pending',
+      retryCount: 0,
+      createdAt: new Date().toISOString(),
+    });
+    this.state.appliedOperations.add(opId);
+
+    await this.persist();
   }
 
   public getTransactions(workspaceId: UUID): JournalTransaction[] {
@@ -536,6 +831,8 @@ export class LocalDatabase {
 
     for (const tx of txs) {
       if (!tx.effectiveDate.startsWith(currentMonthPrefix)) continue;
+      // Exclude voided/deleted, replaced, or reversal transactions from active income & expense totals
+      if (tx.isDeleted || (tx as any).isReplacedBy || tx.transactionType === 'reversal') continue;
 
       if (tx.transactionType === 'income') {
         for (const line of tx.lines) {
@@ -745,6 +1042,7 @@ export class LocalDatabase {
       workspaces: Array.from(this.state.workspaces.entries()),
       accounts: Array.from(this.state.accounts.entries()),
       categories: Array.from(this.state.categories.entries()),
+      parties: Array.from(this.state.parties.entries()),
       journalTransactions: Array.from(this.state.journalTransactions.entries()),
       journalLines: Array.from(this.state.journalLines.entries()),
       syncOperations: Array.from(this.state.syncOperations.entries()),
@@ -774,6 +1072,7 @@ export class LocalDatabase {
     this.state.workspaces = new Map(data.workspaces || []);
     this.state.accounts = new Map(data.accounts || []);
     this.state.categories = new Map(data.categories || []);
+    this.state.parties = new Map(data.parties || []);
     this.state.journalTransactions = new Map(data.journalTransactions || []);
     this.state.journalLines = new Map(data.journalLines || []);
     this.state.syncOperations = new Map(data.syncOperations || []);

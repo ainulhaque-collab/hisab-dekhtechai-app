@@ -21,6 +21,7 @@ export interface PostIncomeCommand {
   amountMinor: PaisaString;
   effectiveDate: string; // YYYY-MM-DD
   note?: string;
+  partyId?: UUID | null;
   receiptBlobSha256?: string | null;
   receiptName?: string | null;
   opId: UUID;
@@ -34,6 +35,7 @@ export interface PostExpenseCommand {
   amountMinor: PaisaString;
   effectiveDate: string; // YYYY-MM-DD
   note?: string;
+  partyId?: UUID | null;
   receiptBlobSha256?: string | null;
   receiptName?: string | null;
   opId: UUID;
@@ -49,6 +51,7 @@ export interface PostTransferCommand {
   feeExpenseCategoryId?: UUID;
   effectiveDate: string; // YYYY-MM-DD
   note?: string;
+  partyId?: UUID | null;
   receiptBlobSha256?: string | null;
   receiptName?: string | null;
   opId: UUID;
@@ -94,6 +97,7 @@ export function buildIncomeJournal(cmd: PostIncomeCommand): BalancedJournal {
     effectiveDate: cmd.effectiveDate,
     occurredAtUtc: new Date().toISOString(),
     note: cmd.note,
+    partyId: cmd.partyId || null,
     createdOpId: cmd.opId,
     receiptBlobSha256: cmd.receiptBlobSha256 || null,
     receiptName: cmd.receiptName || null,
@@ -141,6 +145,7 @@ export function buildExpenseJournal(cmd: PostExpenseCommand): BalancedJournal {
     effectiveDate: cmd.effectiveDate,
     occurredAtUtc: new Date().toISOString(),
     note: cmd.note,
+    partyId: cmd.partyId || null,
     createdOpId: cmd.opId,
     receiptBlobSha256: cmd.receiptBlobSha256 || null,
     receiptName: cmd.receiptName || null,
@@ -197,6 +202,7 @@ export function buildTransferJournal(cmd: PostTransferCommand): BalancedJournal 
     effectiveDate: cmd.effectiveDate,
     occurredAtUtc: new Date().toISOString(),
     note: cmd.note,
+    partyId: cmd.partyId || null,
     createdOpId: cmd.opId,
     receiptBlobSha256: cmd.receiptBlobSha256 || null,
     receiptName: cmd.receiptName || null,

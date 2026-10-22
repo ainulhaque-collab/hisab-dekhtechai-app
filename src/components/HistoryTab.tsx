@@ -1,6 +1,6 @@
 import React, { useState, useMemo } from 'react';
 import { useApp } from '../context/AppContext';
-import { formatBDT, parsePaisaString } from '../domain/money';
+import { formatBDT, parsePaisaString, normalizeNumericAmountInput } from '../domain/money';
 import {
   Search,
   Filter,
@@ -13,16 +13,15 @@ import {
   X,
   Check,
   Calendar,
-  Layers
+  Layers,
+  Edit3,
+  Trash2,
+  AlertTriangle,
+  User,
+  Users,
+  Phone
 } from 'lucide-react';
-import { JournalTransaction, SyncOperation } from '../contracts/types';
-import {
-  buildReversalJournal,
-  buildExpenseJournal,
-  buildIncomeJournal,
-  generateUUID
-} from '../domain/journal';
-import { canonicalJson, computeSha256 } from '../sync/canonical';
+import { JournalTransaction, PartyRole } from '../contracts/types';
 
 interface HistoryTabProps {
   selectedTransaction?: JournalTransaction | null;
@@ -33,30 +32,70 @@ export const HistoryTab: React.FC<HistoryTabProps> = ({
   selectedTransaction: propSelectedTx,
   onClearSelected,
 }) => {
-  const { transactions, accounts, categories, language, db, refreshState, triggerManualSync, isOnline } =
-    useApp();
+  const {
+    transactions,
+    accounts,
+    categories,
+    parties,
+    currentWorkspace,
+    language,
+    db,
+    refreshState,
+    triggerManualSync,
+    deleteTransaction,
+    editTransaction,
+    isOnline,
+  } = useApp();
+
+  const isEn = language === 'en';
+  const isBusiness = currentWorkspace?.kind === 'business';
 
   const [searchTerm, setSearchTerm] = useState('');
   const [periodFilter, setPeriodFilter] = useState<'all' | 'today' | 'week' | 'month'>('all');
   const [typeFilter, setTypeFilter] = useState<'all' | 'income' | 'expense' | 'transfer' | 'correction'>(
     'all'
   );
+  const [partyFilter, setPartyFilter] = useState<string>('all');
 
   const [activeModalTx, setActiveModalTx] = useState<JournalTransaction | null>(null);
-  const [isCorrecting, setIsCorrecting] = useState(false);
-  const [correctionNote, setCorrectionNote] = useState('');
-  const [newAmountStr, setNewAmountStr] = useState('');
-  const [newNote, setNewNote] = useState('');
+  const [isEditing, setIsEditing] = useState(false);
+  const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
+  const [isDeleting, setIsDeleting] = useState(false);
+
+  // Edit form state
+  const [editAmountStr, setEditAmountStr] = useState('');
+  const [editAccountId, setEditAccountId] = useState('');
+  const [editCategoryId, setEditCategoryId] = useState('');
+  const [editPartyId, setEditPartyId] = useState<string>('');
+  const [editEffectiveDate, setEditEffectiveDate] = useState('');
+  const [editNote, setEditNote] = useState('');
+  const [editError, setEditError] = useState<string | null>(null);
 
   // Handle selected transaction from outside
   React.useEffect(() => {
     if (propSelectedTx) {
-      setActiveModalTx(propSelectedTx);
+      handleOpenDetail(propSelectedTx);
     }
   }, [propSelectedTx]);
 
   const accountsMap = useMemo(() => new Map(accounts.map((a) => [a.id, a])), [accounts]);
   const categoriesMap = useMemo(() => new Map(categories.map((c) => [c.id, c])), [categories]);
+  const partiesMap = useMemo(() => new Map(parties.map((p) => [p.id, p])), [parties]);
+
+  const getRoleLabel = (r: PartyRole) => {
+    switch (r) {
+      case 'partner':
+        return isEn ? 'Partner' : 'অংশীদার';
+      case 'staff':
+        return isEn ? 'Staff' : 'কর্মচারী';
+      case 'customer':
+        return isEn ? 'Customer' : 'কাস্টমার';
+      case 'supplier':
+        return isEn ? 'Supplier' : 'সাপ্লায়ার';
+      default:
+        return isEn ? 'Member' : 'সদস্য';
+    }
+  };
 
   // Filter transactions
   const filteredTransactions = useMemo(() => {
@@ -75,6 +114,12 @@ export const HistoryTab: React.FC<HistoryTabProps> = ({
         if (typeFilter !== 'correction' && tx.transactionType !== typeFilter) return false;
       }
 
+      // Party filter
+      if (partyFilter !== 'all') {
+        if (partyFilter === 'none' && tx.partyId) return false;
+        if (partyFilter !== 'none' && tx.partyId !== partyFilter) return false;
+      }
+
       // Search term
       if (searchTerm.trim()) {
         const term = searchTerm.toLowerCase();
@@ -82,151 +127,110 @@ export const HistoryTab: React.FC<HistoryTabProps> = ({
         const catMatch = tx.lines.some((l) => {
           if (!l.categoryId) return false;
           const cat = categoriesMap.get(l.categoryId);
-          return (cat?.name || '').toLowerCase().includes(term);
+          return (
+            (cat?.name || '').toLowerCase().includes(term) ||
+            (cat?.nameEn || '').toLowerCase().includes(term)
+          );
         });
         const accMatch = tx.lines.some((l) => {
           const acc = accountsMap.get(l.accountId);
           return (acc?.name || '').toLowerCase().includes(term);
         });
-        if (!noteMatch && !catMatch && !accMatch) return false;
+        const partyMatch = tx.partyId ? (partiesMap.get(tx.partyId)?.name || '').toLowerCase().includes(term) : false;
+        if (!noteMatch && !catMatch && !accMatch && !partyMatch) return false;
       }
 
       return true;
     });
-  }, [transactions, periodFilter, typeFilter, searchTerm, categoriesMap, accountsMap]);
+  }, [transactions, periodFilter, typeFilter, partyFilter, searchTerm, categoriesMap, accountsMap, partiesMap]);
 
   const handleOpenDetail = (tx: JournalTransaction) => {
     setActiveModalTx(tx);
-    setIsCorrecting(false);
+    setIsEditing(false);
+    setShowDeleteConfirm(false);
+    setEditError(null);
+
+    // Find original amount
+    const primaryLine = tx.lines.find((l) => l.debitMinor !== '0' || l.creditMinor !== '0');
+    const amountVal = primaryLine
+      ? primaryLine.debitMinor !== '0'
+        ? primaryLine.debitMinor
+        : primaryLine.creditMinor
+      : '0';
+
+    const paisaNum = Number(amountVal) / 100;
+    setEditAmountStr(paisaNum > 0 ? paisaNum.toFixed(2) : '');
+    setEditAccountId(tx.lines[0]?.accountId || accounts[0]?.id || '');
+    setEditCategoryId(tx.lines.find((l) => l.categoryId)?.categoryId || categories[0]?.id || '');
+    setEditPartyId(tx.partyId || '');
+    setEditEffectiveDate(tx.effectiveDate);
+    setEditNote(tx.note || '');
   };
 
   const handleCloseModal = () => {
     setActiveModalTx(null);
-    setIsCorrecting(false);
+    setIsEditing(false);
+    setShowDeleteConfirm(false);
     onClearSelected();
   };
 
-  // Safe Reversible Correction Execution
-  const handleApplyCorrection = async (e: React.FormEvent) => {
+  // Safe Transaction Deletion (Balanced Double-Entry Reversal + Outbox)
+  const handleDeleteTransaction = async () => {
+    if (!activeModalTx) return;
+    setIsDeleting(true);
+    try {
+      await deleteTransaction(
+        activeModalTx.id,
+        isEn ? 'Deleted by user from history' : 'ব্যবহারকারী কর্তৃক লেনদেন মুছে ফেলা হয়েছে'
+      );
+      handleCloseModal();
+    } catch (err: any) {
+      alert(err.message || 'Failed to delete transaction');
+    } finally {
+      setIsDeleting(false);
+    }
+  };
+
+  // Safe Transaction Edit Execution
+  const handleSaveEdit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!activeModalTx) return;
+    setEditError(null);
 
     try {
-      const parsedNewPaisa = parsePaisaString(newAmountStr);
-      if (parsedNewPaisa <= 0n) {
-        alert('সঠিক নতুন টাকার অঙ্ক লিখুন');
+      const parsedPaisa = parsePaisaString(editAmountStr);
+      if (parsedPaisa <= 0n) {
+        setEditError(isEn ? 'Amount must be greater than zero' : 'টাকার পরিমাণ শূন্যের চেয়ে বেশি হতে হবে');
         return;
       }
 
-      const opId = generateUUID();
-      // 1. Build reversal journal of original transaction
-      const reversalBalanced = buildReversalJournal(
-        activeModalTx,
-        opId,
-        correctionNote.trim() || 'ব্যবহারকারীর সংশোধন'
-      );
-
-      // 2. Build replacement transaction
-      const origLine = activeModalTx.lines.find((l) => l.debitMinor !== '0' || l.creditMinor !== '0');
-      const assetAccountId = activeModalTx.lines[0].accountId;
-      const categoryId = activeModalTx.lines.find((l) => l.categoryId)?.categoryId || 'cat-food';
-
-      let replacementBalanced;
-      if (activeModalTx.transactionType === 'income') {
-        replacementBalanced = buildIncomeJournal({
-          workspaceId: activeModalTx.workspaceId,
-          assetAccountId,
-          revenueCategoryId: categoryId,
-          amountMinor: parsedNewPaisa.toString(),
-          effectiveDate: activeModalTx.effectiveDate,
-          note: newNote.trim() || activeModalTx.note,
-          opId,
-        });
-      } else {
-        replacementBalanced = buildExpenseJournal({
-          workspaceId: activeModalTx.workspaceId,
-          assetAccountId,
-          expenseCategoryId: categoryId,
-          amountMinor: parsedNewPaisa.toString(),
-          effectiveDate: activeModalTx.effectiveDate,
-          note: newNote.trim() || activeModalTx.note,
-          opId,
-        });
-      }
-
-      const payload = {
-        originalTransactionId: activeModalTx.id,
-        reversalBalanced,
-        replacementBalanced,
-        baseRevision: 'v1',
-        note: correctionNote.trim(),
-      };
-
-      const opCanonical = canonicalJson(payload);
-      const contentSha256 = await computeSha256(opCanonical);
-
-      const op: SyncOperation = {
-        protocolVersion: 1,
-        ownerHash: db.getIdentity()?.ownerSubjectHash || 'owner',
-        deviceId: db.getDeviceId(),
-        seq: db.getNextDeviceSeq(),
-        operationId: opId,
-        entityId: activeModalTx.id,
-        type: 'journal.correct',
-        baseRevision: 'v1',
-        createdAtUtc: new Date().toISOString(),
-        payload,
-        contentSha256,
-      };
-
-      // Apply reversal & replacement atomically
-      const state = db.getRawState();
-      state.journalTransactions.set(reversalBalanced.transaction.id, {
-        ...reversalBalanced.transaction,
-        createdOpId: opId,
-        lines: reversalBalanced.lines,
+      await editTransaction(activeModalTx.id, {
+        amountMinor: parsedPaisa.toString(),
+        effectiveDate: editEffectiveDate,
+        assetAccountId: editAccountId,
+        categoryId: editCategoryId,
+        partyId: editPartyId || null,
+        note: editNote.trim() || undefined,
+        reason: isEn ? 'User edited transaction' : 'ব্যবহারকারী কর্তৃক লেনদেন সংশোধন',
       });
-      for (const line of reversalBalanced.lines) {
-        state.journalLines.set(line.id, line);
-      }
-
-      state.journalTransactions.set(replacementBalanced.transaction.id, {
-        ...replacementBalanced.transaction,
-        createdOpId: opId,
-        lines: replacementBalanced.lines,
-      });
-      for (const line of replacementBalanced.lines) {
-        state.journalLines.set(line.id, line);
-      }
-
-      // Add to outbox & applied
-      state.syncOperations.set(opId, op);
-      state.syncOutbox.set(opId, {
-        opId,
-        uploadedStatus: 'pending',
-        retryCount: 0,
-        createdAt: new Date().toISOString(),
-      });
-      state.appliedOperations.add(opId);
-
-      await db.persist();
-      refreshState();
-
-      if (isOnline) {
-        triggerManualSync().catch(console.error);
-      }
 
       handleCloseModal();
     } catch (err: any) {
-      alert(`রদবদল ব্যর্থ: ${err.message}`);
+      setEditError(err.message || (isEn ? 'Failed to update transaction' : 'লেনদেন আপডেট ব্যর্থ হয়েছে'));
     }
   };
 
   return (
-    <div className="space-y-4 pb-24 animate-in fade-in">
+    <div className="space-y-4 pb-24 animate-in fade-in text-xs">
       <div>
-        <h1 className="text-base font-bold text-slate-800 tracking-tight">লেনদেনের ইতিহাস ও অনুসন্ধান</h1>
-        <p className="text-xs text-slate-500">অডিট ট্রেইল এবং রদবদল রেকর্ডসহ পূর্ণ বিবরণ</p>
+        <h1 className="text-base font-bold text-slate-800 tracking-tight">
+          {isEn ? 'Transaction History & Search' : 'লেনদেনের ইতিহাস ও অনুসন্ধান'}
+        </h1>
+        <p className="text-slate-500 text-[11px]">
+          {isEn
+            ? 'Complete double-entry journal with editable records and audit log'
+            : 'অডিট ট্রেইল এবং রদবদল রেকর্ডসহ পূর্ণ বিবরণ'}
+        </p>
       </div>
 
       {/* Search Bar */}
@@ -234,7 +238,11 @@ export const HistoryTab: React.FC<HistoryTabProps> = ({
         <Search className="w-4 h-4 absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-400" />
         <input
           type="text"
-          placeholder="বিবরণ, খাত বা অ্যাকাউন্ট দিয়ে খুঁজুন..."
+          placeholder={
+            isEn
+              ? 'Search by note, category, account, or person...'
+              : 'বিবরণ, খাত, অ্যাকাউন্ট বা ব্যক্তির নাম দিয়ে খুঁজুন...'
+          }
           value={searchTerm}
           onChange={(e) => setSearchTerm(e.target.value)}
           className="w-full pl-9 pr-3.5 py-2.5 bg-white border border-slate-200 rounded-xl text-xs font-medium focus:outline-none focus:ring-2 focus:ring-blue-600 shadow-xs"
@@ -250,8 +258,8 @@ export const HistoryTab: React.FC<HistoryTabProps> = ({
         )}
       </div>
 
-      {/* Filters: Period & Type */}
-      <div className="flex flex-wrap items-center justify-between gap-2 text-xs">
+      {/* Filters: Period, Type & Party */}
+      <div className="flex flex-wrap items-center justify-between gap-2">
         {/* Period Chips */}
         <div className="flex gap-1 bg-slate-100 p-0.5 rounded-lg font-medium">
           {(['all', 'today', 'month'] as const).map((p) => (
@@ -259,126 +267,204 @@ export const HistoryTab: React.FC<HistoryTabProps> = ({
               key={p}
               type="button"
               onClick={() => setPeriodFilter(p)}
-              className={`px-2.5 py-1 rounded-md transition-all ${
+              className={`px-2.5 py-1 rounded-md text-[11px] capitalize transition-colors ${
                 periodFilter === p
-                  ? 'bg-white text-blue-700 font-bold shadow-xs'
+                  ? 'bg-white text-slate-900 font-bold shadow-xs'
                   : 'text-slate-600 hover:text-slate-900'
               }`}
             >
-              {p === 'all' ? 'সব' : p === 'today' ? 'আজ' : 'এই মাস'}
+              {p === 'all'
+                ? isEn
+                  ? 'All'
+                  : 'সকল'
+                : p === 'today'
+                ? isEn
+                  ? 'Today'
+                  : 'আজ'
+                : isEn
+                ? 'This Month'
+                : 'এই মাস'}
             </button>
           ))}
         </div>
 
-        {/* Type Select */}
-        <div className="flex items-center gap-1.5">
-          <Filter className="w-3.5 h-3.5 text-slate-500" />
+        {/* Filter Dropdowns */}
+        <div className="flex items-center gap-1.5 flex-wrap">
+          {/* Party Filter (for business workspaces) */}
+          {isBusiness && parties.length > 0 && (
+            <select
+              value={partyFilter}
+              onChange={(e) => setPartyFilter(e.target.value)}
+              className="px-2.5 py-1 bg-white border border-slate-200 rounded-lg text-[11px] font-semibold text-slate-700 shadow-xs focus:outline-none"
+            >
+              <option value="all">{isEn ? 'All Persons / Parties' : 'সকল ব্যক্তি / সদস্য'}</option>
+              {parties.map((p) => (
+                <option key={p.id} value={p.id}>
+                  {p.name} ({getRoleLabel(p.role)})
+                </option>
+              ))}
+              <option value="none">{isEn ? 'General (No Person)' : 'ব্যক্তি ছাড়া (সাধারণ)'}</option>
+            </select>
+          )}
+
+          {/* Type Filter */}
           <select
             value={typeFilter}
             onChange={(e) => setTypeFilter(e.target.value as any)}
-            className="px-2.5 py-1 bg-white border border-slate-200 rounded-lg text-xs font-medium text-slate-700 focus:outline-none focus:ring-2 focus:ring-blue-600"
+            className="px-2.5 py-1 bg-white border border-slate-200 rounded-lg text-[11px] font-semibold text-slate-700 shadow-xs focus:outline-none"
           >
-            <option value="all">সকল ধরণ</option>
-            <option value="expense">খরচ</option>
-            <option value="income">আয়</option>
-            <option value="transfer">স্থানান্তর</option>
-            <option value="correction">সংশোধন / রিভার্সাল</option>
+            <option value="all">{isEn ? 'All Types' : 'সকল ধরণ'}</option>
+            <option value="expense">{isEn ? 'Expenses' : 'খরচ'}</option>
+            <option value="income">{isEn ? 'Income' : 'আয়'}</option>
+            <option value="transfer">{isEn ? 'Transfers' : 'স্থানান্তর'}</option>
+            <option value="correction">{isEn ? 'Reversals / Corrections' : 'রিভার্সাল / সংশোধন'}</option>
           </select>
         </div>
       </div>
 
       {/* Transactions List */}
-      <div className="bg-white rounded-xl border border-slate-200 shadow-xs divide-y divide-slate-100 overflow-hidden">
+      <div className="space-y-2">
         {filteredTransactions.length === 0 ? (
-          <div className="p-8 text-center text-slate-500 text-xs">
-            কোনো লেনদেন পাওয়া যায়নি।
+          <div className="text-center py-12 bg-white rounded-2xl border border-slate-200 p-6 space-y-2">
+            <div className="w-10 h-10 rounded-full bg-slate-100 text-slate-400 flex items-center justify-center mx-auto">
+              <Search className="w-5 h-5" />
+            </div>
+            <div className="font-bold text-slate-700">
+              {isEn ? 'No Transactions Found' : 'কোনো লেনদেন পাওয়া যায়নি'}
+            </div>
+            <p className="text-[11px] text-slate-400 max-w-xs mx-auto">
+              {searchTerm || periodFilter !== 'all' || typeFilter !== 'all' || partyFilter !== 'all'
+                ? isEn
+                  ? 'Try adjusting your filters or search keywords.'
+                  : 'অনুগ্রহ করে ফিল্টার পরিবর্তন করুন।'
+                : isEn
+                ? 'Fresh install has zero mock transactions. Add an entry or sync with Google Drive.'
+                : 'নতুন ইনস্টলে কোনো কৃত্রিম ডাটা নেই। নতুন লেনদেন যোগ করুন বা গুগল ড্রাইভে সিঙ্ক করুন।'}
+            </p>
           </div>
         ) : (
           filteredTransactions.map((tx) => {
-            const isIncome = tx.transactionType === 'income';
             const isExpense = tx.transactionType === 'expense';
+            const isIncome = tx.transactionType === 'income';
             const isTransfer = tx.transactionType === 'transfer';
             const isReversal = tx.transactionType === 'reversal';
 
-            let displayAmount = '0';
-            if (isIncome) {
-              const line = tx.lines.find((l) => l.debitMinor !== '0');
-              displayAmount = line ? line.debitMinor : '0';
-            } else if (isExpense) {
-              const line = tx.lines.find((l) => l.creditMinor !== '0');
-              displayAmount = line ? line.creditMinor : '0';
-            } else if (isTransfer) {
-              const line = tx.lines.find((l) => l.creditMinor !== '0');
-              displayAmount = line ? line.creditMinor : '0';
-            } else if (isReversal) {
-              const line = tx.lines.find((l) => l.creditMinor !== '0' || l.debitMinor !== '0');
-              displayAmount = line ? (line.debitMinor !== '0' ? line.debitMinor : line.creditMinor) : '0';
+            // Find effective display amount
+            let displayAmountMinor = '0';
+            for (const l of tx.lines) {
+              if (isExpense && l.debitMinor !== '0' && l.categoryId) {
+                displayAmountMinor = l.debitMinor;
+                break;
+              }
+              if (isIncome && l.creditMinor !== '0' && l.categoryId) {
+                displayAmountMinor = l.creditMinor;
+                break;
+              }
+              if (isTransfer && l.debitMinor !== '0') {
+                displayAmountMinor = l.debitMinor;
+                break;
+              }
+              if (l.debitMinor !== '0') displayAmountMinor = l.debitMinor;
             }
+
+            // Find category, account, and party name
+            const firstCategoryLine = tx.lines.find((l) => l.categoryId);
+            const cat = firstCategoryLine ? categoriesMap.get(firstCategoryLine.categoryId!) : null;
+            const primaryAcc = accountsMap.get(tx.lines[0]?.accountId);
+            const party = tx.partyId ? partiesMap.get(tx.partyId) : null;
+
+            const isDeleted = (tx as any).isDeleted;
 
             return (
               <div
                 key={tx.id}
                 onClick={() => handleOpenDetail(tx)}
-                className="p-3.5 hover:bg-slate-50 transition-colors cursor-pointer flex items-center justify-between gap-3"
+                className={`p-3.5 bg-white rounded-xl border transition-all cursor-pointer hover:shadow-xs flex items-center justify-between gap-3 ${
+                  isDeleted
+                    ? 'border-rose-200 bg-rose-50/30 opacity-75'
+                    : isReversal
+                    ? 'border-purple-200 bg-purple-50/20'
+                    : 'border-slate-200 hover:border-blue-300'
+                }`}
               >
-                <div className="flex items-center gap-3">
+                <div className="flex items-center gap-3 min-w-0">
                   <div
                     className={`w-9 h-9 rounded-xl flex items-center justify-center shrink-0 ${
-                      isIncome
-                        ? 'bg-emerald-50 text-emerald-700'
-                        : isExpense
-                        ? 'bg-rose-50 text-rose-700'
+                      isExpense
+                        ? 'bg-rose-50 text-rose-600'
+                        : isIncome
+                        ? 'bg-emerald-50 text-emerald-600'
                         : isTransfer
-                        ? 'bg-blue-50 text-blue-700'
-                        : 'bg-purple-50 text-purple-700'
+                        ? 'bg-blue-50 text-blue-600'
+                        : 'bg-purple-50 text-purple-600'
                     }`}
                   >
-                    {isIncome ? (
-                      <TrendingUp className="w-4 h-4" />
-                    ) : isExpense ? (
+                    {isExpense ? (
                       <TrendingDown className="w-4 h-4" />
+                    ) : isIncome ? (
+                      <TrendingUp className="w-4 h-4" />
                     ) : isTransfer ? (
                       <ArrowRightLeft className="w-4 h-4" />
                     ) : (
                       <RotateCcw className="w-4 h-4" />
                     )}
                   </div>
-                  <div>
-                    <div className="text-xs font-semibold text-slate-800 line-clamp-1">
-                      {tx.note || (isIncome ? 'আয়' : isExpense ? 'খরচ' : isTransfer ? 'স্থানান্তর' : 'রিভার্সাল')}
-                    </div>
-                    <div className="text-[11px] text-slate-400 mt-0.5 flex items-center gap-2">
-                      <span>{tx.effectiveDate}</span>
-                      {tx.reversalOf && (
-                        <span className="text-[10px] text-purple-700 bg-purple-50 px-1.5 py-0.2 rounded font-semibold">
-                          রদবদল
+
+                  <div className="min-w-0">
+                    <div className="font-bold text-slate-800 truncate flex items-center gap-1.5 flex-wrap">
+                      <span>
+                        {cat
+                          ? isEn && cat.nameEn
+                            ? cat.nameEn
+                            : cat.name
+                          : tx.note || (isEn ? 'Journal Entry' : 'জার্নাল এন্ট্রি')}
+                      </span>
+                      {party && (
+                        <span className="text-[10px] bg-blue-50 text-blue-700 px-1.5 py-0.2 rounded font-semibold border border-blue-200 inline-flex items-center gap-1">
+                          <User className="w-2.5 h-2.5" />
+                          <span>{party.name}</span>
                         </span>
                       )}
+                      {isDeleted && (
+                        <span className="text-[9px] bg-rose-100 text-rose-700 px-1 py-0.2 rounded font-semibold">
+                          {isEn ? 'Deleted' : 'বাতিল'}
+                        </span>
+                      )}
+                      {isReversal && (
+                        <span className="text-[9px] bg-purple-100 text-purple-700 px-1 py-0.2 rounded font-semibold">
+                          {isEn ? 'Reversal' : 'সংশোধন'}
+                        </span>
+                      )}
+                    </div>
+                    <div className="text-[11px] text-slate-500 truncate flex items-center gap-1.5 mt-0.5">
+                      <span>{tx.effectiveDate}</span>
+                      <span>•</span>
+                      <span>{primaryAcc?.name || 'Account'}</span>
+                      {tx.note && <span className="truncate max-w-[140px] text-slate-400">• {tx.note}</span>}
                     </div>
                   </div>
                 </div>
 
                 <div className="text-right shrink-0">
                   <div
-                    className={`text-xs font-bold tabular-nums ${
-                      isIncome
-                        ? 'text-emerald-700'
+                    className={`font-bold tabular-nums text-sm ${
+                      isDeleted
+                        ? 'line-through text-slate-400'
                         : isExpense
-                        ? 'text-slate-900'
+                        ? 'text-rose-600'
+                        : isIncome
+                        ? 'text-emerald-600'
                         : isTransfer
-                        ? 'text-blue-700'
-                        : 'text-purple-700'
+                        ? 'text-blue-600'
+                        : 'text-purple-600'
                     }`}
                   >
-                    {isIncome ? '+' : isExpense ? '-' : ''}
-                    {formatBDT(displayAmount, { locale: language })}
+                    {isExpense ? '-' : isIncome ? '+' : ''}
+                    {formatBDT(displayAmountMinor, { locale: language })}
                   </div>
-                  {tx.receiptBlobSha256 && (
-                    <span className="text-[10px] text-blue-600 flex items-center justify-end gap-0.5 mt-0.5">
-                      <Receipt className="w-2.5 h-2.5" />
-                      <span>রসিদ</span>
-                    </span>
-                  )}
+                  <div className="text-[10px] text-slate-400">
+                    {isEn ? 'Tap to view / edit' : 'বিস্তারিত / এডিট'}
+                  </div>
                 </div>
               </div>
             );
@@ -386,54 +472,107 @@ export const HistoryTab: React.FC<HistoryTabProps> = ({
         )}
       </div>
 
-      {/* Transaction Details & Reversible Correction Modal */}
+      {/* Transaction Detail & Actions Modal */}
       {activeModalTx && (
-        <div className="fixed inset-0 z-50 bg-black/50 backdrop-blur-xs flex items-center justify-center p-4">
+        <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-xs flex items-center justify-center p-4">
           <div className="bg-white rounded-2xl max-w-md w-full p-5 shadow-2xl border border-slate-200 animate-in zoom-in-95 max-h-[90vh] overflow-y-auto">
             <div className="flex items-center justify-between pb-3 border-b border-slate-100">
-              <h3 className="text-sm font-bold text-slate-800">লেনদেনের বিস্তারিত ও জার্নাল</h3>
+              <div className="flex items-center gap-2">
+                <Layers className="w-4 h-4 text-blue-700" />
+                <h3 className="font-bold text-slate-800">
+                  {isEditing
+                    ? isEn
+                      ? 'Edit Transaction'
+                      : 'লেনদেন এডিট করুন'
+                    : showDeleteConfirm
+                    ? isEn
+                      ? 'Delete Confirmation'
+                      : 'লেনদেন মুছে ফেলার নিশ্চিতকরণ'
+                    : isEn
+                    ? 'Transaction Details'
+                    : 'লেনদেনের বিস্তারিত ও অডিট ট্রেইল'}
+                </h3>
+              </div>
               <button
                 type="button"
                 onClick={handleCloseModal}
-                className="p-1 rounded-lg hover:bg-slate-100 text-slate-500"
+                className="p-1 rounded-lg text-slate-400 hover:bg-slate-100"
               >
                 <X className="w-4 h-4" />
               </button>
             </div>
 
-            {!isCorrecting ? (
-              <div className="space-y-4 pt-3 text-xs">
-                {/* Meta details */}
-                <div className="grid grid-cols-2 gap-3 bg-slate-50 p-3 rounded-xl border border-slate-200">
+            {/* View Mode */}
+            {!isEditing && !showDeleteConfirm && (
+              <div className="space-y-4 pt-3">
+                <div className="grid grid-cols-2 gap-2.5 bg-slate-50 p-3 rounded-xl border border-slate-200">
                   <div>
-                    <span className="text-slate-400 text-[10px]">তারিখ (Effective Date)</span>
+                    <span className="text-slate-400 text-[10px]">
+                      {isEn ? 'Date' : 'তারিখ'}
+                    </span>
                     <div className="font-semibold text-slate-800">{activeModalTx.effectiveDate}</div>
                   </div>
                   <div>
-                    <span className="text-slate-400 text-[10px]">ধরণ (Type)</span>
+                    <span className="text-slate-400 text-[10px]">
+                      {isEn ? 'Type' : 'ধরণ'}
+                    </span>
                     <div className="font-semibold text-slate-800 uppercase">
                       {activeModalTx.transactionType}
                     </div>
                   </div>
+
+                  {/* Associated Person / Party */}
+                  {activeModalTx.partyId && partiesMap.get(activeModalTx.partyId) && (
+                    <div className="col-span-2 p-2.5 bg-blue-50/70 border border-blue-200 rounded-lg">
+                      <span className="text-blue-700 font-bold text-[10px] uppercase block mb-1">
+                        {isEn ? 'Associated Person / Party' : 'সংশ্লিষ্ট ব্যক্তি / পক্ষ'}
+                      </span>
+                      <div className="flex items-center justify-between">
+                        <div className="flex items-center gap-1.5 font-bold text-slate-900">
+                          <User className="w-3.5 h-3.5 text-blue-700" />
+                          <span>{partiesMap.get(activeModalTx.partyId)?.name}</span>
+                          <span className="text-[10px] px-1.5 py-0.2 bg-white rounded border border-blue-200 text-blue-700">
+                            {getRoleLabel(partiesMap.get(activeModalTx.partyId)!.role)}
+                          </span>
+                        </div>
+                        {partiesMap.get(activeModalTx.partyId)?.phone && (
+                          <a
+                            href={`tel:${partiesMap.get(activeModalTx.partyId)!.phone}`}
+                            className="text-[11px] text-blue-700 hover:underline flex items-center gap-1"
+                          >
+                            <Phone className="w-3 h-3" />
+                            <span>{partiesMap.get(activeModalTx.partyId)!.phone}</span>
+                          </a>
+                        )}
+                      </div>
+                    </div>
+                  )}
+
                   <div className="col-span-2">
-                    <span className="text-slate-400 text-[10px]">বিবরণ / নোট</span>
+                    <span className="text-slate-400 text-[10px]">
+                      {isEn ? 'Note / Description' : 'বিবরণ / নোট'}
+                    </span>
                     <div className="font-semibold text-slate-800">
-                      {activeModalTx.note || 'কোনো বিবরণ দেওয়া হয়নি'}
+                      {activeModalTx.note || (isEn ? 'No note provided' : 'কোনো বিবরণ দেওয়া হয়নি')}
                     </div>
                   </div>
                 </div>
 
-                {/* Double-Entry Journal Lines Breakdown */}
+                {/* Balanced Double-Entry Lines */}
                 <div>
-                  <h4 className="text-xs font-bold text-slate-700 mb-2 flex items-center gap-1.5">
+                  <h4 className="font-bold text-slate-700 mb-2 flex items-center gap-1.5 text-xs">
                     <Layers className="w-3.5 h-3.5 text-blue-700" />
-                    <span>জার্নাল এন্ট্রি লাইন (Balanced Debits & Credits)</span>
+                    <span>
+                      {isEn
+                        ? 'Balanced Journal Lines (Debits & Credits)'
+                        : 'জার্নাল এন্ট্রি লাইন (Balanced Debits & Credits)'}
+                    </span>
                   </h4>
                   <div className="bg-white border border-slate-200 rounded-xl overflow-hidden divide-y divide-slate-100">
                     <div className="grid grid-cols-3 p-2 bg-slate-50 text-[10px] font-bold text-slate-500 uppercase">
-                      <span>খাত / অ্যাকাউন্ট</span>
-                      <span className="text-right">ডেবিট ৳</span>
-                      <span className="text-right">ক্রেডিট ৳</span>
+                      <span>{isEn ? 'Account / Category' : 'খাত / অ্যাকাউন্ট'}</span>
+                      <span className="text-right">{isEn ? 'Debit ৳' : 'ডেবিট ৳'}</span>
+                      <span className="text-right">{isEn ? 'Credit ৳' : 'ক্রেডিট ৳'}</span>
                     </div>
                     {activeModalTx.lines.map((line) => {
                       const acc = accountsMap.get(line.accountId);
@@ -441,7 +580,7 @@ export const HistoryTab: React.FC<HistoryTabProps> = ({
                       return (
                         <div key={line.id} className="grid grid-cols-3 p-2 text-xs">
                           <span className="truncate font-medium text-slate-800">
-                            {cat ? cat.name : acc ? acc.name : line.accountId}
+                            {cat ? (isEn && cat.nameEn ? cat.nameEn : cat.name) : acc ? acc.name : line.accountId}
                           </span>
                           <span className="text-right font-semibold text-slate-700 tabular-nums">
                             {line.debitMinor !== '0'
@@ -459,96 +598,203 @@ export const HistoryTab: React.FC<HistoryTabProps> = ({
                   </div>
                 </div>
 
-                {/* Audit & Operation Provenance */}
-                <div className="bg-slate-50 p-2.5 rounded-xl border border-slate-200 text-[11px] text-slate-500 space-y-1 font-mono">
-                  <div>ট্রানজ্যাকশন আইডি: {activeModalTx.id}</div>
-                  <div>সিঙ্ক অপারেশন আইডি: {activeModalTx.createdOpId}</div>
-                  <div>UTC সময়: {activeModalTx.occurredAtUtc}</div>
-                  {activeModalTx.reversalOf && (
-                    <div className="text-purple-700 font-semibold">
-                      পূর্ববর্তী রিভার্সাল অব: {activeModalTx.reversalOf}
-                    </div>
-                  )}
-                </div>
+                {/* Action Buttons: Edit and Delete */}
+                {activeModalTx.transactionType !== 'reversal' && !(activeModalTx as any).isDeleted && (
+                  <div className="flex gap-2 pt-2">
+                    <button
+                      type="button"
+                      onClick={() => setIsEditing(true)}
+                      className="flex-1 py-2.5 bg-blue-700 hover:bg-blue-800 text-white rounded-xl font-bold flex items-center justify-center gap-2 shadow-xs transition-colors"
+                    >
+                      <Edit3 className="w-3.5 h-3.5" />
+                      <span>{isEn ? 'Edit Entry' : 'এডিট করুন'}</span>
+                    </button>
 
-                {/* Reversible Correction Button */}
-                {activeModalTx.transactionType !== 'reversal' && (
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setIsCorrecting(true);
-                      setNewNote(activeModalTx.note || '');
-                    }}
-                    className="w-full py-2.5 bg-amber-600 hover:bg-amber-700 text-white rounded-xl font-bold flex items-center justify-center gap-2 shadow-sm transition-colors"
-                  >
-                    <RotateCcw className="w-4 h-4" />
-                    <span>রদবদল / সংশোধন করুন (Reversible Correction)</span>
-                  </button>
+                    <button
+                      type="button"
+                      onClick={() => setShowDeleteConfirm(true)}
+                      className="px-4 py-2.5 bg-rose-50 hover:bg-rose-100 text-rose-700 border border-rose-200 rounded-xl font-bold flex items-center justify-center gap-2 transition-colors"
+                    >
+                      <Trash2 className="w-3.5 h-3.5" />
+                      <span>{isEn ? 'Delete' : 'মুছে ফেলুন'}</span>
+                    </button>
+                  </div>
                 )}
               </div>
-            ) : (
-              /* Correction Form */
-              <form onSubmit={handleApplyCorrection} className="space-y-3 pt-3 text-xs">
-                <div className="p-3 bg-amber-50 border border-amber-200 text-amber-900 rounded-xl">
-                  <span className="font-bold block mb-1">অপরিবর্তনীয় অডিট ট্রেইল সতর্কতা:</span>
-                  পূর্বের এন্ট্রি মুছে ফেলা হবে না; একটি স্বয়ংক্রিয় রিভার্সাল এবং সংশোধিত নতুন
-                  এন্ট্রি ডাটাবেজে যুক্ত হবে।
+            )}
+
+            {/* Delete Confirmation Dialog */}
+            {showDeleteConfirm && (
+              <div className="space-y-4 pt-3 text-xs">
+                <div className="p-3.5 bg-rose-50 border border-rose-200 rounded-xl text-rose-900 space-y-2">
+                  <div className="flex items-center gap-2 font-bold text-rose-800">
+                    <AlertTriangle className="w-4 h-4 text-rose-600" />
+                    <span>
+                      {isEn ? 'Are you sure you want to delete?' : 'আপনি কি নিশ্চিত মুছে ফেলতে চান?'}
+                    </span>
+                  </div>
+                  <p className="text-[11px] text-rose-700 leading-relaxed">
+                    {isEn
+                      ? 'This entry will be voided using balanced double-entry accounting. Your account balance will be restored, and the change will sync to Google Drive.'
+                      : 'এই লেনদেনটি ডাবল-এন্ট্রি হিসাবের অডিট ট্রেইল অনুযায়ী বাতিল হবে এবং অ্যাকাউন্টের ব্যালেন্স পূর্বাবস্থায় ফিরে আসবে।'}
+                  </p>
+                </div>
+
+                <div className="flex gap-2">
+                  <button
+                    type="button"
+                    onClick={handleDeleteTransaction}
+                    disabled={isDeleting}
+                    className="flex-1 py-2.5 bg-rose-600 hover:bg-rose-700 text-white rounded-xl font-bold flex items-center justify-center gap-2 disabled:opacity-50"
+                  >
+                    <Trash2 className="w-4 h-4" />
+                    <span>
+                      {isDeleting
+                        ? isEn
+                          ? 'Deleting...'
+                          : 'মুছে ফেলা হচ্ছে...'
+                        : isEn
+                        ? 'Confirm Delete'
+                        : 'হ্যাঁ, মুছে ফেলুন'}
+                    </span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setShowDeleteConfirm(false)}
+                    className="px-4 py-2.5 text-slate-600 hover:bg-slate-100 rounded-xl font-semibold"
+                  >
+                    {isEn ? 'Cancel' : 'বাতিল'}
+                  </button>
+                </div>
+              </div>
+            )}
+
+            {/* Edit Form */}
+            {isEditing && (
+              <form onSubmit={handleSaveEdit} className="space-y-3 pt-3 text-xs">
+                {editError && (
+                  <div className="p-2.5 bg-rose-50 border border-rose-200 rounded-xl text-rose-800 text-[11px]">
+                    {editError}
+                  </div>
+                )}
+
+                <div>
+                  <div className="flex items-center justify-between mb-1">
+                    <label className="text-slate-700 font-semibold">
+                      {isEn ? 'New Amount (BDT)' : 'নতুন টাকার অঙ্ক (BDT)'}
+                    </label>
+                    <span className="text-[10px] text-slate-400">
+                      {isEn ? 'Auto Bengali-to-English' : 'বাংলা লিখলেও সংখ্যায় রূপান্তর'}
+                    </span>
+                  </div>
+                  <div className="relative">
+                    <span className="absolute left-3 top-1/2 -translate-y-1/2 font-bold text-slate-400 text-base">
+                      ৳
+                    </span>
+                    <input
+                      type="text"
+                      inputMode="decimal"
+                      value={editAmountStr}
+                      onChange={(e) => setEditAmountStr(normalizeNumericAmountInput(e.target.value))}
+                      className="w-full pl-7 pr-3 py-2 bg-slate-50 border border-slate-300 rounded-xl font-bold text-slate-900 focus:bg-white focus:outline-none focus:ring-2 focus:ring-blue-600 tabular-nums"
+                      required
+                    />
+                  </div>
                 </div>
 
                 <div>
                   <label className="block text-slate-700 font-semibold mb-1">
-                    নতুন টাকার পরিমাণ (New Amount ৳)
+                    {isEn ? 'Account' : 'অ্যাকাউন্ট'}
+                  </label>
+                  <select
+                    value={editAccountId}
+                    onChange={(e) => setEditAccountId(e.target.value)}
+                    className="w-full px-3 py-2 bg-slate-50 border border-slate-300 rounded-xl focus:bg-white focus:outline-none focus:ring-2 focus:ring-blue-600"
+                  >
+                    {accounts.map((a) => (
+                      <option key={a.id} value={a.id}>
+                        {a.name}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+
+                <div>
+                  <label className="block text-slate-700 font-semibold mb-1">
+                    {isEn ? 'Category' : 'ক্যাটাগরি'}
+                  </label>
+                  <select
+                    value={editCategoryId}
+                    onChange={(e) => setEditCategoryId(e.target.value)}
+                    className="w-full px-3 py-2 bg-slate-50 border border-slate-300 rounded-xl focus:bg-white focus:outline-none focus:ring-2 focus:ring-blue-600"
+                  >
+                    {categories.map((c) => (
+                      <option key={c.id} value={c.id}>
+                        {isEn && c.nameEn ? c.nameEn : c.name}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+
+                {/* Edit Associated Person / Party for Business Ledgers */}
+                {isBusiness && (
+                  <div>
+                    <label className="block text-slate-700 font-semibold mb-1">
+                      {isEn ? 'Associated Person / Party' : 'সংশ্লিষ্ট ব্যক্তি / সদস্য'}
+                    </label>
+                    <select
+                      value={editPartyId}
+                      onChange={(e) => setEditPartyId(e.target.value)}
+                      className="w-full px-3 py-2 bg-slate-50 border border-slate-300 rounded-xl focus:bg-white focus:outline-none focus:ring-2 focus:ring-blue-600"
+                    >
+                      <option value="">{isEn ? '-- None (General) --' : '-- কোনো ব্যক্তি নয় (সাধারণ) --'}</option>
+                      {parties.map((p) => (
+                        <option key={p.id} value={p.id}>
+                          {p.name} ({getRoleLabel(p.role)})
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                )}
+
+                <div>
+                  <label className="block text-slate-700 font-semibold mb-1">
+                    {isEn ? 'Date' : 'তারিখ'}
                   </label>
                   <input
-                    type="text"
-                    placeholder="0.00"
-                    value={newAmountStr}
-                    onChange={(e) => setNewAmountStr(e.target.value)}
-                    className="w-full px-3 py-2 bg-slate-50 border border-slate-300 rounded-xl text-base font-bold text-slate-900 focus:bg-white focus:outline-none focus:ring-2 focus:ring-blue-600 tabular-nums"
-                    autoFocus
+                    type="date"
+                    value={editEffectiveDate}
+                    onChange={(e) => setEditEffectiveDate(e.target.value)}
+                    className="w-full px-3 py-2 bg-slate-50 border border-slate-300 rounded-xl focus:bg-white focus:outline-none focus:ring-2 focus:ring-blue-600"
                     required
                   />
                 </div>
 
                 <div>
                   <label className="block text-slate-700 font-semibold mb-1">
-                    সংশোধিত বিবরণ / নোট
+                    {isEn ? 'Note / Description' : 'বিবরণ / নোট'}
                   </label>
                   <input
                     type="text"
-                    value={newNote}
-                    onChange={(e) => setNewNote(e.target.value)}
+                    value={editNote}
+                    onChange={(e) => setEditNote(e.target.value)}
                     className="w-full px-3 py-2 bg-slate-50 border border-slate-300 rounded-xl focus:bg-white focus:outline-none focus:ring-2 focus:ring-blue-600"
-                  />
-                </div>
-
-                <div>
-                  <label className="block text-slate-700 font-semibold mb-1">
-                    সংশোধনের কারণ (Audit Reason)
-                  </label>
-                  <input
-                    type="text"
-                    placeholder="যেমন: টাকার অঙ্ক টাইপো হয়েছিল"
-                    value={correctionNote}
-                    onChange={(e) => setCorrectionNote(e.target.value)}
-                    className="w-full px-3 py-2 bg-slate-50 border border-slate-300 rounded-xl focus:bg-white focus:outline-none focus:ring-2 focus:ring-blue-600"
-                    required
                   />
                 </div>
 
                 <div className="flex gap-2 pt-2">
                   <button
                     type="submit"
-                    className="flex-1 py-2.5 bg-amber-600 hover:bg-amber-700 text-white rounded-xl font-bold"
+                    className="flex-1 py-2.5 bg-blue-700 hover:bg-blue-800 text-white rounded-xl font-bold"
                   >
-                    সংশোধন নিশ্চিত করুন
+                    {isEn ? 'Save Changes' : 'পরিবর্তন সংরক্ষণ করুন'}
                   </button>
                   <button
                     type="button"
-                    onClick={() => setIsCorrecting(false)}
+                    onClick={() => setIsEditing(false)}
                     className="px-4 py-2.5 text-slate-600 hover:bg-slate-100 rounded-xl font-semibold"
                   >
-                    ফিরে যান
+                    {isEn ? 'Back' : 'ফিরে যান'}
                   </button>
                 </div>
               </form>
