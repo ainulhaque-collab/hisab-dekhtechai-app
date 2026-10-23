@@ -9,6 +9,7 @@ import {
   generateUUID
 } from '../domain/journal';
 import { canonicalJson, computeSha256 } from '../sync/canonical';
+import { SyncOperation } from '../contracts/types';
 
 test('Durable storage fallback: basic get, set, remove', async () => {
   const driver = new LocalStorageFallbackDriver();
@@ -118,7 +119,7 @@ test('LocalDatabase fault-injection: atomic journal posting and outbox rollback 
     opId,
   });
 
-  const op = {
+  const op: SyncOperation = {
     protocolVersion: 1,
     ownerHash: 'test-owner',
     deviceId: db.getDeviceId(),
@@ -150,7 +151,7 @@ test('LocalDatabase fault-injection: atomic journal posting and outbox rollback 
     'Transaction must not be saved if durable storage commit fails'
   );
   assert.equal(
-    db.getPendingOutbox().filter((e) => e.opId === opId).length,
+    db.getPendingOutbox().filter((e) => e.operationId === opId).length,
     0,
     'Outbox entry must not exist if durable storage commit fails'
   );
@@ -168,7 +169,7 @@ test('LocalDatabase: Double-entry trial balance and independent ledger balance v
   // Helper to post transaction
   const post = async (journal: any) => {
     const opId = generateUUID();
-    const op = {
+    const op: SyncOperation = {
       protocolVersion: 1,
       ownerHash: 'test-owner',
       deviceId: db.getDeviceId(),

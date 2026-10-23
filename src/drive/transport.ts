@@ -32,7 +32,7 @@ export class RealGoogleDriveTransport implements DriveTransport {
   private uploadUrl = 'https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart';
   private fetchFn: typeof fetch = (...args) => fetch(...args);
   private initialRetryDelayMs = 500;
-  private tokenProvider?: () => Promise<string>;
+  private tokenProvider?: (forceRenew?: boolean) => Promise<string>;
 
   constructor(
     accessToken: string,
@@ -41,7 +41,7 @@ export class RealGoogleDriveTransport implements DriveTransport {
       uploadUrl?: string;
       customFetch?: typeof fetch;
       initialRetryDelayMs?: number;
-      tokenProvider?: () => Promise<string>;
+      tokenProvider?: (forceRenew?: boolean) => Promise<string>;
     }
   ) {
     this.accessToken = accessToken;
@@ -147,15 +147,21 @@ export class RealGoogleDriveTransport implements DriveTransport {
     maxRetries = 3
   ): Promise<Response> {
     let attempt = 0;
+    let authRetryCount = 0;
     let delay = this.initialRetryDelayMs;
 
     while (true) {
       try {
         const res = await this.fetchFn(input, init);
-        if (res.status === 401 && this.tokenProvider && attempt < maxRetries) {
+        if (res.status === 401 && this.tokenProvider && authRetryCount === 0) {
+          authRetryCount++;
           attempt++;
           try {
-            const freshToken = await this.tokenProvider();
+            const freshToken = await this.tokenProvider(true);
+            if (!freshToken || freshToken === this.accessToken) {
+              console.warn('Token provider returned same or empty token on 401.');
+              return res;
+            }
             this.accessToken = freshToken;
             if (init && init.headers) {
               if (init.headers instanceof Headers) {
@@ -171,7 +177,11 @@ export class RealGoogleDriveTransport implements DriveTransport {
             continue;
           } catch (e) {
             console.warn('Token provider failed to refresh token on 401:', e);
+            return res;
           }
+        }
+        if (res.status === 401) {
+          return res;
         }
         if (res.status === 429 || (res.status >= 500 && res.status <= 599)) {
           attempt++;

@@ -300,30 +300,63 @@ export class LocalDatabase {
     }
   }
 
-  /**
-   * Persists database state asynchronously to durable SQLite / IndexedDB driver.
-   * Ensures durable writes complete before reporting success and propagates any storage errors.
-   */
-  public async persist(): Promise<void> {
-    if (this.driver) {
-      const serializable = this.toSerializable();
-      await this.driver.setItem(this.storageKey, JSON.stringify(serializable));
-    }
-    this.persistSync();
-  }
-
-  private pendingPersistPromise: Promise<void> = Promise.resolve();
-  private lastPersistenceError: Error | null = null;
+  private writeQueuePromise: Promise<void> = Promise.resolve();
+  private pendingQueueCount = 0;
+  public lastPersistenceError: Error | null = null;
 
   public getLastPersistenceError(): Error | null {
     return this.lastPersistenceError;
   }
 
   /**
+   * Enqueues a durable persist task into a strictly serialized FIFO queue.
+   * Guarantees that:
+   * 1. Concurrent writes never execute in parallel or overwrite newer snapshots with stale ones.
+   * 2. Snapshots are captured sequentially at the exact moment each write executes.
+   * 3. Failures immediately propagate to the caller's returned Promise.
+   * 4. Errors are never swallowed or falsely acknowledged as successful.
+   */
+  public enqueuePersist(): Promise<void> {
+    this.pendingQueueCount++;
+    const task = this.writeQueuePromise
+      .catch(() => {
+        // Keep the queue pipeline moving even if a prior write rejected
+      })
+      .then(async () => {
+        try {
+          if (this.driver) {
+            const serializable = this.toSerializable();
+            await this.driver.setItem(this.storageKey, JSON.stringify(serializable));
+          }
+          this.persistSync();
+          this.lastPersistenceError = null;
+        } catch (err: any) {
+          const errorObj = err instanceof Error ? err : new Error(String(err));
+          this.lastPersistenceError = errorObj;
+          console.error('[CRITICAL LocalDatabase Storage Write Error]:', errorObj);
+          throw errorObj;
+        } finally {
+          this.pendingQueueCount = Math.max(0, this.pendingQueueCount - 1);
+        }
+      });
+
+    this.writeQueuePromise = task;
+    return task;
+  }
+
+  /**
+   * Persists database state asynchronously to durable SQLite / IndexedDB driver.
+   * Ensures durable writes complete before reporting success and propagates any storage errors.
+   */
+  public async persist(): Promise<void> {
+    return await this.enqueuePersist();
+  }
+
+  /**
    * Reliably awaits all in-flight asynchronous storage writes and re-throws any persisted errors.
    */
   public async waitForPendingWrites(): Promise<void> {
-    await this.pendingPersistPromise;
+    await this.writeQueuePromise.catch(() => {});
     if (this.lastPersistenceError) {
       throw this.lastPersistenceError;
     }
@@ -332,21 +365,12 @@ export class LocalDatabase {
   /**
    * Helper for internal synchronous mutating methods.
    * If a transaction is in progress, intermediate mutations are not persisted until commit.
-   * Never silently swallows durable persistence errors; reliably tracks promise and logs critical failures.
+   * Enqueues write and safely catches fire-and-forget promise while tracking errors for waitForPendingWrites.
    */
-  private autoPersist(): Promise<void> {
+  private autoPersist(): void {
     if (!this.inTransaction) {
-      this.pendingPersistPromise = this.persist()
-        .then(() => {
-          this.lastPersistenceError = null;
-        })
-        .catch((err) => {
-          this.lastPersistenceError = err;
-          console.error('[CRITICAL LocalDatabase Storage Write Error]:', err);
-        });
-      return this.pendingPersistPromise;
+      this.enqueuePersist().catch(() => {});
     }
-    return Promise.resolve();
   }
 
   // --- Atomic Database Transactions ---

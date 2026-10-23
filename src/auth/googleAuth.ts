@@ -31,10 +31,11 @@ declare global {
           initTokenClient: (config: {
             client_id: string;
             scope: string;
+            hint?: string;
             callback: (response: { access_token?: string; error?: any; expires_in?: number }) => void;
             error_callback?: (error: any) => void;
           }) => {
-            requestAccessToken: (overrideConfig?: { prompt?: string }) => void;
+            requestAccessToken: (overrideConfig?: { prompt?: string; hint?: string }) => void;
           };
         };
       };
@@ -48,6 +49,7 @@ export class GoogleAuthManager {
 
   private currentProfile: GoogleUserProfile | null = null;
   private isSimulatedAuth = false;
+  public simulatedRenewSubjectHash?: string | null;
   private readonly DRIVE_SCOPE =
     'https://www.googleapis.com/auth/drive.appdata email profile openid';
 
@@ -250,6 +252,11 @@ export class GoogleAuthManager {
   public async renewAccessTokenSilent(prompt: '' | 'consent' = ''): Promise<string> {
     if (this.isSimulatedAuth) {
       if (this.currentProfile) {
+        if (this.simulatedRenewSubjectHash && this.simulatedRenewSubjectHash !== this.currentProfile.subjectHash) {
+          throw new Error(
+            `Security Error: Renewed Google account owner (${this.simulatedRenewSubjectHash}) does not match dataset owner (${this.currentProfile.subjectHash}).`
+          );
+        }
         this.currentProfile.accessToken = 'renewed-simulated-token-' + Date.now();
         this.currentProfile.tokenExpiresAt = Date.now() + 3600 * 1000;
         return this.currentProfile.accessToken;
@@ -274,13 +281,36 @@ export class GoogleAuthManager {
               reject(new Error(resp.error?.message || 'Token renewal failed or was cancelled.'));
               return;
             }
-            if (this.currentProfile) {
-              this.currentProfile.accessToken = resp.access_token;
-              const expiresIn = resp.expires_in || 3600;
-              this.currentProfile.tokenExpiresAt = Date.now() + expiresIn * 1000;
-              this.saveProfile();
+
+            try {
+              // Verify identity of renewed token to prevent account switching
+              if (this.currentProfile?.subjectHash) {
+                const userRes = await fetch('https://www.googleapis.com/oauth2/v3/userinfo', {
+                  headers: { Authorization: `Bearer ${resp.access_token}` },
+                });
+                if (userRes.ok) {
+                  const userInfo = await userRes.json();
+                  if (userInfo.sub) {
+                    const renewedSubjectHash = await computeSha256(userInfo.sub);
+                    if (renewedSubjectHash !== this.currentProfile.subjectHash) {
+                      throw new Error(
+                        `Security Error: Renewed Google account owner does not match dataset owner.`
+                      );
+                    }
+                  }
+                }
+              }
+
+              if (this.currentProfile) {
+                this.currentProfile.accessToken = resp.access_token;
+                const expiresIn = resp.expires_in || 3600;
+                this.currentProfile.tokenExpiresAt = Date.now() + expiresIn * 1000;
+                this.saveProfile();
+              }
+              resolve(resp.access_token);
+            } catch (verifyErr) {
+              reject(verifyErr);
             }
-            resolve(resp.access_token);
           },
           error_callback: (err) => {
             reject(new Error(err?.message || 'OAuth error occurred during token renewal.'));
@@ -295,16 +325,24 @@ export class GoogleAuthManager {
   }
 
   /**
-   * Obtains a valid, unexpired access token, triggering silent renewal if expired.
+   * Obtains a valid, unexpired access token.
+   * If forceRenew is true (e.g. after HTTP 401 error), invalidates local token and triggers renewal.
    */
-  public async getValidAccessToken(): Promise<string> {
-    if (!this.currentProfile?.accessToken) {
+  public async getValidAccessToken(forceRenew = false): Promise<string> {
+    if (!this.currentProfile?.accessToken && !forceRenew) {
       throw new Error('User is not signed in to Google.');
+    }
+    if (forceRenew) {
+      if (this.currentProfile) {
+        this.currentProfile.accessToken = undefined;
+        this.currentProfile.tokenExpiresAt = 0;
+      }
+      return await this.renewAccessTokenSilent();
     }
     if (this.isTokenExpired()) {
       return await this.renewAccessTokenSilent();
     }
-    return this.currentProfile.accessToken;
+    return this.currentProfile!.accessToken!;
   }
 
   /**

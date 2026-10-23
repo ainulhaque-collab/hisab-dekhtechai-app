@@ -19,6 +19,7 @@ import {
 } from '../contracts/types';
 import { canonicalJson, computeSha256 } from './canonical';
 import { generateUUID } from '../domain/journal';
+import { GoogleUserProfile } from '../auth/googleAuth';
 
 export type SyncStatusState =
   | 'idle'
@@ -397,6 +398,17 @@ export class SyncOrchestrator {
    * Downloads all batch files from Drive appDataFolder, validates integrity, and reconciles operations.
    */
   private async downloadAndReconcileRemoteBatches(): Promise<void> {
+    const isProd =
+      (typeof process !== 'undefined' && process.env && process.env.NODE_ENV === 'production') ||
+      (typeof import.meta !== 'undefined' && (import.meta as any).env?.PROD === true);
+    const localOwner = this.db.getIdentity()?.ownerSubjectHash;
+
+    if (this.isAuthorized && isProd && !localOwner) {
+      throw new Error(
+        'Security Error: Cannot apply remote sync batches in production without a verified local Google owner identity.'
+      );
+    }
+
     const remoteFiles = await this.transport.listAppDataFiles();
 
     // Filter valid batch files: hsc-v1-ops-*
@@ -417,7 +429,6 @@ export class SyncOrchestrator {
         }
 
         // Validate dataset owner identity against local owner
-        const localOwner = this.db.getIdentity()?.ownerSubjectHash;
         if (!batch.ownerHash) {
           console.warn(
             `Security Warning: Remote batch ${file.name} is missing ownerHash. Skipping unowned batch.`
@@ -427,6 +438,12 @@ export class SyncOrchestrator {
         if (localOwner && batch.ownerHash !== localOwner) {
           console.warn(
             `Security Warning: Remote batch ${file.name} belongs to owner ${batch.ownerHash}, expected ${localOwner}. Skipping foreign batch.`
+          );
+          continue;
+        }
+        if (isProd && !localOwner) {
+          console.warn(
+            `Security Warning: Remote batch ${file.name} cannot be applied without verified local owner. Skipping.`
           );
           continue;
         }
@@ -449,15 +466,49 @@ export class SyncOrchestrator {
   }
 
   /**
+   * Safe First-Device / New-Device Bootstrap and Restore:
+   * 1. Requires verified authenticated Google user profile (with subjectHash).
+   * 2. Sets verified local identity on the local database: db.setIdentity(profile.subjectHash, profile.displayName).
+   * 3. Triggers sync to download and apply all remote batches belonging to this verified owner.
+   */
+  public async bootstrapAndRestore(profile: GoogleUserProfile): Promise<{
+    restoredOpsCount: number;
+    verifiedOwner: string;
+  }> {
+    if (!profile || !profile.subjectHash) {
+      throw new Error('Bootstrap and restore requires a verified Google user profile with subjectHash.');
+    }
+
+    this.db.setIdentity(profile.subjectHash, profile.displayName);
+    this.isAuthorized = true;
+
+    await this.triggerSync();
+
+    return {
+      restoredOpsCount: this.db.getRawState().appliedOperations.size,
+      verifiedOwner: profile.subjectHash,
+    };
+  }
+
+  /**
    * Applies an ordered array of operations into local state with deduplication and conflict checks.
    */
   public async applyBatchOperations(batch: SyncBatch): Promise<void> {
     const myDeviceId = this.db.getDeviceId();
     const isFromSelf = batch.deviceId === myDeviceId;
+    const isProd =
+      (typeof process !== 'undefined' && process.env && process.env.NODE_ENV === 'production') ||
+      (typeof import.meta !== 'undefined' && (import.meta as any).env?.PROD === true);
+    const localOwner = this.db.getIdentity()?.ownerSubjectHash;
+
+    if (this.isAuthorized && isProd && !localOwner) {
+      throw new Error(
+        'Security Error: Cannot apply operations in production without a verified local Google owner identity.'
+      );
+    }
 
     for (const op of batch.operations) {
       // 1. Validate dataset owner identity on operation
-      const localOwner = this.db.getIdentity()?.ownerSubjectHash;
       if (!op.ownerHash) {
         console.warn(`Security Warning: Operation ${op.operationId} missing ownerHash. Skipping.`);
         continue;

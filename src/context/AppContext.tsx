@@ -5,10 +5,12 @@
  */
 
 import React, { createContext, useContext, useEffect, useState, useMemo } from 'react';
+import { Capacitor } from '@capacitor/core';
 import { LocalDatabase } from '../storage/db';
 import { SyncOrchestrator, SyncStatusInfo } from '../sync/orchestrator';
 import { SimulatedGoogleDriveTransport, RealGoogleDriveTransport } from '../drive/transport';
 import { GoogleAuthManager, GoogleUserProfile } from '../auth/googleAuth';
+import { generateUUID } from '../domain/journal';
 import {
   Workspace,
   Account,
@@ -94,13 +96,11 @@ function getProductionDeviceProfile(): DeviceProfile {
       if (savedName) deviceName = savedName;
     } catch {}
   }
-  if (!deviceId) {
-    deviceId = generateUUID();
-    if (typeof localStorage !== 'undefined') {
-      try {
-        localStorage.setItem('hisab_production_device_id_v1', deviceId);
-      } catch {}
-    }
+  const finalDeviceId = deviceId || generateUUID();
+  if (!deviceId && typeof localStorage !== 'undefined') {
+    try {
+      localStorage.setItem('hisab_production_device_id_v1', finalDeviceId);
+    } catch {}
   }
   if (typeof navigator !== 'undefined') {
     if (Capacitor.isNativePlatform()) {
@@ -111,7 +111,7 @@ function getProductionDeviceProfile(): DeviceProfile {
     }
   }
   return {
-    id: deviceId,
+    id: finalDeviceId,
     name: deviceName,
     platform: Capacitor.isNativePlatform() ? 'android' : 'web',
   };
@@ -148,11 +148,21 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     if (prod) {
       // In production mode, never instantiate simulated cloud storage
       return new RealGoogleDriveTransport('', {
-        tokenProvider: () => auth.getValidAccessToken(),
+        tokenProvider: async (forceRenew?: boolean) => {
+          const token = await auth.getValidAccessToken(forceRenew);
+          const activeOwnerHash = db.getIdentity()?.ownerSubjectHash;
+          const currentAuthOwnerHash = auth.getProfile()?.subjectHash;
+          if (activeOwnerHash && currentAuthOwnerHash && activeOwnerHash !== currentAuthOwnerHash) {
+            throw new Error(
+              `Security Error: Renewed Google account owner (${currentAuthOwnerHash}) does not match dataset owner (${activeOwnerHash}).`
+            );
+          }
+          return token;
+        },
       });
     }
     return new SimulatedGoogleDriveTransport();
-  }, [prod, auth]);
+  }, [prod, auth, db]);
 
   const [sync, setSync] = useState<SyncOrchestrator>(() => new SyncOrchestrator(db, sharedTransport));
 
