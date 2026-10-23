@@ -268,6 +268,23 @@ export class SyncOrchestrator {
       toSeq
     ).padStart(12, '0')}-${batchId}.json`;
 
+    // Duplicate prevention: check if this identical batch was already uploaded
+    try {
+      const remoteFiles = await this.transport.listAppDataFiles();
+      const duplicate = remoteFiles.find(
+        (f) =>
+          f.name === fileName ||
+          f.name.startsWith(`hsc-v1-ops-${deviceId}-${String(fromSeq).padStart(12, '0')}-${String(toSeq).padStart(12, '0')}`)
+      );
+      if (duplicate) {
+        const opIds = pendingOps.map((op) => op.operationId);
+        this.db.markOutboxUploaded(opIds, duplicate.id);
+        return;
+      }
+    } catch (e) {
+      // Fall through to upload if remote listing is not available
+    }
+
     // Upload to Drive appDataFolder
     const uploadReceipt = await this.transport.uploadBatchFile(
       fileName,
@@ -302,6 +319,15 @@ export class SyncOrchestrator {
           continue;
         }
 
+        // Validate dataset owner identity against local owner
+        const localOwner = this.db.getIdentity()?.ownerSubjectHash;
+        if (localOwner && batch.ownerHash && batch.ownerHash !== localOwner) {
+          console.warn(
+            `Security Warning: Remote batch ${file.name} belongs to owner ${batch.ownerHash}, expected ${localOwner}. Skipping foreign batch.`
+          );
+          continue;
+        }
+
         // Verify batch SHA256 integrity
         if (batch.batchSha256) {
           const recomputedHash = await SyncOrchestrator.computeBatchHash(batch);
@@ -327,7 +353,14 @@ export class SyncOrchestrator {
     const isFromSelf = batch.deviceId === myDeviceId;
 
     for (const op of batch.operations) {
-      // 1. Idempotency: if already applied, skip
+      // 1. Validate dataset owner identity on operation
+      const localOwner = this.db.getIdentity()?.ownerSubjectHash;
+      if (localOwner && op.ownerHash && op.ownerHash !== localOwner) {
+        console.warn(`Security Warning: Operation ${op.operationId} owner mismatch. Skipping.`);
+        continue;
+      }
+
+      // 2. Idempotency: if already applied, skip
       if (this.db.getRawState().appliedOperations.has(op.operationId)) {
         continue;
       }

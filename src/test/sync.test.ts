@@ -2,9 +2,15 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { canonicalJson, computeSha256 } from '../sync/canonical';
 import { LocalDatabase } from '../storage/db';
-import { SimulatedGoogleDriveTransport } from '../drive/transport';
+import { SimulatedGoogleDriveTransport, RealGoogleDriveTransport } from '../drive/transport';
 import { SyncOrchestrator } from '../sync/orchestrator';
-import { buildIncomeJournal, buildExpenseJournal, buildReversalJournal, generateUUID } from '../domain/journal';
+import {
+  buildIncomeJournal,
+  buildExpenseJournal,
+  buildTransferJournal,
+  buildReversalJournal,
+  generateUUID,
+} from '../domain/journal';
 import { SyncOperation } from '../contracts/types';
 import { toPaisa } from '../domain/money';
 
@@ -344,4 +350,407 @@ test('Sync error handling: 403 quota and 401 unauthorized status reporting', asy
   await sync.triggerSync();
   status = sync.getStatus();
   assert.equal(status.state, 'auth_required', 'Status must report auth_required on 401');
+});
+
+test('Google Drive Sync: Dataset owner identity mismatch rejection', async () => {
+  SimulatedGoogleDriveTransport.clearSharedCloud();
+
+  // Device A is registered to owner-alice
+  const dbA = new LocalDatabase('test_db_owner_alice');
+  dbA.seedDefaultEntities();
+  dbA.setDeviceIdentity('dev-alice', 'Alice Phone');
+  dbA.setIdentity('owner-alice-hash', 'alice@gmail.com');
+  const transportA = new SimulatedGoogleDriveTransport();
+  const syncA = new SyncOrchestrator(dbA, transportA);
+
+  // Pre-seed cloud with a batch from a different owner (owner-mallory-hash)
+  const opMalloryId = generateUUID();
+  const journalMallory = buildIncomeJournal({
+    workspaceId: 'ws-personal-default',
+    assetAccountId: 'acc-cash-1',
+    revenueCategoryId: 'cat-salary',
+    amountMinor: '500000',
+    effectiveDate: '2026-10-22',
+    opId: opMalloryId,
+  });
+  const malloryBatchData = {
+    protocolVersion: 1 as const,
+    ownerHash: 'owner-mallory-hash',
+    deviceId: 'dev-mallory',
+    batchId: generateUUID(),
+    fromSeq: 1,
+    toSeq: 1,
+    operations: [
+      {
+        protocolVersion: 1 as const,
+        ownerHash: 'owner-mallory-hash',
+        deviceId: 'dev-mallory',
+        seq: 1,
+        operationId: opMalloryId,
+        entityId: journalMallory.transaction.id,
+        type: 'journal.post' as const,
+        createdAtUtc: new Date().toISOString(),
+        payload: { balancedJournal: journalMallory },
+        contentSha256: await computeSha256(canonicalJson({ balancedJournal: journalMallory })),
+      },
+    ],
+    createdAtUtc: new Date().toISOString(),
+  };
+  const mallorySha = await SyncOrchestrator.computeBatchHash(malloryBatchData);
+  const malloryFullBatch = {
+    ...malloryBatchData,
+    batchSha256: mallorySha,
+    byteLength: 200,
+  };
+  await transportA.uploadBatchFile(
+    `hsc-v1-ops-dev-mallory-000000000001-000000000001-${malloryBatchData.batchId}.json`,
+    JSON.stringify(malloryFullBatch)
+  );
+
+  // Alice triggers sync
+  await syncA.triggerSync();
+
+  // Assert Alice's database rejected Mallory's foreign batch
+  const aliceTxs = dbA.getTransactions('ws-personal-default');
+  assert.equal(aliceTxs.length, 0, 'Foreign owner transactions must be rejected and not imported');
+  assert.equal(
+    dbA.getRawState().appliedOperations.has(opMalloryId),
+    false,
+    'Foreign operation ID must not be recorded as applied'
+  );
+});
+
+test('Google Drive Sync: Duplicate batch upload prevention', async () => {
+  SimulatedGoogleDriveTransport.clearSharedCloud();
+
+  const db = new LocalDatabase('test_db_dup_prevent');
+  db.seedDefaultEntities();
+  db.setDeviceIdentity('dev-dup-test', 'Device Dup Test');
+  db.setIdentity('owner-dup-test');
+  const transport = new SimulatedGoogleDriveTransport();
+  const sync = new SyncOrchestrator(db, transport);
+
+  const wsId = 'ws-personal-default';
+  const opId = generateUUID();
+  const journal = buildExpenseJournal({
+    workspaceId: wsId,
+    assetAccountId: 'acc-cash-1',
+    expenseCategoryId: 'cat-food',
+    amountMinor: '15000',
+    effectiveDate: '2026-10-22',
+    opId,
+  });
+  const op: SyncOperation = {
+    protocolVersion: 1,
+    ownerHash: 'owner-dup-test',
+    deviceId: 'dev-dup-test',
+    seq: 1,
+    operationId: opId,
+    entityId: journal.transaction.id,
+    type: 'journal.post',
+    createdAtUtc: new Date().toISOString(),
+    payload: { balancedJournal: journal },
+    contentSha256: await computeSha256(canonicalJson({ balancedJournal: journal })),
+  };
+  await db.commitJournalWithOutbox(journal, op);
+
+  // Simulate that the batch already exists on Drive
+  const existingFileName = `hsc-v1-ops-dev-dup-test-000000000001-000000000001-existing-batch-uuid.json`;
+  await transport.uploadBatchFile(existingFileName, '{}');
+  const filesBefore = await transport.listAppDataFiles();
+  assert.equal(filesBefore.length, 1);
+
+  // Trigger sync on device
+  await sync.triggerSync();
+
+  // Outbox operations must be marked uploaded, without uploading a duplicate file
+  assert.equal(db.getPendingOutbox().length, 0, 'Pending outbox must be marked uploaded');
+  const filesAfter = await transport.listAppDataFiles();
+  assert.equal(filesAfter.length, 1, 'No duplicate file should have been uploaded');
+});
+
+test('Google Drive Sync: Interrupted upload maintains pending outbox and recovers on retry', async () => {
+  SimulatedGoogleDriveTransport.clearSharedCloud();
+
+  const db = new LocalDatabase('test_db_interrupted');
+  db.seedDefaultEntities();
+  db.setDeviceIdentity('dev-interrupted', 'Device Interrupted');
+  const transport = new SimulatedGoogleDriveTransport();
+  const sync = new SyncOrchestrator(db, transport);
+
+  const wsId = 'ws-personal-default';
+  const opId = generateUUID();
+  const journal = buildIncomeJournal({
+    workspaceId: wsId,
+    assetAccountId: 'acc-cash-1',
+    revenueCategoryId: 'cat-salary',
+    amountMinor: '250000',
+    effectiveDate: '2026-10-22',
+    opId,
+  });
+  const op: SyncOperation = {
+    protocolVersion: 1,
+    ownerHash: 'owner-test',
+    deviceId: 'dev-interrupted',
+    seq: db.getNextDeviceSeq(),
+    operationId: opId,
+    entityId: journal.transaction.id,
+    type: 'journal.post',
+    createdAtUtc: new Date().toISOString(),
+    payload: { balancedJournal: journal },
+    contentSha256: await computeSha256(canonicalJson({ balancedJournal: journal })),
+  };
+  await db.commitJournalWithOutbox(journal, op);
+
+  assert.equal(db.getPendingOutbox().length, 1, 'Initial outbox must have 1 pending op');
+
+  // Inject upload interruption fault
+  transport.simulateFault = 'upload_interrupted';
+  await sync.triggerSync();
+
+  // Outbox MUST remain pending because upload did not complete!
+  assert.equal(
+    db.getPendingOutbox().length,
+    1,
+    'Outbox must remain pending after interrupted upload'
+  );
+  const statusAfterFault = sync.getStatus();
+  assert.equal(
+    statusAfterFault.state,
+    'error_retryable',
+    'Sync status must reflect retryable error'
+  );
+
+  // Clear fault and trigger sync again
+  transport.simulateFault = 'none';
+  await sync.triggerSync();
+
+  // Outbox is now uploaded and verified
+  assert.equal(db.getPendingOutbox().length, 0, 'Outbox must be empty after successful recovery');
+  assert.equal(sync.getStatus().state, 'synced_verified');
+});
+
+test('Cross-platform sync: 3-device simulation (Android Phone, Android Tablet, Web Browser) eventual convergence', async () => {
+  SimulatedGoogleDriveTransport.clearSharedCloud();
+  const ownerHash = 'owner-sha-user-family-123';
+  const wsId = 'ws-personal-default';
+  const accCash = 'acc-cash-1';
+  const accBank = 'acc-bank-1';
+
+  // Device 1: Android Phone (Redmi Note)
+  const dbPhone = new LocalDatabase('test_db_dev_phone');
+  dbPhone.seedDefaultEntities();
+  dbPhone.setDeviceIdentity('dev-android-phone', 'Redmi Note 12');
+  dbPhone.setIdentity(ownerHash);
+  const transportPhone = new SimulatedGoogleDriveTransport();
+  const syncPhone = new SyncOrchestrator(dbPhone, transportPhone);
+
+  // Device 2: Android Tablet (Galaxy Tab)
+  const dbTablet = new LocalDatabase('test_db_dev_tablet');
+  dbTablet.seedDefaultEntities();
+  dbTablet.setDeviceIdentity('dev-android-tablet', 'Galaxy Tab S9');
+  dbTablet.setIdentity(ownerHash);
+  const transportTablet = new SimulatedGoogleDriveTransport();
+  const syncTablet = new SyncOrchestrator(dbTablet, transportTablet);
+
+  // Device 3: Web Browser (Chrome Desktop)
+  const dbWeb = new LocalDatabase('test_db_dev_web');
+  dbWeb.seedDefaultEntities();
+  dbWeb.setDeviceIdentity('dev-web-desktop', 'Chrome Desktop (Windows)');
+  dbWeb.setIdentity(ownerHash);
+  const transportWeb = new SimulatedGoogleDriveTransport();
+  const syncWeb = new SyncOrchestrator(dbWeb, transportWeb);
+
+  // Step 1: All 3 devices go offline and perform concurrent independent operations
+  syncPhone.setOnline(false);
+  syncTablet.setOnline(false);
+  syncWeb.setOnline(false);
+
+  // Phone: Income ৳5,000 (500000 paisa)
+  const phoneOpId = generateUUID();
+  const phoneJournal = buildIncomeJournal({
+    workspaceId: wsId,
+    assetAccountId: accCash,
+    revenueCategoryId: 'cat-salary',
+    amountMinor: '500000',
+    effectiveDate: '2026-10-23',
+    note: 'Salary received via Phone',
+    opId: phoneOpId,
+  });
+  const phoneOp: SyncOperation = {
+    protocolVersion: 1,
+    ownerHash,
+    deviceId: 'dev-android-phone',
+    seq: dbPhone.getNextDeviceSeq(),
+    operationId: phoneOpId,
+    entityId: phoneJournal.transaction.id,
+    type: 'journal.post',
+    createdAtUtc: new Date().toISOString(),
+    payload: { balancedJournal: phoneJournal },
+    contentSha256: await computeSha256(canonicalJson({ balancedJournal: phoneJournal })),
+  };
+  await dbPhone.commitJournalWithOutbox(phoneJournal, phoneOp);
+
+  // Tablet: Expense ৳1,200 (120000 paisa)
+  const tabletOpId = generateUUID();
+  const tabletJournal = buildExpenseJournal({
+    workspaceId: wsId,
+    assetAccountId: accCash,
+    expenseCategoryId: 'cat-groceries',
+    amountMinor: '120000',
+    effectiveDate: '2026-10-23',
+    note: 'Groceries purchased via Tablet',
+    opId: tabletOpId,
+  });
+  const tabletOp: SyncOperation = {
+    protocolVersion: 1,
+    ownerHash,
+    deviceId: 'dev-android-tablet',
+    seq: dbTablet.getNextDeviceSeq(),
+    operationId: tabletOpId,
+    entityId: tabletJournal.transaction.id,
+    type: 'journal.post',
+    createdAtUtc: new Date().toISOString(),
+    payload: { balancedJournal: tabletJournal },
+    contentSha256: await computeSha256(canonicalJson({ balancedJournal: tabletJournal })),
+  };
+  await dbTablet.commitJournalWithOutbox(tabletJournal, tabletOp);
+
+  // Web Browser: Transfer ৳2,000 (200000 paisa) with ৳25 (2500 paisa) transfer fee from Cash to Bank
+  const webOpId = generateUUID();
+  const webJournal = buildTransferJournal({
+    workspaceId: wsId,
+    fromAssetAccountId: accCash,
+    toAssetAccountId: accBank,
+    amountMinor: '200000',
+    feeMinor: '2500',
+    feeExpenseCategoryId: 'cat-food',
+    effectiveDate: '2026-10-23',
+    note: 'Online Transfer Cash to Bank via Web',
+    opId: webOpId,
+  });
+  const webOp: SyncOperation = {
+    protocolVersion: 1,
+    ownerHash,
+    deviceId: 'dev-web-desktop',
+    seq: dbWeb.getNextDeviceSeq(),
+    operationId: webOpId,
+    entityId: webJournal.transaction.id,
+    type: 'journal.post',
+    createdAtUtc: new Date().toISOString(),
+    payload: { balancedJournal: webJournal },
+    contentSha256: await computeSha256(canonicalJson({ balancedJournal: webJournal })),
+  };
+  await dbWeb.commitJournalWithOutbox(webJournal, webOp);
+
+  // Step 2: All 3 devices come online and sync in rounds until fully propagated
+  syncPhone.setOnline(true);
+  syncTablet.setOnline(true);
+  syncWeb.setOnline(true);
+
+  // Round 1: Each uploads their batch and downloads what's available
+  await syncPhone.triggerSync();
+  await syncTablet.triggerSync();
+  await syncWeb.triggerSync();
+
+  // Round 2: Propagate all remote batches to all peers
+  await syncPhone.triggerSync();
+  await syncTablet.triggerSync();
+  await syncWeb.triggerSync();
+
+  // Step 3: Verify eventual convergence on all 3 platforms
+  const txsPhone = dbPhone.getTransactions(wsId);
+  const txsTablet = dbTablet.getTransactions(wsId);
+  const txsWeb = dbWeb.getTransactions(wsId);
+
+  assert.equal(txsPhone.length, 3, 'Phone must have all 3 transactions');
+  assert.equal(txsTablet.length, 3, 'Tablet must have all 3 transactions');
+  assert.equal(txsWeb.length, 3, 'Web must have all 3 transactions');
+
+  // Verify financial balance convergence:
+  // Expected Cash: 0 + 500000 (Income) - 120000 (Expense) - 200000 (Transfer) - 2500 (Fee) = 177500 paisa
+  // Expected Bank: 0 + 200000 (Transfer) = 200000 paisa
+  const summariesPhone = dbPhone.calculateAccountSummaries(wsId);
+  const summariesTablet = dbTablet.calculateAccountSummaries(wsId);
+  const summariesWeb = dbWeb.calculateAccountSummaries(wsId);
+
+  const cashPhone = summariesPhone.find((s) => s.accountId === accCash)?.currentBalanceMinor;
+  const cashTablet = summariesTablet.find((s) => s.accountId === accCash)?.currentBalanceMinor;
+  const cashWeb = summariesWeb.find((s) => s.accountId === accCash)?.currentBalanceMinor;
+
+  const bankPhone = summariesPhone.find((s) => s.accountId === accBank)?.currentBalanceMinor;
+  const bankTablet = summariesTablet.find((s) => s.accountId === accBank)?.currentBalanceMinor;
+  const bankWeb = summariesWeb.find((s) => s.accountId === accBank)?.currentBalanceMinor;
+
+  assert.equal(cashPhone, '177500', 'Cash on Phone must be exactly 177500 paisa (৳1,775.00)');
+  assert.equal(cashTablet, '177500', 'Cash on Tablet must be exactly 177500 paisa (৳1,775.00)');
+  assert.equal(cashWeb, '177500', 'Cash on Web must be exactly 177500 paisa (৳1,775.00)');
+
+  assert.equal(bankPhone, '200000', 'Bank on Phone must be exactly 200000 paisa (৳2,000.00)');
+  assert.equal(bankTablet, '200000', 'Bank on Tablet must be exactly 200000 paisa (৳2,000.00)');
+  assert.equal(bankWeb, '200000', 'Bank on Web must be exactly 200000 paisa (৳2,000.00)');
+
+  // Step 4: Verify ledger and trial balance integrity across all 3 platforms
+  const auditPhone = dbPhone.verifyLedgerIntegrity(wsId);
+  const auditTablet = dbTablet.verifyLedgerIntegrity(wsId);
+  const auditWeb = dbWeb.verifyLedgerIntegrity(wsId);
+
+  assert.equal(auditPhone.isValid, true);
+  assert.equal(auditPhone.trialBalanceMatched, true);
+  assert.equal(auditTablet.isValid, true);
+  assert.equal(auditTablet.trialBalanceMatched, true);
+  assert.equal(auditWeb.isValid, true);
+  assert.equal(auditWeb.trialBalanceMatched, true);
+});
+
+test('RealGoogleDriveTransport: Pagination across multiple pages and retry on 429 backoff', async () => {
+  let callCount = 0;
+  const mockFetch = (async (input: RequestInfo | URL, init?: RequestInit): Promise<Response> => {
+    callCount++;
+    const urlStr = String(input);
+
+    // Call 1: Simulate 429 Rate Limit error on first attempt
+    if (callCount === 1) {
+      return new Response(JSON.stringify({ error: 'Rate limit exceeded' }), {
+        status: 429,
+        headers: { 'Content-Type': 'application/json' },
+      });
+    }
+
+    // Call 2: Retry succeeds with Page 1 containing nextPageToken
+    if (callCount === 2) {
+      return new Response(
+        JSON.stringify({
+          files: [{ id: 'f-page-1', name: 'hsc-v1-ops-batch1.json', mimeType: 'application/json' }],
+          nextPageToken: 'token-page-2',
+        }),
+        { status: 200, headers: { 'Content-Type': 'application/json' } }
+      );
+    }
+
+    // Call 3: Page 2 request using pageToken
+    if (callCount === 3) {
+      assert.ok(urlStr.includes('pageToken=token-page-2'), 'Must pass pageToken in pagination URL');
+      return new Response(
+        JSON.stringify({
+          files: [{ id: 'f-page-2', name: 'hsc-v1-ops-batch2.json', mimeType: 'application/json' }],
+          nextPageToken: null,
+        }),
+        { status: 200, headers: { 'Content-Type': 'application/json' } }
+      );
+    }
+
+    return new Response('Not found', { status: 404 });
+  }) as typeof fetch;
+
+  const transport = new RealGoogleDriveTransport('test-access-token', {
+    customFetch: mockFetch,
+    initialRetryDelayMs: 1, // fast backoff for tests
+  });
+
+  const files = await transport.listAppDataFiles();
+  assert.equal(files.length, 2, 'Must paginate and collect files from both pages');
+  assert.equal(files[0].id, 'f-page-1');
+  assert.equal(files[1].id, 'f-page-2');
+  assert.equal(callCount, 3, 'Must have executed 3 calls (1 initial 429 + 1 retry page 1 + 1 page 2)');
 });

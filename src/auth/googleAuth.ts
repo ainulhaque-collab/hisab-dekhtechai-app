@@ -9,6 +9,7 @@
  * - Token expiry tracking and renewal
  */
 
+import { Capacitor } from '@capacitor/core';
 import { computeSha256 } from '../sync/canonical';
 
 export interface GoogleUserProfile {
@@ -46,6 +47,7 @@ export class GoogleAuthManager {
     '271505920973-an5igoqnn715b3j39g05r7vausnqhat2.apps.googleusercontent.com';
 
   private currentProfile: GoogleUserProfile | null = null;
+  private isSimulatedAuth = false;
   private readonly DRIVE_SCOPE =
     'https://www.googleapis.com/auth/drive.appdata email profile openid';
 
@@ -62,12 +64,20 @@ export class GoogleAuthManager {
     );
   }
 
+  /**
+   * Safely loads cached public user profile.
+   * OAuth access tokens are NEVER restored from unencrypted localStorage.
+   */
   private loadSavedProfile(): void {
     if (typeof localStorage !== 'undefined') {
       try {
         const raw = localStorage.getItem('hisab_google_user');
         if (raw) {
-          this.currentProfile = JSON.parse(raw);
+          const parsed = JSON.parse(raw);
+          // Never trust or load raw tokens from unencrypted localStorage
+          delete parsed.accessToken;
+          delete parsed.tokenExpiresAt;
+          this.currentProfile = parsed;
         }
       } catch (err) {
         console.warn('Failed to parse cached Google user profile:', err);
@@ -75,10 +85,22 @@ export class GoogleAuthManager {
     }
   }
 
+  /**
+   * Persists user identity offline without saving sensitive raw OAuth access tokens.
+   */
   private saveProfile(): void {
     if (typeof localStorage !== 'undefined') {
       if (this.currentProfile) {
-        localStorage.setItem('hisab_google_user', JSON.stringify(this.currentProfile));
+        // Strip sensitive raw accessToken and tokenExpiresAt before persisting to localStorage
+        const sanitized: Omit<GoogleUserProfile, 'accessToken' | 'tokenExpiresAt'> = {
+          subjectId: this.currentProfile.subjectId,
+          subjectHash: this.currentProfile.subjectHash,
+          email: this.currentProfile.email,
+          displayName: this.currentProfile.displayName,
+          photoUrl: this.currentProfile.photoUrl,
+          isDriveAuthorized: this.currentProfile.isDriveAuthorized,
+        };
+        localStorage.setItem('hisab_google_user', JSON.stringify(sanitized));
       } else {
         localStorage.removeItem('hisab_google_user');
       }
@@ -91,6 +113,19 @@ export class GoogleAuthManager {
 
   public isAuthenticated(): boolean {
     return this.currentProfile !== null;
+  }
+
+  public isRealGoogleAuthenticated(): boolean {
+    return (
+      !this.isSimulatedAuth &&
+      this.currentProfile !== null &&
+      !!this.currentProfile.accessToken &&
+      !this.isTokenExpired()
+    );
+  }
+
+  public isTestMode(): boolean {
+    return this.isSimulatedAuth;
   }
 
   public isTokenExpired(): boolean {
@@ -212,6 +247,7 @@ export class GoogleAuthManager {
   /**
    * Specifically for unit tests and local mock verification.
    * Isolated from standard production authorization.
+   * Throws in production environments to ensure real authentication integrity.
    */
   public async setTestProfileForTesting(
     email: string,
@@ -219,6 +255,16 @@ export class GoogleAuthManager {
     subjectId = 'test-sub-' + Math.random().toString(36).substring(2, 10),
     token?: string
   ): Promise<GoogleUserProfile> {
+    const isProd =
+      (typeof process !== 'undefined' && process.env && process.env.NODE_ENV === 'production') ||
+      (typeof import.meta !== 'undefined' && (import.meta as any).env?.PROD === true);
+    if (isProd) {
+      throw new Error(
+        'Security Error: Simulated authentication credentials are strictly forbidden in production mode.'
+      );
+    }
+
+    this.isSimulatedAuth = true;
     const subjectHash = await computeSha256(`hisab-owner:${subjectId}`);
     this.currentProfile = {
       subjectId,

@@ -54,6 +54,7 @@ interface AppContextType {
   recurringRules: RecurringRule[];
   syncStatus: SyncStatusInfo;
   userProfile: GoogleUserProfile | null;
+  isLiveGoogleAuth: boolean;
   isOnline: boolean;
   setIsOnline: (online: boolean) => void;
   language: 'bn' | 'en';
@@ -174,7 +175,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   useEffect(() => {
     refreshState();
     const currentProf = auth.getProfile();
-    const isRealGoogle = !!(currentProf?.accessToken && currentProf.accessToken.startsWith('ya29.'));
+    const isRealGoogle = auth.isRealGoogleAuthenticated();
     if (isRealGoogle && currentProf?.accessToken && !auth.isTokenExpired()) {
       sync.setTransport(new RealGoogleDriveTransport(currentProf.accessToken));
       sync.setAuthorized(true);
@@ -190,7 +191,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
   const switchDevice = async (dev: DeviceProfile) => {
     const targetDb = getOrCreateDeviceDb(dev.id, dev.name);
-    const isRealGoogle = !!(userProfile?.accessToken && userProfile.accessToken.startsWith('ya29.'));
+    const isRealGoogle = auth.isRealGoogleAuthenticated();
     const targetTransport = isRealGoogle && userProfile?.accessToken && !auth.isTokenExpired()
       ? new RealGoogleDriveTransport(userProfile.accessToken)
       : sharedTransport;
@@ -309,6 +310,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         recurringRules,
         syncStatus,
         userProfile,
+        isLiveGoogleAuth: auth.isRealGoogleAuthenticated(),
         isOnline,
         setIsOnline,
         language,

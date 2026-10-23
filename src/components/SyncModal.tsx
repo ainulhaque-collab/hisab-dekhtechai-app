@@ -41,6 +41,7 @@ export const SyncModal: React.FC<SyncModalProps> = ({
     triggerManualSync,
     conflicts,
     userProfile,
+    isLiveGoogleAuth,
     language,
   } = useApp();
 
@@ -81,7 +82,7 @@ export const SyncModal: React.FC<SyncModalProps> = ({
                 {language === 'en' ? 'Google Drive Sync Dashboard' : 'গুগল ড্রাইভ সিঙ্ক ড্যাশবোর্ড'}
               </h2>
               <div className="text-[10px] text-slate-500 font-medium">
-                {userProfile?.accessToken && userProfile.accessToken.startsWith('ya29.') ? (
+                {isLiveGoogleAuth ? (
                   <span className="text-emerald-700 font-semibold">● {language === 'en' ? 'Live Google Drive REST API Active' : 'লাইভ গুগল ড্রাইভ REST API সক্রিয়'}</span>
                 ) : (
                   <span className="text-blue-700 font-semibold">● {language === 'en' ? 'Multi-Device Test Mode Active' : 'মাল্টি-ডিভাইস টেস্ট মোড সক্রিয়'}</span>
