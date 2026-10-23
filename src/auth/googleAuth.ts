@@ -245,6 +245,69 @@ export class GoogleAuthManager {
   }
 
   /**
+   * Silently renews expired OAuth access token without prompting for consent again.
+   */
+  public async renewAccessTokenSilent(prompt: '' | 'consent' = ''): Promise<string> {
+    if (this.isSimulatedAuth) {
+      if (this.currentProfile) {
+        this.currentProfile.accessToken = 'renewed-simulated-token-' + Date.now();
+        this.currentProfile.tokenExpiresAt = Date.now() + 3600 * 1000;
+        return this.currentProfile.accessToken;
+      }
+      throw new Error('No user profile available for simulated token renewal.');
+    }
+
+    const clientId = this.getClientId();
+    return new Promise((resolve, reject) => {
+      if (typeof window === 'undefined' || !window.google?.accounts?.oauth2) {
+        reject(new Error('Google Identity Services client library is not loaded.'));
+        return;
+      }
+
+      try {
+        const tokenClient = window.google.accounts.oauth2.initTokenClient({
+          client_id: clientId,
+          scope: this.DRIVE_SCOPE,
+          hint: this.currentProfile?.email || undefined,
+          callback: async (resp) => {
+            if (resp.error || !resp.access_token) {
+              reject(new Error(resp.error?.message || 'Token renewal failed or was cancelled.'));
+              return;
+            }
+            if (this.currentProfile) {
+              this.currentProfile.accessToken = resp.access_token;
+              const expiresIn = resp.expires_in || 3600;
+              this.currentProfile.tokenExpiresAt = Date.now() + expiresIn * 1000;
+              this.saveProfile();
+            }
+            resolve(resp.access_token);
+          },
+          error_callback: (err) => {
+            reject(new Error(err?.message || 'OAuth error occurred during token renewal.'));
+          },
+        });
+
+        tokenClient.requestAccessToken({ prompt, hint: this.currentProfile?.email });
+      } catch (err) {
+        reject(err);
+      }
+    });
+  }
+
+  /**
+   * Obtains a valid, unexpired access token, triggering silent renewal if expired.
+   */
+  public async getValidAccessToken(): Promise<string> {
+    if (!this.currentProfile?.accessToken) {
+      throw new Error('User is not signed in to Google.');
+    }
+    if (this.isTokenExpired()) {
+      return await this.renewAccessTokenSilent();
+    }
+    return this.currentProfile.accessToken;
+  }
+
+  /**
    * Specifically for unit tests and local mock verification.
    * Isolated from standard production authorization.
    * Throws in production environments to ensure real authentication integrity.

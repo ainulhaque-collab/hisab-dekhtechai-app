@@ -1,6 +1,9 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { PinLockManager } from '../security/pinLock';
+import { SimulatedGoogleDriveTransport, RealGoogleDriveTransport } from '../drive/transport';
+import { SyncOrchestrator } from '../sync/orchestrator';
+import { LocalDatabase } from '../storage/db';
 
 test('PinLockManager: PBKDF2 slow KDF derivation and verification', async () => {
   const pin = '4321';
@@ -87,3 +90,93 @@ test('PinLockManager: lockout behavior persists after simulated application rest
   // Clean up
   appSession2AfterRestart.resetAttempts();
 });
+
+test('Production isolation: SimulatedGoogleDriveTransport throws in production mode', () => {
+  const origEnv = process.env.NODE_ENV;
+  try {
+    process.env.NODE_ENV = 'production';
+    assert.throws(
+      () => {
+        new SimulatedGoogleDriveTransport();
+      },
+      /Simulated Google Drive cloud storage is strictly forbidden in production mode/,
+      'Must reject simulated transport in production'
+    );
+  } finally {
+    process.env.NODE_ENV = origEnv;
+  }
+});
+
+test('RealGoogleDriveTransport: 401 Unauthorized triggers tokenProvider renewal and succeeds on retry', async () => {
+  let renewCallCount = 0;
+  let fetchCallCount = 0;
+
+  const mockTokenProvider = async () => {
+    renewCallCount++;
+    return 'new-valid-token';
+  };
+
+  const mockFetch = (async (input: RequestInfo | URL, init?: RequestInit): Promise<Response> => {
+    fetchCallCount++;
+    const authHeader = (init?.headers as Record<string, string>)?.['Authorization'];
+
+    // First call has expired token -> return 401
+    if (fetchCallCount === 1) {
+      assert.equal(authHeader, 'Bearer expired-token');
+      return new Response(JSON.stringify({ error: { code: 401, message: 'Invalid Credentials' } }), {
+        status: 401,
+        headers: { 'Content-Type': 'application/json' },
+      });
+    }
+
+    // Second call should have new-valid-token -> return 200
+    if (fetchCallCount === 2) {
+      assert.equal(authHeader, 'Bearer new-valid-token');
+      return new Response(
+        JSON.stringify({ files: [{ id: 'f-1', name: 'batch-1.json', mimeType: 'application/json' }] }),
+        { status: 200, headers: { 'Content-Type': 'application/json' } }
+      );
+    }
+
+    return new Response('Not found', { status: 404 });
+  }) as typeof fetch;
+
+  const transport = new RealGoogleDriveTransport('expired-token', {
+    customFetch: mockFetch,
+    tokenProvider: mockTokenProvider,
+  });
+
+  const files = await transport.listAppDataFiles();
+  assert.equal(files.length, 1);
+  assert.equal(files[0].id, 'f-1');
+  assert.equal(renewCallCount, 1, 'tokenProvider must be called once on 401');
+  assert.equal(fetchCallCount, 2, 'fetch must be retried with the renewed token');
+});
+
+test('SyncOrchestrator: Rejects authenticated sync in production without verified owner identity', async () => {
+  const origEnv = process.env.NODE_ENV;
+  try {
+    process.env.NODE_ENV = 'production';
+    const db = new LocalDatabase('test_db_prod_owner_check');
+    // Deliberately do NOT set owner identity on db
+    const mockTransport = {
+      listAppDataFiles: async () => [],
+      uploadBatchFile: async () => ({ fileId: '1', name: '1', mimeType: 'application/json' }),
+      downloadBatchFile: async () => '{}',
+    };
+
+    const sync = new SyncOrchestrator(db, mockTransport as any);
+    sync.setAuthorized(true);
+
+    await assert.rejects(
+      async () => {
+        await sync.triggerSync();
+      },
+      /Strict dataset ownership requires authenticated user owner identity in production/,
+      'Authenticated production sync must fail without owner identity'
+    );
+  } finally {
+    process.env.NODE_ENV = origEnv;
+  }
+});
+

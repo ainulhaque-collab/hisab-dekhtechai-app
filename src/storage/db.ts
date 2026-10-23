@@ -312,16 +312,41 @@ export class LocalDatabase {
     this.persistSync();
   }
 
+  private pendingPersistPromise: Promise<void> = Promise.resolve();
+  private lastPersistenceError: Error | null = null;
+
+  public getLastPersistenceError(): Error | null {
+    return this.lastPersistenceError;
+  }
+
+  /**
+   * Reliably awaits all in-flight asynchronous storage writes and re-throws any persisted errors.
+   */
+  public async waitForPendingWrites(): Promise<void> {
+    await this.pendingPersistPromise;
+    if (this.lastPersistenceError) {
+      throw this.lastPersistenceError;
+    }
+  }
+
   /**
    * Helper for internal synchronous mutating methods.
    * If a transaction is in progress, intermediate mutations are not persisted until commit.
+   * Never silently swallows durable persistence errors; reliably tracks promise and logs critical failures.
    */
-  private autoPersist(): void {
+  private autoPersist(): Promise<void> {
     if (!this.inTransaction) {
-      this.persist().catch((err) => {
-        console.warn('Auto-persist notice:', err);
-      });
+      this.pendingPersistPromise = this.persist()
+        .then(() => {
+          this.lastPersistenceError = null;
+        })
+        .catch((err) => {
+          this.lastPersistenceError = err;
+          console.error('[CRITICAL LocalDatabase Storage Write Error]:', err);
+        });
+      return this.pendingPersistPromise;
     }
+    return Promise.resolve();
   }
 
   // --- Atomic Database Transactions ---
@@ -742,7 +767,7 @@ export class LocalDatabase {
       color,
     };
     this.state.categories.set(cat.id, cat);
-    this.persist();
+    this.autoPersist();
     return cat;
   }
 
@@ -756,7 +781,7 @@ export class LocalDatabase {
     const cat = this.state.categories.get(categoryId);
     if (cat) {
       cat.archivedAt = new Date().toISOString();
-      this.persist();
+      this.autoPersist();
     }
   }
 
@@ -771,7 +796,7 @@ export class LocalDatabase {
       cat.name = name;
       if (nameEn !== undefined) cat.nameEn = nameEn;
       if (parentId !== undefined) cat.parentId = parentId;
-      this.persist();
+      this.autoPersist();
     }
   }
 
@@ -797,7 +822,7 @@ export class LocalDatabase {
       createdAt: new Date().toISOString(),
     };
     this.state.parties.set(id, party);
-    this.persist();
+    this.autoPersist();
     return party;
   }
 
@@ -821,7 +846,7 @@ export class LocalDatabase {
       if (updates.phone !== undefined) p.phone = updates.phone;
       if (updates.role !== undefined) p.role = updates.role;
       if (updates.notes !== undefined) p.notes = updates.notes;
-      this.persist();
+      this.autoPersist();
     }
   }
 
@@ -829,7 +854,7 @@ export class LocalDatabase {
     const p = this.state.parties.get(id);
     if (p) {
       p.archivedAt = new Date().toISOString();
-      this.persist();
+      this.autoPersist();
     }
   }
 
@@ -851,49 +876,56 @@ export class LocalDatabase {
     const opId = generateUUID();
     const reversalBalanced = buildReversalJournal(tx, opId, reason);
 
-    // Save reversal in local state
-    this.state.journalTransactions.set(reversalBalanced.transaction.id, {
-      ...reversalBalanced.transaction,
-      createdOpId: opId,
-      lines: reversalBalanced.lines,
-    });
-    for (const line of reversalBalanced.lines) {
-      this.state.journalLines.set(line.id, line);
+    // Atomic transaction boundary
+    await this.beginTransaction();
+    try {
+      // Save reversal in local state
+      this.state.journalTransactions.set(reversalBalanced.transaction.id, {
+        ...reversalBalanced.transaction,
+        createdOpId: opId,
+        lines: reversalBalanced.lines,
+      });
+      for (const line of reversalBalanced.lines) {
+        this.state.journalLines.set(line.id, line);
+      }
+
+      // Mark original transaction as deleted/voided
+      (tx as any).isDeleted = true;
+
+      // Queue sync operation in durable outbox
+      const payload = {
+        originalTransactionId: tx.id,
+        reversalTransactionId: reversalBalanced.transaction.id,
+        reason,
+      };
+      const op: SyncOperation = {
+        protocolVersion: 1,
+        ownerHash: this.getIdentity()?.ownerSubjectHash || 'owner',
+        deviceId: this.getDeviceId(),
+        seq: this.getNextDeviceSeq(),
+        operationId: opId,
+        entityId: tx.id,
+        type: 'journal.delete',
+        baseRevision: 'v1',
+        createdAtUtc: new Date().toISOString(),
+        payload,
+        contentSha256: await computeSha256(canonicalJson(payload)),
+      };
+
+      this.state.syncOperations.set(opId, op);
+      this.state.syncOutbox.set(opId, {
+        opId,
+        uploadedStatus: 'pending',
+        retryCount: 0,
+        createdAt: new Date().toISOString(),
+      });
+      this.state.appliedOperations.add(opId);
+
+      await this.commitTransaction();
+    } catch (err) {
+      await this.rollbackTransaction();
+      throw err;
     }
-
-    // Mark original transaction as deleted/voided
-    (tx as any).isDeleted = true;
-
-    // Queue sync operation in durable outbox
-    const payload = {
-      originalTransactionId: tx.id,
-      reversalTransactionId: reversalBalanced.transaction.id,
-      reason,
-    };
-    const op: SyncOperation = {
-      protocolVersion: 1,
-      ownerHash: this.getIdentity()?.ownerSubjectHash || 'owner',
-      deviceId: this.getDeviceId(),
-      seq: this.getNextDeviceSeq(),
-      operationId: opId,
-      entityId: tx.id,
-      type: 'journal.delete',
-      baseRevision: 'v1',
-      createdAtUtc: new Date().toISOString(),
-      payload,
-      contentSha256: await computeSha256(canonicalJson(payload)),
-    };
-
-    this.state.syncOperations.set(opId, op);
-    this.state.syncOutbox.set(opId, {
-      opId,
-      uploadedStatus: 'pending',
-      retryCount: 0,
-      createdAt: new Date().toISOString(),
-    });
-    this.state.appliedOperations.add(opId);
-
-    await this.persist();
   }
 
   /**
@@ -950,60 +982,67 @@ export class LocalDatabase {
       });
     }
 
-    // Save reversal
-    this.state.journalTransactions.set(reversalBalanced.transaction.id, {
-      ...reversalBalanced.transaction,
-      createdOpId: opId,
-      lines: reversalBalanced.lines,
-    });
-    for (const line of reversalBalanced.lines) {
-      this.state.journalLines.set(line.id, line);
+    // Atomic transaction boundary
+    await this.beginTransaction();
+    try {
+      // Save reversal
+      this.state.journalTransactions.set(reversalBalanced.transaction.id, {
+        ...reversalBalanced.transaction,
+        createdOpId: opId,
+        lines: reversalBalanced.lines,
+      });
+      for (const line of reversalBalanced.lines) {
+        this.state.journalLines.set(line.id, line);
+      }
+
+      // Save replacement
+      this.state.journalTransactions.set(replacementBalanced.transaction.id, {
+        ...replacementBalanced.transaction,
+        createdOpId: opId,
+        lines: replacementBalanced.lines,
+      });
+      for (const line of replacementBalanced.lines) {
+        this.state.journalLines.set(line.id, line);
+      }
+
+      // Mark original
+      (origTx as any).isReplacedBy = replacementBalanced.transaction.id;
+
+      // Queue sync operation
+      const payload = {
+        originalTransactionId: origTx.id,
+        reversalBalanced,
+        replacementBalanced,
+        note: cmd.note,
+      };
+      const op: SyncOperation = {
+        protocolVersion: 1,
+        ownerHash: this.getIdentity()?.ownerSubjectHash || 'owner',
+        deviceId: this.getDeviceId(),
+        seq: this.getNextDeviceSeq(),
+        operationId: opId,
+        entityId: origTx.id,
+        type: 'journal.correct',
+        baseRevision: 'v1',
+        createdAtUtc: new Date().toISOString(),
+        payload,
+        contentSha256: await computeSha256(canonicalJson(payload)),
+      };
+
+      this.state.syncOperations.set(opId, op);
+      this.state.syncOutbox.set(opId, {
+        opId,
+        uploadedStatus: 'pending',
+        retryCount: 0,
+        createdAt: new Date().toISOString(),
+      });
+      this.state.appliedOperations.add(opId);
+
+      await this.commitTransaction();
+    } catch (err) {
+      await this.rollbackTransaction();
+      throw err;
     }
-
-    // Save replacement
-    this.state.journalTransactions.set(replacementBalanced.transaction.id, {
-      ...replacementBalanced.transaction,
-      createdOpId: opId,
-      lines: replacementBalanced.lines,
-    });
-    for (const line of replacementBalanced.lines) {
-      this.state.journalLines.set(line.id, line);
-    }
-
-    // Mark original
-    (origTx as any).isReplacedBy = replacementBalanced.transaction.id;
-
-    // Queue sync operation
-    const payload = {
-      originalTransactionId: origTx.id,
-      reversalBalanced,
-      replacementBalanced,
-      note: cmd.note,
-    };
-    const op: SyncOperation = {
-      protocolVersion: 1,
-      ownerHash: this.getIdentity()?.ownerSubjectHash || 'owner',
-      deviceId: this.getDeviceId(),
-      seq: this.getNextDeviceSeq(),
-      operationId: opId,
-      entityId: origTx.id,
-      type: 'journal.correct',
-      baseRevision: 'v1',
-      createdAtUtc: new Date().toISOString(),
-      payload,
-      contentSha256: await computeSha256(canonicalJson(payload)),
-    };
-
-    this.state.syncOperations.set(opId, op);
-    this.state.syncOutbox.set(opId, {
-      opId,
-      uploadedStatus: 'pending',
-      retryCount: 0,
-      createdAt: new Date().toISOString(),
-    });
-    this.state.appliedOperations.add(opId);
-
-    await this.persist();
   }
 
   public getTransactions(workspaceId: UUID): JournalTransaction[] {
@@ -1169,7 +1208,7 @@ export class LocalDatabase {
     return ops.sort((a, b) => a.seq - b.seq);
   }
 
-  public markOutboxUploaded(opIds: UUID[], remoteFileId: string): void {
+  public async markOutboxUploaded(opIds: UUID[], remoteFileId: string): Promise<void> {
     for (const id of opIds) {
       const entry = this.state.syncOutbox.get(id);
       if (entry) {
@@ -1178,10 +1217,10 @@ export class LocalDatabase {
         entry.lastError = null;
       }
     }
-    this.persist();
+    await this.persist();
   }
 
-  public markOutboxFailed(opIds: UUID[], errorMsg: string): void {
+  public async markOutboxFailed(opIds: UUID[], errorMsg: string): Promise<void> {
     for (const id of opIds) {
       const entry = this.state.syncOutbox.get(id);
       if (entry) {
@@ -1190,7 +1229,7 @@ export class LocalDatabase {
         entry.lastError = errorMsg;
       }
     }
-    this.persist();
+    await this.persist();
   }
 
   public getSyncOutboxEntries(): SyncOutboxEntry[] {
@@ -1201,17 +1240,17 @@ export class LocalDatabase {
     return Array.from(this.state.conflicts.values());
   }
 
-  public addConflict(conflict: ConflictRecord): void {
+  public async addConflict(conflict: ConflictRecord): Promise<void> {
     this.state.conflicts.set(conflict.id, conflict);
-    this.persist();
+    await this.persist();
   }
 
-  public resolveConflict(conflictId: UUID, resolutionOpId: UUID): void {
+  public async resolveConflict(conflictId: UUID, resolutionOpId: UUID): Promise<void> {
     const c = this.state.conflicts.get(conflictId);
     if (c) {
       c.status = 'resolved';
       c.resolutionOpId = resolutionOpId;
-      this.persist();
+      await this.persist();
     }
   }
 
@@ -1221,7 +1260,7 @@ export class LocalDatabase {
 
   public setBudget(budget: Budget): void {
     this.state.budgets.set(budget.id, budget);
-    this.persist();
+    this.autoPersist();
   }
 
   public getRecurringRules(workspaceId: UUID): RecurringRule[] {
@@ -1232,16 +1271,16 @@ export class LocalDatabase {
 
   public setRecurringRule(rule: RecurringRule): void {
     this.state.recurringRules.set(rule.id, rule);
-    this.persist();
+    this.autoPersist();
   }
 
   public getReceiptBlob(sha256: string): ReceiptBlob | undefined {
     return this.state.receiptBlobs.get(sha256);
   }
 
-  public storeReceiptBlob(blob: ReceiptBlob): void {
+  public async storeReceiptBlob(blob: ReceiptBlob): Promise<void> {
     this.state.receiptBlobs.set(blob.sha256, blob);
-    this.persist();
+    await this.persist();
   }
 
   // --- Snapshot and Non-destructive Migration Safeguards ---

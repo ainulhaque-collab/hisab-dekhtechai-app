@@ -32,6 +32,7 @@ export class RealGoogleDriveTransport implements DriveTransport {
   private uploadUrl = 'https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart';
   private fetchFn: typeof fetch = (...args) => fetch(...args);
   private initialRetryDelayMs = 500;
+  private tokenProvider?: () => Promise<string>;
 
   constructor(
     accessToken: string,
@@ -40,6 +41,7 @@ export class RealGoogleDriveTransport implements DriveTransport {
       uploadUrl?: string;
       customFetch?: typeof fetch;
       initialRetryDelayMs?: number;
+      tokenProvider?: () => Promise<string>;
     }
   ) {
     this.accessToken = accessToken;
@@ -47,6 +49,7 @@ export class RealGoogleDriveTransport implements DriveTransport {
     if (options?.uploadUrl) this.uploadUrl = options.uploadUrl;
     if (options?.customFetch) this.fetchFn = options.customFetch;
     if (options?.initialRetryDelayMs !== undefined) this.initialRetryDelayMs = options.initialRetryDelayMs;
+    if (options?.tokenProvider) this.tokenProvider = options.tokenProvider;
   }
 
   public setAccessToken(token: string): void {
@@ -149,6 +152,27 @@ export class RealGoogleDriveTransport implements DriveTransport {
     while (true) {
       try {
         const res = await this.fetchFn(input, init);
+        if (res.status === 401 && this.tokenProvider && attempt < maxRetries) {
+          attempt++;
+          try {
+            const freshToken = await this.tokenProvider();
+            this.accessToken = freshToken;
+            if (init && init.headers) {
+              if (init.headers instanceof Headers) {
+                init.headers.set('Authorization', `Bearer ${freshToken}`);
+              } else if (Array.isArray(init.headers)) {
+                const item = init.headers.find(([k]) => k.toLowerCase() === 'authorization');
+                if (item) item[1] = `Bearer ${freshToken}`;
+                else init.headers.push(['Authorization', `Bearer ${freshToken}`]);
+              } else {
+                (init.headers as any)['Authorization'] = `Bearer ${freshToken}`;
+              }
+            }
+            continue;
+          } catch (e) {
+            console.warn('Token provider failed to refresh token on 401:', e);
+          }
+        }
         if (res.status === 429 || (res.status >= 500 && res.status <= 599)) {
           attempt++;
           if (attempt >= maxRetries) return res;
@@ -241,11 +265,27 @@ export class SimulatedGoogleDriveTransport implements DriveTransport {
     | 'upload_interrupted'
     | 'network_disconnected' = 'none';
 
+  constructor() {
+    this.assertNotProduction();
+  }
+
+  private assertNotProduction(): void {
+    const isProd =
+      (typeof process !== 'undefined' && process.env && process.env.NODE_ENV === 'production') ||
+      (typeof import.meta !== 'undefined' && (import.meta as any).env?.PROD === true);
+    if (isProd) {
+      throw new Error(
+        'Security Error: Simulated Google Drive cloud storage is strictly forbidden in production mode.'
+      );
+    }
+  }
+
   public static clearSharedCloud(): void {
     SimulatedGoogleDriveTransport.sharedAppDataFolder.clear();
   }
 
   public async listAppDataFiles(): Promise<DriveFileMetadata[]> {
+    this.assertNotProduction();
     this.checkSimulatedFault();
     return Array.from(SimulatedGoogleDriveTransport.sharedAppDataFolder.values()).map((v) => v.meta);
   }

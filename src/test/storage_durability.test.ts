@@ -236,3 +236,134 @@ test('LocalDatabase: Double-entry trial balance and independent ledger balance v
   assert.equal(audit.netIncome, '748500');
   assert.equal(audit.totalAssetBalance, '748500');
 });
+
+test('LocalDatabase fault-injection: deleteTransaction rolls back cleanly if durable persist fails', async () => {
+  const driver = new LocalStorageFallbackDriver();
+  const db = new LocalDatabase('test_db_fault_delete', driver);
+  const wsId = 'ws-personal-default';
+
+  const opId = generateUUID();
+  const journal = buildExpenseJournal({
+    workspaceId: wsId,
+    assetAccountId: 'acc-cash-1',
+    expenseCategoryId: 'cat-food',
+    amountMinor: '50000',
+    effectiveDate: '2026-10-23',
+    note: 'Initial food expense',
+    opId,
+  });
+
+  const op = {
+    protocolVersion: 1 as const,
+    ownerHash: 'test-owner',
+    deviceId: db.getDeviceId(),
+    seq: db.getNextDeviceSeq(),
+    operationId: opId,
+    entityId: journal.transaction.id,
+    type: 'journal.post' as const,
+    createdAtUtc: new Date().toISOString(),
+    payload: { balancedJournal: journal },
+    contentSha256: await computeSha256(canonicalJson({ balancedJournal: journal })),
+  };
+
+  // Initially commit successfully
+  await db.commitJournalWithOutbox(journal, op);
+  assert.ok(db.getTransaction(journal.transaction.id));
+
+  // Arm fault injection on durable storage commit
+  driver.faultInjection = 'throw_on_commit';
+
+  // Attempting to delete must reject and roll back cleanly
+  await assert.rejects(
+    async () => {
+      await db.deleteTransaction(journal.transaction.id);
+    },
+    /fault injection/,
+    'deleteTransaction must throw when durable storage commit fails'
+  );
+
+  // Invariant: transaction must STILL exist and not be marked deleted
+  const tx = db.getTransaction(journal.transaction.id);
+  assert.ok(tx, 'Transaction must not be deleted if durable write fails');
+  assert.equal((tx as any)?.isDeleted, undefined, 'Transaction must not be marked deleted');
+  assert.equal(tx?.lines.length, 2, 'Journal lines must remain intact after rollback');
+});
+
+test('LocalDatabase fault-injection: editTransaction rolls back cleanly if durable persist fails', async () => {
+  const driver = new LocalStorageFallbackDriver();
+  const db = new LocalDatabase('test_db_fault_edit', driver);
+  const wsId = 'ws-personal-default';
+
+  const opId = generateUUID();
+  const journal = buildExpenseJournal({
+    workspaceId: wsId,
+    assetAccountId: 'acc-cash-1',
+    expenseCategoryId: 'cat-food',
+    amountMinor: '30000',
+    effectiveDate: '2026-10-23',
+    note: 'Original Note',
+    opId,
+  });
+
+  const op = {
+    protocolVersion: 1 as const,
+    ownerHash: 'test-owner',
+    deviceId: db.getDeviceId(),
+    seq: db.getNextDeviceSeq(),
+    operationId: opId,
+    entityId: journal.transaction.id,
+    type: 'journal.post' as const,
+    createdAtUtc: new Date().toISOString(),
+    payload: { balancedJournal: journal },
+    contentSha256: await computeSha256(canonicalJson({ balancedJournal: journal })),
+  };
+
+  // Initially commit successfully
+  await db.commitJournalWithOutbox(journal, op);
+
+  // Arm fault injection
+  driver.faultInjection = 'throw_on_commit';
+
+  // Attempt to edit must reject and roll back
+  await assert.rejects(
+    async () => {
+      await db.editTransaction(journal.transaction.id, {
+        amountMinor: '30000',
+        effectiveDate: '2026-10-23',
+        assetAccountId: 'acc-cash-1',
+        categoryId: 'cat-food',
+        note: 'Tampered Note',
+      });
+    },
+    /fault injection/,
+    'editTransaction must throw when durable storage commit fails'
+  );
+
+  // Invariant: original note must be preserved
+  const tx = db.getTransaction(journal.transaction.id);
+  assert.equal(tx?.note, 'Original Note', 'Note must not be modified if durable write fails');
+  assert.equal((tx as any)?.isReplacedBy, undefined, 'isReplacedBy must not be set after rollback');
+});
+
+test('LocalDatabase: waitForPendingWrites tracks background entity mutations and surfaces durable errors', async () => {
+  const driver = new LocalStorageFallbackDriver();
+  const db = new LocalDatabase('test_db_wait_pending', driver);
+
+  // Arm fault injection for setItem
+  driver.faultInjection = 'throw_on_write';
+
+  // Create a category (triggers autoPersist)
+  db.createCategory('cat-test-error', 'Test Category', 'expense');
+
+  // waitForPendingWrites must throw the error
+  await assert.rejects(
+    async () => {
+      await db.waitForPendingWrites();
+    },
+    /fault injection/,
+    'waitForPendingWrites must surface durable persistence failure'
+  );
+
+  assert.ok(db.lastPersistenceError, 'lastPersistenceError must be recorded on the database instance');
+});
+

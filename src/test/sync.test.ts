@@ -454,19 +454,42 @@ test('Google Drive Sync: Duplicate batch upload prevention', async () => {
   };
   await db.commitJournalWithOutbox(journal, op);
 
-  // Simulate that the batch already exists on Drive
-  const existingFileName = `hsc-v1-ops-dev-dup-test-000000000001-000000000001-existing-batch-uuid.json`;
-  await transport.uploadBatchFile(existingFileName, '{}');
-  const filesBefore = await transport.listAppDataFiles();
-  assert.equal(filesBefore.length, 1);
+  // Step 1: Verify that a file with matching sequence prefix but MISMATCHED / corrupted content
+  // is NOT accepted as duplicate!
+  const mismatchedFileName = `hsc-v1-ops-dev-dup-test-000000000001-000000000001-corrupt-uuid.json`;
+  await transport.uploadBatchFile(mismatchedFileName, JSON.stringify({ corrupt: true }));
 
-  // Trigger sync on device
+  // Step 2: Upload the verified matching batch to Drive (as if an earlier upload completed before receipt)
+  const matchingBatchId = generateUUID();
+  const batchData = {
+    protocolVersion: 1 as const,
+    ownerHash: 'owner-dup-test',
+    deviceId: 'dev-dup-test',
+    batchId: matchingBatchId,
+    fromSeq: 1,
+    toSeq: 1,
+    operations: [op],
+    createdAtUtc: new Date().toISOString(),
+  };
+  const batchSha256 = await SyncOrchestrator.computeBatchHash(batchData);
+  const fullBatch = {
+    ...batchData,
+    batchSha256,
+    byteLength: JSON.stringify(batchData).length,
+  };
+  const verifiedFileName = `hsc-v1-ops-dev-dup-test-000000000001-000000000001-${matchingBatchId}.json`;
+  await transport.uploadBatchFile(verifiedFileName, JSON.stringify(fullBatch, null, 2));
+
+  const filesBefore = await transport.listAppDataFiles();
+  assert.equal(filesBefore.length, 2);
+
+  // Trigger sync on device:
+  // Must verify remote content and hash against the matching batch, and mark outbox uploaded without uploading a 3rd file!
   await sync.triggerSync();
 
-  // Outbox operations must be marked uploaded, without uploading a duplicate file
   assert.equal(db.getPendingOutbox().length, 0, 'Pending outbox must be marked uploaded');
   const filesAfter = await transport.listAppDataFiles();
-  assert.equal(filesAfter.length, 1, 'No duplicate file should have been uploaded');
+  assert.equal(filesAfter.length, 2, 'No duplicate file should have been uploaded');
 });
 
 test('Google Drive Sync: Interrupted upload maintains pending outbox and recovers on retry', async () => {

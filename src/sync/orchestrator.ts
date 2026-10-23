@@ -190,6 +190,19 @@ export class SyncOrchestrator {
       return;
     }
 
+    const localOwner = this.db.getIdentity()?.ownerSubjectHash;
+    const isProd =
+      (typeof process !== 'undefined' && process.env && process.env.NODE_ENV === 'production') ||
+      (typeof import.meta !== 'undefined' && (import.meta as any).env?.PROD === true);
+
+    if (this.isAuthorized && isProd && !localOwner) {
+      this.currentState = 'auth_required';
+      this.lastError =
+        'Security Error: Strict dataset ownership requires authenticated user owner identity in production.';
+      this.notifyListeners();
+      throw new Error(this.lastError);
+    }
+
     this.isSyncInProgress = true;
     this.currentState = 'syncing';
     this.lastError = null;
@@ -244,9 +257,20 @@ export class SyncOrchestrator {
     const toSeq = pendingOps[pendingOps.length - 1].seq;
     const batchId = generateUUID();
 
+    const localOwner = this.db.getIdentity()?.ownerSubjectHash;
+    const isProd =
+      (typeof process !== 'undefined' && process.env && process.env.NODE_ENV === 'production') ||
+      (typeof import.meta !== 'undefined' && (import.meta as any).env?.PROD === true);
+
+    if (this.isAuthorized && isProd && !localOwner) {
+      throw new Error(
+        'Security Error: Cannot sync authenticated dataset in production without verified owner identity.'
+      );
+    }
+
     const batchData = {
       protocolVersion: 1 as const,
-      ownerHash: this.db.getIdentity()?.ownerSubjectHash || 'owner',
+      ownerHash: localOwner || 'owner',
       deviceId,
       batchId,
       fromSeq,
@@ -268,18 +292,91 @@ export class SyncOrchestrator {
       toSeq
     ).padStart(12, '0')}-${batchId}.json`;
 
-    // Duplicate prevention: check if this identical batch was already uploaded
+    // Robust Duplicate Prevention: Verify candidate remote file content, hash, and operation IDs
     try {
       const remoteFiles = await this.transport.listAppDataFiles();
-      const duplicate = remoteFiles.find(
+      const candidates = remoteFiles.filter(
         (f) =>
           f.name === fileName ||
-          f.name.startsWith(`hsc-v1-ops-${deviceId}-${String(fromSeq).padStart(12, '0')}-${String(toSeq).padStart(12, '0')}`)
+          f.name.startsWith(
+            `hsc-v1-ops-${deviceId}-${String(fromSeq).padStart(12, '0')}-${String(toSeq).padStart(12, '0')}`
+          )
       );
-      if (duplicate) {
-        const opIds = pendingOps.map((op) => op.operationId);
-        this.db.markOutboxUploaded(opIds, duplicate.id);
-        return;
+
+      for (const candidate of candidates) {
+        try {
+          const remoteRaw = await this.transport.downloadBatchFile(candidate.id);
+          const candidateBatch: SyncBatch = JSON.parse(remoteRaw);
+
+          // 1. Verify candidate has immutable batch identity and valid protocol
+          if (
+            !candidateBatch ||
+            candidateBatch.protocolVersion !== 1 ||
+            !candidateBatch.batchId ||
+            typeof candidateBatch.batchId !== 'string' ||
+            !candidateBatch.batchSha256
+          ) {
+            continue;
+          }
+
+          // 2. Verify candidate remote file's own cryptographic hash integrity
+          const candidateDataToHash = {
+            protocolVersion: candidateBatch.protocolVersion,
+            ownerHash: candidateBatch.ownerHash,
+            deviceId: candidateBatch.deviceId,
+            batchId: candidateBatch.batchId,
+            fromSeq: candidateBatch.fromSeq,
+            toSeq: candidateBatch.toSeq,
+            operations: candidateBatch.operations,
+            createdAtUtc: candidateBatch.createdAtUtc,
+          };
+          const computedHash = await SyncOrchestrator.computeBatchHash(candidateDataToHash);
+          if (computedHash !== candidateBatch.batchSha256) {
+            console.warn(`Candidate batch ${candidate.name} has invalid hash integrity.`);
+            continue;
+          }
+
+          // 3. Verify deviceId and sequence range match
+          if (
+            candidateBatch.deviceId !== deviceId ||
+            candidateBatch.fromSeq !== fromSeq ||
+            candidateBatch.toSeq !== toSeq
+          ) {
+            continue;
+          }
+
+          // 4. Verify dataset owner matches if authenticated
+          if (localOwner && candidateBatch.ownerHash !== localOwner) {
+            continue;
+          }
+
+          // 5. Verify operations count, IDs, sequence numbers, and content SHA-256
+          if (
+            !Array.isArray(candidateBatch.operations) ||
+            candidateBatch.operations.length !== pendingOps.length
+          ) {
+            continue;
+          }
+
+          const allOpsMatch = pendingOps.every((pendingOp, idx) => {
+            const remoteOp = candidateBatch.operations[idx];
+            return (
+              remoteOp &&
+              remoteOp.operationId === pendingOp.operationId &&
+              remoteOp.seq === pendingOp.seq &&
+              remoteOp.contentSha256 === pendingOp.contentSha256
+            );
+          });
+
+          if (allOpsMatch) {
+            // Verified identical immutable batch is already safely present on Drive!
+            const opIds = pendingOps.map((op) => op.operationId);
+            await this.db.markOutboxUploaded(opIds, candidate.id);
+            return;
+          }
+        } catch (candidateErr) {
+          console.warn(`Could not verify candidate duplicate file ${candidate.name}:`, candidateErr);
+        }
       }
     } catch (e) {
       // Fall through to upload if remote listing is not available
@@ -293,7 +390,7 @@ export class SyncOrchestrator {
 
     // Atomically mark outbox operations as uploaded
     const opIds = pendingOps.map((op) => op.operationId);
-    this.db.markOutboxUploaded(opIds, uploadReceipt.fileId);
+    await this.db.markOutboxUploaded(opIds, uploadReceipt.fileId);
   }
 
   /**
@@ -321,7 +418,13 @@ export class SyncOrchestrator {
 
         // Validate dataset owner identity against local owner
         const localOwner = this.db.getIdentity()?.ownerSubjectHash;
-        if (localOwner && batch.ownerHash && batch.ownerHash !== localOwner) {
+        if (!batch.ownerHash) {
+          console.warn(
+            `Security Warning: Remote batch ${file.name} is missing ownerHash. Skipping unowned batch.`
+          );
+          continue;
+        }
+        if (localOwner && batch.ownerHash !== localOwner) {
           console.warn(
             `Security Warning: Remote batch ${file.name} belongs to owner ${batch.ownerHash}, expected ${localOwner}. Skipping foreign batch.`
           );
@@ -355,8 +458,14 @@ export class SyncOrchestrator {
     for (const op of batch.operations) {
       // 1. Validate dataset owner identity on operation
       const localOwner = this.db.getIdentity()?.ownerSubjectHash;
-      if (localOwner && op.ownerHash && op.ownerHash !== localOwner) {
-        console.warn(`Security Warning: Operation ${op.operationId} owner mismatch. Skipping.`);
+      if (!op.ownerHash) {
+        console.warn(`Security Warning: Operation ${op.operationId} missing ownerHash. Skipping.`);
+        continue;
+      }
+      if (localOwner && op.ownerHash !== localOwner) {
+        console.warn(
+          `Security Warning: Operation ${op.operationId} owner mismatch (${op.ownerHash} != ${localOwner}). Skipping.`
+        );
         continue;
       }
 
@@ -447,7 +556,7 @@ export class SyncOrchestrator {
               ],
             },
           };
-          this.db.addConflict(conflict);
+          await this.db.addConflict(conflict);
           break;
         }
 

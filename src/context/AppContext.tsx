@@ -77,6 +77,46 @@ interface AppContextType {
 const AppContext = createContext<AppContextType | null>(null);
 
 // Device database pool to simulate separate local SQLite databases on different phones
+const isProduction = (): boolean => {
+  return (
+    (typeof process !== 'undefined' && process.env && process.env.NODE_ENV === 'production') ||
+    (typeof import.meta !== 'undefined' && (import.meta as any).env?.PROD === true)
+  );
+};
+
+function getProductionDeviceProfile(): DeviceProfile {
+  let deviceId: string | null = null;
+  let deviceName = 'Hisab Device';
+  if (typeof localStorage !== 'undefined') {
+    try {
+      deviceId = localStorage.getItem('hisab_production_device_id_v1');
+      const savedName = localStorage.getItem('hisab_production_device_name_v1');
+      if (savedName) deviceName = savedName;
+    } catch {}
+  }
+  if (!deviceId) {
+    deviceId = generateUUID();
+    if (typeof localStorage !== 'undefined') {
+      try {
+        localStorage.setItem('hisab_production_device_id_v1', deviceId);
+      } catch {}
+    }
+  }
+  if (typeof navigator !== 'undefined') {
+    if (Capacitor.isNativePlatform()) {
+      deviceName = `Android Device (${Capacitor.getPlatform()})`;
+    } else {
+      const isMobile = /Android|iPhone|iPad|Mobile/i.test(navigator.userAgent);
+      deviceName = isMobile ? 'Mobile Browser' : 'Desktop Browser';
+    }
+  }
+  return {
+    id: deviceId,
+    name: deviceName,
+    platform: Capacitor.isNativePlatform() ? 'android' : 'web',
+  };
+}
+
 const deviceDatabases: Map<string, LocalDatabase> = new Map();
 
 function getOrCreateDeviceDb(deviceId: string, deviceName: string): LocalDatabase {
@@ -90,14 +130,31 @@ function getOrCreateDeviceDb(deviceId: string, deviceName: string): LocalDatabas
 }
 
 export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
-  const [currentDevice, setCurrentDevice] = useState<DeviceProfile>(SIMULATED_DEVICES[0]);
+  const prod = isProduction();
+  const initialDevice: DeviceProfile = prod ? getProductionDeviceProfile() : SIMULATED_DEVICES[0];
+  const [currentDevice, setCurrentDevice] = useState<DeviceProfile>(initialDevice);
   const [db, setDb] = useState<LocalDatabase>(() =>
-    getOrCreateDeviceDb(SIMULATED_DEVICES[0].id, SIMULATED_DEVICES[0].name)
+    prod
+      ? (() => {
+          const mainDb = new LocalDatabase('hisab_dekhtechai_db');
+          mainDb.setDeviceIdentity(initialDevice.id, initialDevice.name);
+          return mainDb;
+        })()
+      : getOrCreateDeviceDb(SIMULATED_DEVICES[0].id, SIMULATED_DEVICES[0].name)
   );
 
-  const sharedTransport = useMemo(() => new SimulatedGoogleDriveTransport(), []);
-  const [sync, setSync] = useState<SyncOrchestrator>(() => new SyncOrchestrator(db, sharedTransport));
   const auth = useMemo(() => new GoogleAuthManager(), []);
+  const sharedTransport = useMemo(() => {
+    if (prod) {
+      // In production mode, never instantiate simulated cloud storage
+      return new RealGoogleDriveTransport('', {
+        tokenProvider: () => auth.getValidAccessToken(),
+      });
+    }
+    return new SimulatedGoogleDriveTransport();
+  }, [prod, auth]);
+
+  const [sync, setSync] = useState<SyncOrchestrator>(() => new SyncOrchestrator(db, sharedTransport));
 
   const [currentWorkspaceId, setCurrentWorkspaceId] = useState<UUID>('ws-personal-default');
   const [workspaces, setWorkspaces] = useState<Workspace[]>([]);
@@ -176,8 +233,12 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     refreshState();
     const currentProf = auth.getProfile();
     const isRealGoogle = auth.isRealGoogleAuthenticated();
-    if (isRealGoogle && currentProf?.accessToken && !auth.isTokenExpired()) {
-      sync.setTransport(new RealGoogleDriveTransport(currentProf.accessToken));
+    if (isRealGoogle && currentProf?.accessToken) {
+      sync.setTransport(
+        new RealGoogleDriveTransport(currentProf.accessToken, {
+          tokenProvider: () => auth.getValidAccessToken(),
+        })
+      );
       sync.setAuthorized(true);
     } else {
       sync.setAuthorized(false);
@@ -189,12 +250,48 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     return unsub;
   }, [db, sync, currentWorkspaceId, userProfile?.accessToken]);
 
+  // Automatic sync on network connectivity restoration
+  useEffect(() => {
+    const handleOnline = () => {
+      console.info('[Network] Connectivity restored. Automatically triggering sync.');
+      setIsOnlineState(true);
+      sync.setOnline(true);
+      if (auth.isRealGoogleAuthenticated()) {
+        sync.triggerSync().catch((err) => {
+          console.warn('[Auto-sync error on online restoration]:', err);
+        });
+      }
+    };
+
+    const handleOffline = () => {
+      console.info('[Network] Connection lost. Switching to offline mode.');
+      setIsOnlineState(false);
+      sync.setOnline(false);
+    };
+
+    if (typeof window !== 'undefined') {
+      window.addEventListener('online', handleOnline);
+      window.addEventListener('offline', handleOffline);
+      return () => {
+        window.removeEventListener('online', handleOnline);
+        window.removeEventListener('offline', handleOffline);
+      };
+    }
+  }, [sync, auth]);
+
   const switchDevice = async (dev: DeviceProfile) => {
+    if (isProduction()) {
+      console.warn('Security: Simulated device switching is forbidden in production mode.');
+      return;
+    }
     const targetDb = getOrCreateDeviceDb(dev.id, dev.name);
     const isRealGoogle = auth.isRealGoogleAuthenticated();
-    const targetTransport = isRealGoogle && userProfile?.accessToken && !auth.isTokenExpired()
-      ? new RealGoogleDriveTransport(userProfile.accessToken)
-      : sharedTransport;
+    const targetTransport =
+      isRealGoogle && userProfile?.accessToken && !auth.isTokenExpired()
+        ? new RealGoogleDriveTransport(userProfile.accessToken, {
+            tokenProvider: () => auth.getValidAccessToken(),
+          })
+        : sharedTransport;
     const targetSync = new SyncOrchestrator(targetDb, targetTransport);
     targetSync.setOnline(isOnline);
     if (!isRealGoogle) {
@@ -212,6 +309,11 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   const setIsOnline = (online: boolean) => {
     setIsOnlineState(online);
     sync.setOnline(online);
+    if (online) {
+      sync.triggerSync().catch((err) => {
+        console.warn('[Auto-sync error on manual online toggle]:', err);
+      });
+    }
   };
 
   const triggerManualSync = async () => {
