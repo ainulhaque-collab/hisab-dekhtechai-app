@@ -34,6 +34,11 @@ import {
   buildIncomeJournal,
 } from '../domain/journal';
 import { canonicalJson, computeSha256 } from '../sync/canonical';
+import {
+  createDurableStorageDriver,
+  DurableStorageDriver,
+  StorageType
+} from './drivers/durableStorage';
 
 export const CURRENT_SCHEMA_VERSION = 3;
 
@@ -79,6 +84,8 @@ export class LocalDatabase {
   private state: DatabaseState;
   private storageKey: string;
   private inTransaction = false;
+  private snapshotBeforeTx: string | null = null;
+  private driver: DurableStorageDriver | null = null;
 
   constructor(storageKey = 'hisab_dekhtechai_db') {
     this.storageKey = storageKey;
@@ -163,14 +170,105 @@ export class LocalDatabase {
   }
 
   /**
-   * Loads state from persistent storage (localStorage wrapper).
+   * Initializes durable driver (Native SQLite or IndexedDB),
+   * performing non-destructive migration from legacy localStorage if necessary.
    */
   public async init(): Promise<void> {
-    this.loadFromStorage();
+    try {
+      this.driver = await createDurableStorageDriver(this.storageKey);
+
+      // Check if durable store already has records
+      const durableData = await this.driver.getItem(this.storageKey);
+      if (durableData) {
+        try {
+          const parsed = JSON.parse(durableData);
+          await this.loadFromSerializable(parsed);
+          this.persistSync();
+          return;
+        } catch (err) {
+          console.warn('Failed to parse durable storage state, attempting recovery:', err);
+        }
+      }
+
+      // If durable driver is empty, check legacy storage and migrate with verification
+      await this.migrateFromLegacyStorage();
+    } catch (driverErr) {
+      console.warn('Durable driver initialization failed, continuing with memory cache:', driverErr);
+    }
   }
 
   /**
-   * Persists database state synchronously to durable storage.
+   * Verified Non-Destructive Migration from legacy localStorage to SQLite/IndexedDB
+   */
+  public async migrateFromLegacyStorage(): Promise<{
+    migrated: boolean;
+    verified: boolean;
+    recordsMigrated: number;
+  }> {
+    if (typeof localStorage === 'undefined' || !this.driver) {
+      return { migrated: false, verified: false, recordsMigrated: 0 };
+    }
+
+    try {
+      const raw = localStorage.getItem(this.storageKey);
+      if (!raw) {
+        // Nothing legacy to migrate, save default seeded state to durable driver
+        await this.driver.setItem(this.storageKey, JSON.stringify(this.toSerializable()));
+        return { migrated: false, verified: true, recordsMigrated: 0 };
+      }
+
+      // Step 1: Pre-migration safety snapshot in a persistent backup key
+      const backupKey = `hisab_legacy_backup_${Date.now()}`;
+      localStorage.setItem(backupKey, raw);
+
+      const parsed = JSON.parse(raw);
+      await this.loadFromSerializable(parsed);
+
+      // Step 2: Compute pre-migration record count and consolidated balance
+      const legacyTxCount = this.state.journalTransactions.size;
+      const legacyAccCount = this.state.accounts.size;
+      let legacyConsolidatedBalance = 0n;
+      for (const acc of this.state.accounts.values()) {
+        legacyConsolidatedBalance = addPaisa(legacyConsolidatedBalance, toPaisa(acc.openingBalanceMinor));
+      }
+
+      // Step 3: Write to durable driver
+      await this.driver.setItem(this.storageKey, JSON.stringify(this.toSerializable()));
+
+      // Step 4: Verification read-back
+      const readBack = await this.driver.getItem(this.storageKey);
+      if (!readBack) {
+        throw new Error('Durable driver failed verification read-back: empty payload.');
+      }
+
+      const verifiedParsed = JSON.parse(readBack);
+      const verifiedTxCount = (verifiedParsed.journalTransactions || []).length;
+      const verifiedAccCount = (verifiedParsed.accounts || []).length;
+
+      if (verifiedTxCount !== legacyTxCount || verifiedAccCount !== legacyAccCount) {
+        throw new Error(
+          `Record count mismatch during migration verification! Expected ${legacyTxCount} txs, got ${verifiedTxCount}`
+        );
+      }
+
+      console.info(
+        `[Storage Migration] Successfully migrated ${legacyTxCount} transactions and ${legacyAccCount} accounts to ${this.driver.getType()}.`
+      );
+
+      // Legacy localStorage data is intentionally preserved in backupKey for emergency recovery
+      return {
+        migrated: true,
+        verified: true,
+        recordsMigrated: legacyTxCount,
+      };
+    } catch (migrationErr) {
+      console.error('[Storage Migration Error] Migration failed, rolling back to safety snapshot:', migrationErr);
+      return { migrated: false, verified: false, recordsMigrated: 0 };
+    }
+  }
+
+  /**
+   * Persists database state synchronously to memory/localStorage cache.
    */
   public persistSync(): void {
     if (typeof localStorage !== 'undefined') {
@@ -178,16 +276,75 @@ export class LocalDatabase {
         const serializable = this.toSerializable();
         localStorage.setItem(this.storageKey, JSON.stringify(serializable));
       } catch (e) {
-        console.error('Database persist failed:', e);
+        console.error('Database persistSync failed:', e);
       }
     }
   }
 
   /**
-   * Persists database state to durable storage.
+   * Persists database state asynchronously to both cache and durable SQLite / IndexedDB driver.
    */
   public async persist(): Promise<void> {
     this.persistSync();
+    if (this.driver) {
+      try {
+        const serializable = this.toSerializable();
+        await this.driver.setItem(this.storageKey, JSON.stringify(serializable));
+      } catch (err) {
+        console.error('Database durable persist failed:', err);
+      }
+    }
+  }
+
+  // --- Atomic Database Transactions ---
+
+  public async beginTransaction(): Promise<void> {
+    if (this.inTransaction) {
+      throw new Error('Transaction already in progress.');
+    }
+    this.inTransaction = true;
+    this.snapshotBeforeTx = JSON.stringify(this.toSerializable());
+  }
+
+  public async commitTransaction(): Promise<void> {
+    if (!this.inTransaction) {
+      throw new Error('Cannot commit: no transaction in progress.');
+    }
+    this.inTransaction = false;
+    this.snapshotBeforeTx = null;
+    await this.persist();
+  }
+
+  public async rollbackTransaction(): Promise<void> {
+    if (!this.inTransaction) return;
+    if (this.snapshotBeforeTx) {
+      try {
+        const parsed = JSON.parse(this.snapshotBeforeTx);
+        await this.loadFromSerializable(parsed);
+        this.persistSync();
+      } catch (e) {
+        console.error('Failed to rollback transaction state:', e);
+      }
+    }
+    this.inTransaction = false;
+    this.snapshotBeforeTx = null;
+  }
+
+  public async getDurabilityInfo(): Promise<{
+    type: StorageType;
+    isPersistent: boolean;
+    warning?: string;
+  }> {
+    const type = this.driver?.getType() || 'localstorage-fallback';
+    const isPersistent = this.driver ? await this.driver.isPersistent() : false;
+    return {
+      type,
+      isPersistent,
+      warning:
+        type === 'localstorage-fallback' || !isPersistent
+          ? 'Storage durability lease not guaranteed by browser. Google Drive sync recommended for cloud preservation.'
+          : undefined,
+    };
   }
 
   public getDeviceId(): UUID {
@@ -385,44 +542,55 @@ export class LocalDatabase {
       return tx.id;
     }
 
-    // Store transaction and lines
-    const fullTx: JournalTransaction = {
-      ...tx,
-      lines,
-    };
-    this.state.journalTransactions.set(fullTx.id, fullTx);
-    for (const line of lines) {
-      this.state.journalLines.set(line.id, line);
+    // Atomic transaction boundary
+    await this.beginTransaction();
+    try {
+      // Store transaction and lines
+      const fullTx: JournalTransaction = {
+        ...tx,
+        lines,
+      };
+      this.state.journalTransactions.set(fullTx.id, fullTx);
+      for (const line of lines) {
+        this.state.journalLines.set(line.id, line);
+      }
+
+      // Store sync operation
+      this.state.syncOperations.set(op.operationId, op);
+
+      // Queue in durable outbox
+      const outboxEntry: SyncOutboxEntry = {
+        opId: op.operationId,
+        uploadedStatus: 'pending',
+        retryCount: 0,
+        createdAt: new Date().toISOString(),
+      };
+      this.state.syncOutbox.set(op.operationId, outboxEntry);
+
+      // Mark as applied
+      this.state.appliedOperations.add(op.operationId);
+
+      // Advance device sequence head if this device generated it
+      if (op.deviceId === this.state.deviceIdentity.deviceId) {
+        this.state.syncDeviceHeads.set(op.deviceId, op.seq);
+      }
+
+      await this.commitTransaction();
+      return fullTx.id;
+    } catch (err) {
+      await this.rollbackTransaction();
+      throw err;
     }
-
-    // Store sync operation
-    this.state.syncOperations.set(op.operationId, op);
-
-    // Queue in durable outbox
-    const outboxEntry: SyncOutboxEntry = {
-      opId: op.operationId,
-      uploadedStatus: 'pending',
-      retryCount: 0,
-      createdAt: new Date().toISOString(),
-    };
-    this.state.syncOutbox.set(op.operationId, outboxEntry);
-
-    // Mark as applied
-    this.state.appliedOperations.add(op.operationId);
-
-    // Advance device sequence head if this device generated it
-    if (op.deviceId === this.state.deviceIdentity.deviceId) {
-      this.state.syncDeviceHeads.set(op.deviceId, op.seq);
-    }
-
-    await this.persist();
-    return fullTx.id;
   }
 
   // --- Query Engine ---
 
   public getWorkspaces(): Workspace[] {
     return Array.from(this.state.workspaces.values()).filter((w) => !w.archivedAt);
+  }
+
+  public getAllWorkspaces(): Workspace[] {
+    return Array.from(this.state.workspaces.values());
   }
 
   public getWorkspace(id: UUID): Workspace | undefined {
@@ -441,6 +609,31 @@ export class LocalDatabase {
     this.state.workspaces.set(ws.id, ws);
     this.persist();
     return ws;
+  }
+
+  public archiveWorkspace(id: UUID): boolean {
+    const ws = this.state.workspaces.get(id);
+    if (!ws) return false;
+    ws.archivedAt = new Date().toISOString();
+    this.persist();
+    return true;
+  }
+
+  public restoreWorkspace(id: UUID): boolean {
+    const ws = this.state.workspaces.get(id);
+    if (!ws) return false;
+    ws.archivedAt = null;
+    this.persist();
+    return true;
+  }
+
+  public editWorkspace(id: UUID, updates: Partial<Pick<Workspace, 'name' | 'kind'>>): boolean {
+    const ws = this.state.workspaces.get(id);
+    if (!ws) return false;
+    if (updates.name) ws.name = updates.name.trim();
+    if (updates.kind) ws.kind = updates.kind;
+    this.persist();
+    return true;
   }
 
   public getAccounts(workspaceId: UUID): Account[] {

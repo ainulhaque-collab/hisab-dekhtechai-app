@@ -40,19 +40,33 @@ export class RealGoogleDriveTransport implements DriveTransport {
   }
 
   public async listAppDataFiles(): Promise<DriveFileMetadata[]> {
-    const url = `${this.baseUrl}/files?spaces=appDataFolder&fields=files(id,name,mimeType,size,createdTime)&pageSize=100`;
-    const res = await fetch(url, {
-      headers: {
-        Authorization: `Bearer ${this.accessToken}`,
-      },
-    });
+    const allFiles: DriveFileMetadata[] = [];
+    let pageToken: string | null = null;
 
-    if (!res.ok) {
-      this.handleHttpError(res.status, await res.text());
-    }
+    do {
+      let url = `${this.baseUrl}/files?spaces=appDataFolder&fields=nextPageToken,files(id,name,mimeType,size,createdTime)&pageSize=100`;
+      if (pageToken) {
+        url += `&pageToken=${encodeURIComponent(pageToken)}`;
+      }
 
-    const data = await res.json();
-    return data.files || [];
+      const res = await this.fetchWithRetry(url, {
+        headers: {
+          Authorization: `Bearer ${this.accessToken}`,
+        },
+      });
+
+      if (!res.ok) {
+        this.handleHttpError(res.status, await res.text());
+      }
+
+      const data = await res.json();
+      if (data.files && Array.isArray(data.files)) {
+        allFiles.push(...data.files);
+      }
+      pageToken = data.nextPageToken || null;
+    } while (pageToken);
+
+    return allFiles;
   }
 
   public async uploadBatchFile(
@@ -78,7 +92,7 @@ export class RealGoogleDriveTransport implements DriveTransport {
       contentJson +
       closeDelimiter;
 
-    const res = await fetch(this.uploadUrl, {
+    const res = await this.fetchWithRetry(this.uploadUrl, {
       method: 'POST',
       headers: {
         Authorization: `Bearer ${this.accessToken}`,
@@ -97,7 +111,7 @@ export class RealGoogleDriveTransport implements DriveTransport {
 
   public async downloadBatchFile(fileId: string): Promise<string> {
     const url = `${this.baseUrl}/files/${fileId}?alt=media`;
-    const res = await fetch(url, {
+    const res = await this.fetchWithRetry(url, {
       headers: {
         Authorization: `Bearer ${this.accessToken}`,
       },
@@ -108,6 +122,34 @@ export class RealGoogleDriveTransport implements DriveTransport {
     }
 
     return await res.text();
+  }
+
+  private async fetchWithRetry(
+    input: RequestInfo | URL,
+    init?: RequestInit,
+    maxRetries = 3
+  ): Promise<Response> {
+    let attempt = 0;
+    let delay = 500;
+
+    while (true) {
+      try {
+        const res = await fetch(input, init);
+        if (res.status === 429 || (res.status >= 500 && res.status <= 599)) {
+          attempt++;
+          if (attempt >= maxRetries) return res;
+          await new Promise((r) => setTimeout(r, delay));
+          delay *= 2;
+          continue;
+        }
+        return res;
+      } catch (networkErr) {
+        attempt++;
+        if (attempt >= maxRetries) throw networkErr;
+        await new Promise((r) => setTimeout(r, delay));
+        delay *= 2;
+      }
+    }
   }
 
   public async deleteFile(fileId: string): Promise<void> {

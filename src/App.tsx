@@ -18,6 +18,8 @@ import { SnapshotModal } from './components/SnapshotModal';
 import { SettingsModal } from './components/SettingsModal';
 import { AuthModal } from './components/AuthModal';
 import { PartiesModal } from './components/PartiesModal';
+import { PinLockScreen } from './components/PinLockScreen';
+import { pinLock } from './security/pinLock';
 import { JournalTransaction } from './contracts/types';
 
 interface ErrorBoundaryProps {
@@ -74,6 +76,7 @@ class ErrorBoundary extends React.Component<ErrorBoundaryProps, ErrorBoundarySta
 function MainApp() {
   const [activeTab, setActiveTab] = useState<TabType>('home');
   const [selectedTx, setSelectedTx] = useState<JournalTransaction | null>(null);
+  const [isUnlocked, setIsUnlocked] = useState(() => !pinLock.isEnabled());
 
   // Modals state
   const [isSyncModalOpen, setIsSyncModalOpen] = useState(false);
@@ -82,6 +85,10 @@ function MainApp() {
   const [isSettingsModalOpen, setIsSettingsModalOpen] = useState(false);
   const [isAuthModalOpen, setIsAuthModalOpen] = useState(false);
   const [isPartiesModalOpen, setIsPartiesModalOpen] = useState(false);
+
+  if (!isUnlocked) {
+    return <PinLockScreen onUnlocked={() => setIsUnlocked(true)} />;
+  }
 
   const handleSelectTransactionFromDashboard = (tx: JournalTransaction) => {
     setSelectedTx(tx);

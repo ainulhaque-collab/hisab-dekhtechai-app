@@ -61,6 +61,9 @@ interface AppContextType {
   refreshState: () => void;
   triggerManualSync: () => Promise<void>;
   createWorkspace: (name: string, kind: 'personal' | 'business') => Workspace;
+  archiveWorkspace: (id: UUID) => boolean;
+  restoreWorkspace: (id: UUID) => boolean;
+  durabilityInfo: { type: string; isPersistent: boolean; warning?: string };
   createCategory: (name: string, kind: Category['kind'], parentId?: UUID | null, nameEn?: string) => Category;
   deleteCategory: (id: UUID) => void;
   createParty: (name: string, role: PartyRole, phone?: string, notes?: string) => BusinessParty;
@@ -123,6 +126,28 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     }
   };
 
+  const [durabilityInfo, setDurabilityInfo] = useState<{
+    type: string;
+    isPersistent: boolean;
+    warning?: string;
+  }>({ type: 'indexeddb', isPersistent: true });
+
+  // Initialize durable storage engine on mount / db switch
+  useEffect(() => {
+    let isMounted = true;
+    db.init().then(() => {
+      if (isMounted) {
+        db.getDurabilityInfo().then((info) => {
+          if (isMounted) setDurabilityInfo(info);
+        });
+        refreshState();
+      }
+    });
+    return () => {
+      isMounted = false;
+    };
+  }, [db]);
+
   // Initialize and refresh state from current device DB
   const refreshState = () => {
     const wsList = db.getWorkspaces();
@@ -150,10 +175,11 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     refreshState();
     const currentProf = auth.getProfile();
     const isRealGoogle = !!(currentProf?.accessToken && currentProf.accessToken.startsWith('ya29.'));
-    if (isRealGoogle && currentProf?.accessToken) {
+    if (isRealGoogle && currentProf?.accessToken && !auth.isTokenExpired()) {
       sync.setTransport(new RealGoogleDriveTransport(currentProf.accessToken));
+      sync.setAuthorized(true);
     } else {
-      sync.setTransport(sharedTransport);
+      sync.setAuthorized(false);
     }
     const unsub = sync.subscribe((status) => {
       setSyncStatus(status);
@@ -165,16 +191,19 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   const switchDevice = async (dev: DeviceProfile) => {
     const targetDb = getOrCreateDeviceDb(dev.id, dev.name);
     const isRealGoogle = !!(userProfile?.accessToken && userProfile.accessToken.startsWith('ya29.'));
-    const targetTransport = isRealGoogle && userProfile?.accessToken
+    const targetTransport = isRealGoogle && userProfile?.accessToken && !auth.isTokenExpired()
       ? new RealGoogleDriveTransport(userProfile.accessToken)
       : sharedTransport;
     const targetSync = new SyncOrchestrator(targetDb, targetTransport);
     targetSync.setOnline(isOnline);
+    if (!isRealGoogle) {
+      targetSync.setAuthorized(false);
+    }
     setDb(targetDb);
     setSync(targetSync);
     setCurrentDevice(dev);
     // Trigger sync on device switch
-    if (isOnline) {
+    if (isOnline && isRealGoogle) {
       setTimeout(() => targetSync.triggerSync(), 200);
     }
   };
@@ -193,6 +222,18 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     const ws = db.createWorkspace(name, kind);
     refreshState();
     return ws;
+  };
+
+  const archiveWorkspace = (id: UUID) => {
+    const res = db.archiveWorkspace(id);
+    refreshState();
+    return res;
+  };
+
+  const restoreWorkspace = (id: UUID) => {
+    const res = db.restoreWorkspace(id);
+    refreshState();
+    return res;
   };
 
   const createCategory = (
@@ -275,6 +316,9 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         refreshState,
         triggerManualSync,
         createWorkspace,
+        archiveWorkspace,
+        restoreWorkspace,
+        durabilityInfo,
         createCategory,
         deleteCategory,
         createParty,

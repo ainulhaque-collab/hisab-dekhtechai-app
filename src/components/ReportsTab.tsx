@@ -3,6 +3,7 @@ import { useApp } from '../context/AppContext';
 import { formatBDT, parsePaisaString, toPaisa } from '../domain/money';
 import { evaluateBudget } from '../domain/recurring';
 import { exportTransactionsToCSV } from '../domain/csv';
+import { exportFinancialsToXLSX } from '../domain/excel';
 import {
   Download,
   Calendar,
@@ -25,6 +26,7 @@ export const ReportsTab: React.FC = () => {
     transactions,
     accounts,
     categories,
+    parties,
     budgets,
     recurringRules,
     db,
@@ -88,6 +90,22 @@ export const ReportsTab: React.FC = () => {
     const link = document.createElement('a');
     link.href = url;
     link.download = `Hisab_${currentWorkspace.name}_${new Date().toISOString().slice(0, 10)}.csv`;
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    URL.revokeObjectURL(url);
+  };
+
+  // Excel (XLSX) Export handler
+  const handleExportXLSX = () => {
+    const data = exportFinancialsToXLSX(currentWorkspace, transactions, accounts, categories, parties);
+    const blob = new Blob([data.buffer as ArrayBuffer], {
+      type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+    });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = `Hisab_${currentWorkspace.name}_${new Date().toISOString().slice(0, 10)}.xlsx`;
     document.body.appendChild(link);
     link.click();
     document.body.removeChild(link);
@@ -159,14 +177,26 @@ export const ReportsTab: React.FC = () => {
             {isEn ? 'Monthly cashflow and expense limits' : 'মাসিক ক্যাশফ্লো ও বাজেট পরিকল্পনা'}
           </p>
         </div>
-        <button
-          type="button"
-          onClick={handleExportCSV}
-          className="px-3 py-1.5 bg-white border border-slate-200 hover:bg-slate-50 text-slate-700 rounded-lg text-xs font-medium flex items-center gap-1.5 shadow-2xs transition-colors"
-        >
-          <FileSpreadsheet className="w-3.5 h-3.5 text-slate-500" />
-          <span>{isEn ? 'Export CSV' : 'CSV এক্সপোর্ট'}</span>
-        </button>
+        <div className="flex items-center gap-1.5">
+          <button
+            type="button"
+            onClick={handleExportCSV}
+            className="px-2.5 py-1.5 bg-white border border-slate-200 hover:bg-slate-50 text-slate-700 rounded-lg text-xs font-medium flex items-center gap-1 shadow-2xs transition-colors"
+            title={isEn ? 'Export to CSV' : 'CSV ফাইল ডাউনলোড'}
+          >
+            <FileSpreadsheet className="w-3.5 h-3.5 text-slate-500" />
+            <span>CSV</span>
+          </button>
+          <button
+            type="button"
+            onClick={handleExportXLSX}
+            className="px-2.5 py-1.5 bg-emerald-700 hover:bg-emerald-800 text-white rounded-lg text-xs font-medium flex items-center gap-1 shadow-2xs transition-colors"
+            title={isEn ? 'Export formatted Excel workbook' : 'এক্সেল ফাইল ডাউনলোড'}
+          >
+            <Download className="w-3.5 h-3.5" />
+            <span>Excel</span>
+          </button>
+        </div>
       </div>
 
       {/* Segmented Section Switcher */}

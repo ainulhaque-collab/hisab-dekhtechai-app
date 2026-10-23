@@ -56,6 +56,8 @@ export const HistoryTab: React.FC<HistoryTabProps> = ({
     'all'
   );
   const [partyFilter, setPartyFilter] = useState<string>('all');
+  const [accountFilter, setAccountFilter] = useState<string>('all');
+  const [categoryFilter, setCategoryFilter] = useState<string>('all');
 
   const [activeModalTx, setActiveModalTx] = useState<JournalTransaction | null>(null);
   const [isEditing, setIsEditing] = useState(false);
@@ -120,6 +122,18 @@ export const HistoryTab: React.FC<HistoryTabProps> = ({
         if (partyFilter !== 'none' && tx.partyId !== partyFilter) return false;
       }
 
+      // Account filter
+      if (accountFilter !== 'all') {
+        const matchesAccount = tx.lines.some((l) => l.accountId === accountFilter);
+        if (!matchesAccount) return false;
+      }
+
+      // Category filter
+      if (categoryFilter !== 'all') {
+        const matchesCategory = tx.lines.some((l) => l.categoryId === categoryFilter);
+        if (!matchesCategory) return false;
+      }
+
       // Search term
       if (searchTerm.trim()) {
         const term = searchTerm.toLowerCase();
@@ -142,7 +156,7 @@ export const HistoryTab: React.FC<HistoryTabProps> = ({
 
       return true;
     });
-  }, [transactions, periodFilter, typeFilter, partyFilter, searchTerm, categoriesMap, accountsMap, partiesMap]);
+  }, [transactions, periodFilter, typeFilter, partyFilter, accountFilter, categoryFilter, searchTerm, categoriesMap, accountsMap, partiesMap]);
 
   const handleOpenDetail = (tx: JournalTransaction) => {
     setActiveModalTx(tx);
@@ -302,17 +316,32 @@ export const HistoryTab: React.FC<HistoryTabProps> = ({
             </select>
           )}
 
-          {/* Type Filter */}
+          {/* Account Filter */}
           <select
-            value={typeFilter}
-            onChange={(e) => setTypeFilter(e.target.value as any)}
+            value={accountFilter}
+            onChange={(e) => setAccountFilter(e.target.value)}
             className="px-2.5 py-1 bg-white border border-slate-200 rounded-lg text-[11px] font-medium text-slate-700 shadow-2xs focus:outline-none"
           >
-            <option value="all">{isEn ? 'All Types' : 'সকল ধরণ'}</option>
-            <option value="expense">{isEn ? 'Expenses' : 'খরচ'}</option>
-            <option value="income">{isEn ? 'Income' : 'জমা'}</option>
-            <option value="transfer">{isEn ? 'Transfers' : 'স্থানান্তর'}</option>
-            <option value="correction">{isEn ? 'Corrections' : 'সংশোধনী'}</option>
+            <option value="all">{isEn ? 'All Accounts' : 'সকল অ্যাকাউন্ট'}</option>
+            {accounts.map((a) => (
+              <option key={a.id} value={a.id}>
+                {a.name}
+              </option>
+            ))}
+          </select>
+
+          {/* Category Filter */}
+          <select
+            value={categoryFilter}
+            onChange={(e) => setCategoryFilter(e.target.value)}
+            className="px-2.5 py-1 bg-white border border-slate-200 rounded-lg text-[11px] font-medium text-slate-700 shadow-2xs focus:outline-none"
+          >
+            <option value="all">{isEn ? 'All Categories' : 'সকল খাত'}</option>
+            {categories.map((c) => (
+              <option key={c.id} value={c.id}>
+                {c.name}
+              </option>
+            ))}
           </select>
         </div>
       </div>

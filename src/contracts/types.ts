@@ -99,6 +99,8 @@ export interface JournalTransaction {
   lines: JournalLine[];
   receiptBlobSha256?: string | null;
   receiptName?: string | null;
+  isDeleted?: boolean;
+  isReplacedBy?: UUID | null;
 }
 
 export interface BalancedJournal {

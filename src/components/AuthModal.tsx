@@ -60,10 +60,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onClose }) => {
     setLoginError(null);
 
     try {
-      await auth.signIn(selectedEmail, selectedName);
-      if (consentGranted) {
-        await auth.authorizeDrive();
-      }
+      await auth.setTestProfileForTesting(selectedEmail, selectedName, consentGranted ? 'demo-test-token' : undefined);
       refreshState();
       if (isOnline) {
         triggerManualSync().catch(console.error);

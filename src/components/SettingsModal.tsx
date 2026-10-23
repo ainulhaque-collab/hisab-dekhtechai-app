@@ -10,6 +10,8 @@ import {
   Info
 } from 'lucide-react';
 
+import { pinLock } from '../security/pinLock';
+
 interface SettingsModalProps {
   isOpen: boolean;
   onClose: () => void;
@@ -32,7 +34,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
 
   const isEn = language === 'en';
 
-  const [pinEnabled, setPinEnabled] = useState(false);
+  const [pinEnabled, setPinEnabled] = useState(() => pinLock.isEnabled());
   const [pin, setPin] = useState('');
   const [confirmPin, setConfirmPin] = useState('');
   const [showPinSetup, setShowPinSetup] = useState(false);
@@ -40,7 +42,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
 
   if (!isOpen) return null;
 
-  const handleSavePin = (e: React.FormEvent) => {
+  const handleSavePin = async (e: React.FormEvent) => {
     e.preventDefault();
     if (pin.length !== 4) {
       alert(isEn ? 'PIN must be 4 digits' : 'পিন ৪ সংখ্যার হতে হবে');
@@ -50,6 +52,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
       alert(isEn ? 'PINs do not match' : 'উভয় পিন এক হতে হবে');
       return;
     }
+    await pinLock.setPin(pin);
     setPinEnabled(true);
     setShowPinSetup(false);
     setPin('');
@@ -249,6 +252,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                     if (e.target.checked) {
                       setShowPinSetup(true);
                     } else {
+                      pinLock.removePin();
                       setPinEnabled(false);
                     }
                   }}
