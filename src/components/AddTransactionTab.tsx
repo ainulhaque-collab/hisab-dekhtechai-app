@@ -321,6 +321,7 @@ export const AddTransactionTab: React.FC<AddTransactionTabProps> = ({ onSuccess 
       };
 
       await db.commitJournalWithOutbox(balancedJournal, op);
+      await db.waitForPendingWrites();
       refreshState();
       setSuccessToast(true);
 

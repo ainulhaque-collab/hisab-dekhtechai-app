@@ -468,25 +468,58 @@ export class SyncOrchestrator {
   /**
    * Safe First-Device / New-Device Bootstrap and Restore:
    * 1. Requires verified authenticated Google user profile (with subjectHash).
-   * 2. Sets verified local identity on the local database: db.setIdentity(profile.subjectHash, profile.displayName).
-   * 3. Triggers sync to download and apply all remote batches belonging to this verified owner.
+   * 2. Prevents silent reassignment of an existing non-empty dataset to a different Google account.
+   * 3. Preserves any offline transactions recorded prior to authentication by adopting them under the verified owner.
+   * 4. Downloads and applies all remote batches from Google Drive belonging to this verified owner.
    */
   public async bootstrapAndRestore(profile: GoogleUserProfile): Promise<{
     restoredOpsCount: number;
     verifiedOwner: string;
+    preservedOfflineOpsCount: number;
   }> {
     if (!profile || !profile.subjectHash) {
       throw new Error('Bootstrap and restore requires a verified Google user profile with subjectHash.');
     }
 
+    const currentOwner = this.db.getIdentity()?.ownerSubjectHash;
+    const rawState = this.db.getRawState();
+    const hasTransactions = rawState.journalTransactions.size > 0;
+    const hasSyncOps = rawState.syncOperations.size > 0;
+    const isNonEmpty = hasTransactions || hasSyncOps;
+
+    // 1. Prevent silent reassignment of an existing non-empty dataset to another Google account
+    if (currentOwner && currentOwner !== profile.subjectHash && isNonEmpty) {
+      throw new Error(
+        `Security Error: Cannot reassign existing non-empty dataset belonging to owner (${currentOwner}) to a different Google account (${profile.subjectHash}).`
+      );
+    }
+
+    // 2. Preserve offline transactions: if dataset was created offline before login (or by this owner)
+    let preservedOfflineOpsCount = 0;
+    if ((!currentOwner || currentOwner === profile.subjectHash) && isNonEmpty) {
+      for (const op of rawState.syncOperations.values()) {
+        if (!op.ownerHash || op.ownerHash === 'local-owner' || op.ownerHash === 'unassigned') {
+          op.ownerHash = profile.subjectHash;
+          preservedOfflineOpsCount++;
+        }
+      }
+      if (preservedOfflineOpsCount > 0) {
+        await this.db.persist();
+      }
+    }
+
+    // 3. Establish verified identity on database
     this.db.setIdentity(profile.subjectHash, profile.displayName);
     this.isAuthorized = true;
 
+    // 4. Trigger sync to download and apply all remote batches belonging to this verified owner,
+    // and upload any preserved offline outbox operations to Google Drive
     await this.triggerSync();
 
     return {
       restoredOpsCount: this.db.getRawState().appliedOperations.size,
       verifiedOwner: profile.subjectHash,
+      preservedOfflineOpsCount,
     };
   }
 

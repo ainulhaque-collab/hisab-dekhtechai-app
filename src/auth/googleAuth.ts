@@ -23,6 +23,17 @@ export interface GoogleUserProfile {
   tokenExpiresAt?: number; // epoch ms
 }
 
+/**
+ * Canonical owner subject hashing function used across the entire application.
+ * Prepends the standard prefix 'hisab-owner:' and calculates SHA-256.
+ */
+export async function computeOwnerSubjectHash(sub: string): Promise<string> {
+  if (!sub || typeof sub !== 'string' || sub.trim() === '') {
+    throw new Error('Valid Google subject identifier (sub) is required to compute owner hash.');
+  }
+  return await computeSha256(`hisab-owner:${sub.trim()}`);
+}
+
 declare global {
   interface Window {
     google?: {
@@ -50,6 +61,7 @@ export class GoogleAuthManager {
   private currentProfile: GoogleUserProfile | null = null;
   private isSimulatedAuth = false;
   public simulatedRenewSubjectHash?: string | null;
+  public fetchFn: typeof fetch = (...args) => fetch(...args);
   private readonly DRIVE_SCOPE =
     'https://www.googleapis.com/auth/drive.appdata email profile openid';
 
@@ -194,7 +206,7 @@ export class GoogleAuthManager {
               const email = info.email || 'user@gmail.com';
               const name = info.name || email.split('@')[0];
               const picture = info.picture;
-              const subjectHash = await computeSha256(`hisab-owner:${sub}`);
+              const subjectHash = await computeOwnerSubjectHash(sub);
 
               const expiresIn = resp.expires_in || 3600;
 
@@ -252,10 +264,15 @@ export class GoogleAuthManager {
   public async renewAccessTokenSilent(prompt: '' | 'consent' = ''): Promise<string> {
     if (this.isSimulatedAuth) {
       if (this.currentProfile) {
-        if (this.simulatedRenewSubjectHash && this.simulatedRenewSubjectHash !== this.currentProfile.subjectHash) {
-          throw new Error(
-            `Security Error: Renewed Google account owner (${this.simulatedRenewSubjectHash}) does not match dataset owner (${this.currentProfile.subjectHash}).`
-          );
+        if (this.simulatedRenewSubjectHash) {
+          if (this.simulatedRenewSubjectHash === 'unverified') {
+            throw new Error('Security Error: Failed to verify Google userinfo during token renewal (unverified).');
+          }
+          if (this.simulatedRenewSubjectHash !== this.currentProfile.subjectHash) {
+            throw new Error(
+              `Security Error: Renewed Google account owner (${this.simulatedRenewSubjectHash}) does not match dataset owner (${this.currentProfile.subjectHash}).`
+            );
+          }
         }
         this.currentProfile.accessToken = 'renewed-simulated-token-' + Date.now();
         this.currentProfile.tokenExpiresAt = Date.now() + 3600 * 1000;
@@ -285,19 +302,25 @@ export class GoogleAuthManager {
             try {
               // Verify identity of renewed token to prevent account switching
               if (this.currentProfile?.subjectHash) {
-                const userRes = await fetch('https://www.googleapis.com/oauth2/v3/userinfo', {
+                const userRes = await this.fetchFn('https://www.googleapis.com/oauth2/v3/userinfo', {
                   headers: { Authorization: `Bearer ${resp.access_token}` },
                 });
-                if (userRes.ok) {
-                  const userInfo = await userRes.json();
-                  if (userInfo.sub) {
-                    const renewedSubjectHash = await computeSha256(userInfo.sub);
-                    if (renewedSubjectHash !== this.currentProfile.subjectHash) {
-                      throw new Error(
-                        `Security Error: Renewed Google account owner does not match dataset owner.`
-                      );
-                    }
-                  }
+                if (!userRes.ok) {
+                  throw new Error(
+                    `Security Error: Failed to verify Google userinfo during token renewal (${userRes.status}).`
+                  );
+                }
+                const userInfo = await userRes.json();
+                if (!userInfo || !userInfo.sub) {
+                  throw new Error(
+                    'Security Error: Google userinfo response missing valid subject identifier during renewal.'
+                  );
+                }
+                const renewedSubjectHash = await computeOwnerSubjectHash(userInfo.sub);
+                if (renewedSubjectHash !== this.currentProfile.subjectHash) {
+                  throw new Error(
+                    `Security Error: Renewed Google account owner does not match dataset owner.`
+                  );
                 }
               }
 
@@ -366,7 +389,7 @@ export class GoogleAuthManager {
     }
 
     this.isSimulatedAuth = true;
-    const subjectHash = await computeSha256(`hisab-owner:${subjectId}`);
+    const subjectHash = await computeOwnerSubjectHash(subjectId);
     this.currentProfile = {
       subjectId,
       subjectHash,

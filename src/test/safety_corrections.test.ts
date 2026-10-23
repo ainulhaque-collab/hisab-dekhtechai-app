@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { LocalDatabase } from '../storage/db';
 import { LocalStorageFallbackDriver } from '../storage/drivers/durableStorage';
 import { SimulatedGoogleDriveTransport, RealGoogleDriveTransport } from '../drive/transport';
-import { GoogleAuthManager } from '../auth/googleAuth';
+import { GoogleAuthManager, computeOwnerSubjectHash } from '../auth/googleAuth';
 import { SyncOrchestrator } from '../sync/orchestrator';
 import { generateUUID, buildExpenseJournal } from '../domain/journal';
 import { canonicalJson, computeSha256 } from '../sync/canonical';
@@ -58,7 +58,7 @@ test('Multiple concurrent writes: serialized FIFO queue captures all mutations w
 // 2. Interrupted Commits and Error Recovery
 // ============================================================================
 
-test('Interrupted commits: queue propagates failure and recovers on subsequent writes', async () => {
+test('Interrupted commits: queue propagates failure and preserves error until explicitly cleared', async () => {
   const driver = new LocalStorageFallbackDriver();
   const db = new LocalDatabase('test_db_interrupted_queue', driver);
   const wsId = 'ws-personal-default';
@@ -76,19 +76,77 @@ test('Interrupted commits: queue propagates failure and recovers on subsequent w
     'Persist must reject when durable driver write fails'
   );
 
-  // Invariant: lastPersistenceError is recorded
+  // Invariant: lastPersistenceError is preserved
   assert.ok(db.getLastPersistenceError(), 'lastPersistenceError must be recorded');
 
   // Disarm fault injection (simulating disk space freed / connection restored)
   driver.faultInjection = 'none';
 
-  // Next write must succeed, clear lastPersistenceError, and commit cleanly
+  // Invariant: error is preserved until explicitly cleared
+  await assert.rejects(
+    async () => {
+      await db.waitForPendingWrites();
+    },
+    /fault injection/,
+    'waitForPendingWrites must rethrow preserved error'
+  );
+
+  // Explicitly clear handled error
+  db.clearPersistenceError();
+
+  // Next write must succeed and commit cleanly
   db.createCategory(wsId, 'Recovered Category', 'expense');
   await db.persist();
   await db.waitForPendingWrites();
 
-  assert.equal(db.getLastPersistenceError(), null, 'lastPersistenceError must be cleared after successful write');
+  assert.equal(db.getLastPersistenceError(), null, 'lastPersistenceError must be null after explicit clear and successful write');
   assert.ok(db.getCategories(wsId).some((c) => c.name === 'Recovered Category'));
+});
+
+test('Serialized write queue: overlapping transactions blocked and persistence errors preserved until cleared', async () => {
+  const driver = new LocalStorageFallbackDriver();
+  const db = new LocalDatabase('test_db_tx_blocked_on_error', driver);
+  const wsId = 'ws-personal-default';
+
+  // 1. Arm fault injection to trigger storage failure
+  driver.faultInjection = 'throw_on_write';
+  await assert.rejects(async () => {
+    db.createCategory(wsId, 'Failing Cat', 'expense');
+    await db.persist();
+  }, /fault injection/);
+
+  assert.ok(db.getLastPersistenceError(), 'Error must be pending on database');
+
+  // Attempting waitForPendingWrites must reject repeatedly due to preserved persistence error
+  await assert.rejects(
+    async () => {
+      await db.waitForPendingWrites();
+    },
+    /fault injection/,
+    'waitForPendingWrites must re-throw preserved error'
+  );
+
+  // Once explicitly cleared and disk freed
+  driver.faultInjection = 'none';
+  db.clearPersistenceError();
+
+  // Transaction now proceeds cleanly
+  await db.beginTransaction();
+  db.createCategory(wsId, 'Clean Tx Cat', 'expense');
+
+  // 2. Overlapping transaction attempt must be strictly blocked
+  await assert.rejects(
+    async () => {
+      await db.beginTransaction();
+    },
+    /Transaction already in progress/,
+    'Overlapping transaction must be blocked while another transaction is open'
+  );
+
+  await db.commitTransaction();
+  await db.waitForPendingWrites();
+  assert.equal(db.getLastPersistenceError(), null);
+  assert.ok(db.getCategories(wsId).some((c) => c.name === 'Clean Tx Cat'));
 });
 
 // ============================================================================
@@ -188,23 +246,45 @@ test('OAuth infinite retry loop prevention: 401 with failing renewal stops after
 // 5. Account Switching Prevention on Token Renewal
 // ============================================================================
 
-test('Account switching prevention on renewal: rejects token belonging to different Google account', async () => {
+test('OAuth owner hash verification: canonical hash identical in login & renewal, same account succeeds, different account fails, unverified rejected', async () => {
+  const googleSub = 'google-user-sub-998877';
+  const canonicalHash = await computeOwnerSubjectHash(googleSub);
+  assert.ok(canonicalHash, 'Canonical hash must be generated');
+
   const auth = new GoogleAuthManager();
-  // Set initial authenticated user profile
-  await auth.setTestProfileForTesting('alice@example.com', 'Alice');
-  const aliceHash = auth.getProfile()?.subjectHash;
-  assert.ok(aliceHash);
+  await auth.setTestProfileForTesting('alice@example.com', 'Alice', googleSub, 'initial-token');
+  assert.equal(
+    auth.getProfile()?.subjectHash,
+    canonicalHash,
+    'Initial login subjectHash must exactly match canonical computeOwnerSubjectHash'
+  );
 
-  // Simulate user switching accounts in Google prompt during renewal
-  auth.simulatedRenewSubjectHash = 'foreign-attacker-subject-hash';
+  // 1. Renewal with the SAME Google account succeeds
+  auth.simulatedRenewSubjectHash = canonicalHash;
+  const renewedToken = await auth.renewAccessTokenSilent();
+  assert.ok(renewedToken.startsWith('renewed-simulated-token-'), 'Renewal with same account must succeed');
 
-  // Silent renewal must detect mismatched identity and reject
+  // 2. Renewal with a DIFFERENT Google account fails
+  const attackerSub = 'attacker-google-sub-666';
+  const attackerHash = await computeOwnerSubjectHash(attackerSub);
+  auth.simulatedRenewSubjectHash = attackerHash;
+
   await assert.rejects(
     async () => {
       await auth.renewAccessTokenSilent();
     },
     /does not match dataset owner/,
     'Must reject token renewal if renewed account identity mismatches dataset owner'
+  );
+
+  // 3. Renewal with UNVERIFIED userinfo fails
+  auth.simulatedRenewSubjectHash = 'unverified';
+  await assert.rejects(
+    async () => {
+      await auth.renewAccessTokenSilent();
+    },
+    /Failed to verify Google userinfo/,
+    'Must reject token renewal when Google userinfo cannot be verified'
   );
 });
 
@@ -321,76 +401,98 @@ test('Remote batch verification: rejects corrupted hash, missing owner, and fore
 // 7. Safe First-Device and New-Device Bootstrap and Restore Procedure
 // ============================================================================
 
-test('Safe bootstrap and restore: verifies Google owner identity and restores dataset onto fresh device', async () => {
+test('Safe bootstrap and restore: single owner enforcement, offline transaction preservation, and new-device restore', async () => {
   SimulatedGoogleDriveTransport.clearSharedCloud();
   const transport = new SimulatedGoogleDriveTransport();
-
-  const ownerHash = 'verified-google-user-hash';
   const wsId = 'ws-personal-default';
 
-  // Step 1: Device 1 records transactions and syncs to cloud
+  const aliceSub = 'google-alice-123';
+  const aliceHash = await computeOwnerSubjectHash(aliceSub);
+  const aliceProfile = {
+    subjectId: aliceSub,
+    subjectHash: aliceHash,
+    email: 'alice@gmail.com',
+    displayName: 'Alice',
+    isDriveAuthorized: true,
+  };
+
+  const bobSub = 'google-bob-456';
+  const bobHash = await computeOwnerSubjectHash(bobSub);
+  const bobProfile = {
+    subjectId: bobSub,
+    subjectHash: bobHash,
+    email: 'bob@gmail.com',
+    displayName: 'Bob',
+    isDriveAuthorized: true,
+  };
+
+  // Step 1: Device 1 records transactions OFFLINE before signing in
   const dbDevice1 = new LocalDatabase('test_db_bootstrap_dev1');
   dbDevice1.seedDefaultEntities();
   dbDevice1.setDeviceIdentity('dev-1', 'Device 1');
-  dbDevice1.setIdentity(ownerHash, 'Alice');
 
-  const syncDevice1 = new SyncOrchestrator(dbDevice1, transport);
-  const opId = generateUUID();
-  const journal = buildExpenseJournal({
+  const opId1 = generateUUID();
+  const journal1 = buildExpenseJournal({
     workspaceId: wsId,
     assetAccountId: 'acc-cash-1',
     expenseCategoryId: 'cat-food',
     amountMinor: '25000',
     effectiveDate: '2026-10-23',
-    note: 'Initial food expense on Device 1',
-    opId,
+    note: 'Initial offline food expense on Device 1 before login',
+    opId: opId1,
   });
 
-  const op: SyncOperation = {
+  const op1: SyncOperation = {
     protocolVersion: 1,
-    ownerHash,
+    ownerHash: 'local-owner', // Created offline before Google sign-in
     deviceId: 'dev-1',
     seq: 1,
-    operationId: opId,
-    entityId: journal.transaction.id,
+    operationId: opId1,
+    entityId: journal1.transaction.id,
     type: 'journal.post',
     createdAtUtc: new Date().toISOString(),
-    payload: { balancedJournal: journal },
-    contentSha256: await computeSha256(canonicalJson({ balancedJournal: journal })),
+    payload: { balancedJournal: journal1 },
+    contentSha256: await computeSha256(canonicalJson({ balancedJournal: journal1 })),
   };
 
-  await dbDevice1.commitJournalWithOutbox(journal, op);
-  await syncDevice1.triggerSync();
+  await dbDevice1.commitJournalWithOutbox(journal1, op1);
+  assert.equal(dbDevice1.getTransactions(wsId).length, 1, 'Offline transaction exists before login');
 
-  // Invariant: Device 1 uploaded the batch to cloud
+  // Step 2: User signs in with Alice -> bootstrapAndRestore must PRESERVE offline transaction
+  const syncDevice1 = new SyncOrchestrator(dbDevice1, transport);
+  const restoreRes1 = await syncDevice1.bootstrapAndRestore(aliceProfile);
+  assert.equal(restoreRes1.preservedOfflineOpsCount, 1, 'Offline transaction must be preserved and adopted');
+  assert.equal(dbDevice1.getIdentity()?.ownerSubjectHash, aliceHash, 'Alice is now verified owner');
+
+  // Invariant: Device 1 uploaded the adopted batch to cloud
   const cloudFiles = await transport.listAppDataFiles();
-  assert.equal(cloudFiles.length, 1, 'Cloud must contain 1 batch file from Device 1');
+  assert.equal(cloudFiles.length, 1, 'Cloud must contain 1 batch file adopted from Device 1');
 
-  // Step 2: Fresh Device 2 bootstraps and restores from Google Drive
+  // Step 3: Prevent silent reassignment: Bob attempts to sign in on Alice's device with non-empty dataset
+  await assert.rejects(
+    async () => {
+      await syncDevice1.bootstrapAndRestore(bobProfile);
+    },
+    /Security Error: Cannot reassign existing non-empty dataset/,
+    'Must block Bob from overwriting Alice dataset'
+  );
+
+  // Step 4: Fresh Device 2 bootstraps and restores from Google Drive
   const dbDevice2Fresh = new LocalDatabase('test_db_bootstrap_dev2');
   dbDevice2Fresh.seedDefaultEntities();
   dbDevice2Fresh.setDeviceIdentity('dev-2', 'Device 2 (Fresh Phone)');
 
   const syncDevice2 = new SyncOrchestrator(dbDevice2Fresh, transport);
 
-  // Authenticated profile obtained from Google login
-  const verifiedProfile = {
-    subjectId: 'google-sub-alice',
-    subjectHash: ownerHash,
-    email: 'alice@gmail.com',
-    displayName: 'Alice',
-    isDriveAuthorized: true,
-  };
-
-  // Perform safe bootstrap and restore
-  await syncDevice2.bootstrapAndRestore(verifiedProfile);
+  // Perform safe bootstrap and restore on fresh device
+  await syncDevice2.bootstrapAndRestore(aliceProfile);
 
   // Invariant: Fresh device restored Device 1's transaction cleanly
   const restoredTxs = dbDevice2Fresh.getTransactions(wsId);
   assert.equal(restoredTxs.length, 1, 'Device 2 must have restored the transaction');
-  assert.equal(restoredTxs[0].id, journal.transaction.id, 'Transaction ID must match');
-  assert.equal(restoredTxs[0].note, 'Initial food expense on Device 1');
-  assert.equal(dbDevice2Fresh.getIdentity()?.ownerSubjectHash, ownerHash, 'Verified owner must be established on device');
+  assert.equal(restoredTxs[0].id, journal1.transaction.id, 'Transaction ID must match');
+  assert.equal(restoredTxs[0].note, 'Initial offline food expense on Device 1 before login');
+  assert.equal(dbDevice2Fresh.getIdentity()?.ownerSubjectHash, aliceHash, 'Verified owner must be established on fresh device');
 });
 
 // ============================================================================

@@ -74,6 +74,8 @@ interface AppContextType {
   editParty: (id: UUID, updates: Partial<Pick<BusinessParty, 'name' | 'phone' | 'role' | 'notes'>>) => void;
   deleteTransaction: (id: UUID, reason?: string) => Promise<void>;
   editTransaction: (id: UUID, cmd: any) => Promise<void>;
+  signInWithGoogle: () => Promise<GoogleUserProfile>;
+  bootstrapWithTestProfile: (profile: GoogleUserProfile) => Promise<void>;
 }
 
 const AppContext = createContext<AppContextType | null>(null);
@@ -397,6 +399,47 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     }
   };
 
+  const signInWithGoogle = async (): Promise<GoogleUserProfile> => {
+    const profile = await auth.promptGoogleSignIn();
+    try {
+      if (profile.accessToken) {
+        sync.setTransport(
+          new RealGoogleDriveTransport(profile.accessToken, {
+            tokenProvider: async (forceRenew?: boolean) => {
+              const token = await auth.getValidAccessToken(forceRenew);
+              const activeOwnerHash = db.getIdentity()?.ownerSubjectHash;
+              const currentAuthOwnerHash = auth.getProfile()?.subjectHash;
+              if (activeOwnerHash && currentAuthOwnerHash && activeOwnerHash !== currentAuthOwnerHash) {
+                throw new Error(
+                  `Security Error: Renewed Google account owner (${currentAuthOwnerHash}) does not match dataset owner (${activeOwnerHash}).`
+                );
+              }
+              return token;
+            },
+          })
+        );
+      }
+      await sync.bootstrapAndRestore(profile);
+      refreshState();
+      return profile;
+    } catch (err) {
+      auth.signOut();
+      refreshState();
+      throw err;
+    }
+  };
+
+  const bootstrapWithTestProfile = async (profile: GoogleUserProfile): Promise<void> => {
+    try {
+      await sync.bootstrapAndRestore(profile);
+      refreshState();
+    } catch (err) {
+      auth.signOut();
+      refreshState();
+      throw err;
+    }
+  };
+
   const currentWorkspace = useMemo(() => {
     return workspaces.find((w) => w.id === currentWorkspaceId) || workspaces[0] || null;
   }, [workspaces, currentWorkspaceId]);
@@ -440,6 +483,8 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         editParty,
         deleteTransaction,
         editTransaction,
+        signInWithGoogle,
+        bootstrapWithTestProfile,
       }}
     >
       {children}

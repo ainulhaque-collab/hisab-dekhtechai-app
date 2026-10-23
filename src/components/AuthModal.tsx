@@ -8,7 +8,7 @@ interface AuthModalProps {
 }
 
 export const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onClose }) => {
-  const { auth, refreshState, triggerManualSync, isOnline } = useApp();
+  const { auth, refreshState, triggerManualSync, isOnline, signInWithGoogle, bootstrapWithTestProfile } = useApp();
   const [step, setStep] = useState<'welcome' | 'accounts' | 'consent'>('welcome');
   const [selectedEmail, setSelectedEmail] = useState('');
   const [selectedName, setSelectedName] = useState('');
@@ -33,18 +33,16 @@ export const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onClose }) => {
     setIsLoading(true);
     setLoginError(null);
     try {
-      await auth.promptGoogleSignIn();
-      refreshState();
-      if (isOnline) {
-        triggerManualSync().catch(console.error);
-      }
+      await signInWithGoogle();
       setIsLoading(false);
       onClose();
     } catch (err: any) {
       console.warn('Real Google popup cancelled or failed:', err);
       setIsLoading(false);
       const msg = err?.message || String(err);
-      if (msg.includes('invalid_client')) {
+      if (msg.includes('Cannot reassign existing non-empty dataset')) {
+        setLoginError(msg);
+      } else if (msg.includes('invalid_client')) {
         setLoginError('গুগল ক্লায়েন্ট আইডি প্রোপাগেশন প্রক্রিয়াধীন (৫-১০ মিনিট সময় লাগতে পারে)। নিচের ডেমো বিকল্প দিয়ে তাৎক্ষণিক পরীক্ষা করতে পারেন।');
       } else if (msg.includes('popup_closed') || msg.includes('cancel')) {
         setLoginError('গুগল সাইন-ইন পপআপ বন্ধ করা হয়েছে। আবার চেষ্টা করুন।');
@@ -60,11 +58,13 @@ export const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onClose }) => {
     setLoginError(null);
 
     try {
-      await auth.setTestProfileForTesting(selectedEmail, selectedName, consentGranted ? 'demo-test-token' : undefined);
-      refreshState();
-      if (isOnline) {
-        triggerManualSync().catch(console.error);
-      }
+      const profile = await auth.setTestProfileForTesting(
+        selectedEmail,
+        selectedName,
+        undefined,
+        consentGranted ? 'demo-test-token' : undefined
+      );
+      await bootstrapWithTestProfile(profile);
       setIsLoading(false);
       onClose();
     } catch (err: any) {

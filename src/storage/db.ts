@@ -308,6 +308,10 @@ export class LocalDatabase {
     return this.lastPersistenceError;
   }
 
+  public clearPersistenceError(): void {
+    this.lastPersistenceError = null;
+  }
+
   /**
    * Enqueues a durable persist task into a strictly serialized FIFO queue.
    * Guarantees that:
@@ -315,6 +319,7 @@ export class LocalDatabase {
    * 2. Snapshots are captured sequentially at the exact moment each write executes.
    * 3. Failures immediately propagate to the caller's returned Promise.
    * 4. Errors are never swallowed or falsely acknowledged as successful.
+   * 5. Unhandled persistence errors are preserved until explicitly cleared by clearPersistenceError().
    */
   public enqueuePersist(): Promise<void> {
     this.pendingQueueCount++;
@@ -329,7 +334,6 @@ export class LocalDatabase {
             await this.driver.setItem(this.storageKey, JSON.stringify(serializable));
           }
           this.persistSync();
-          this.lastPersistenceError = null;
         } catch (err: any) {
           const errorObj = err instanceof Error ? err : new Error(String(err));
           this.lastPersistenceError = errorObj;
@@ -376,6 +380,8 @@ export class LocalDatabase {
   // --- Atomic Database Transactions ---
 
   public async beginTransaction(): Promise<void> {
+    // Strictly wait for all in-flight writes in the durability queue to settle before beginning transaction
+    await this.writeQueuePromise.catch(() => {});
     if (this.inTransaction) {
       throw new Error('Transaction already in progress.');
     }
