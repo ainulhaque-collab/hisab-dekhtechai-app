@@ -6,6 +6,7 @@ on:
       - main
       - master
       - antigravity
+      - 'stabilization/**'
   workflow_dispatch:
 
 jobs:
@@ -24,7 +25,7 @@ jobs:
           cache: 'npm'
 
       - name: Install Web Dependencies
-        run: npm install
+        run: npm ci
 
       - name: Build Web Application
         run: npm run build
