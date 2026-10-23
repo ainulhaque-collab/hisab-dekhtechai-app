@@ -1,7 +1,7 @@
 <?xml version='1.0' encoding='utf-8'?>
 <resources>
-    <string name="app_name">হিসাব দেখতে চাই</string>
-    <string name="title_activity_main">হিসাব দেখতে চাই</string>
+    <string name="app_name">Hisab Dekhtechai</string>
+    <string name="title_activity_main">Hisab Dekhtechai</string>
     <string name="package_name">com.hisabdekhtechai.app</string>
     <string name="custom_url_scheme">com.hisabdekhtechai.app</string>
 </resources>
