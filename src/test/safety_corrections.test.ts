@@ -553,3 +553,96 @@ test('Drive duplicate retries: idempotent upload prevention with verified immuta
   assert.equal(filesSecond.length, 1, 'No duplicate file should be uploaded to Drive');
   assert.equal(db.getPendingOutbox().length, 0, 'Pending outbox must be cleanly marked uploaded');
 });
+
+// ============================================================================
+// 9. AppContext tokenProvider: forceRenew Forwarding & Account Identity Verification
+// ============================================================================
+
+test('AppContext tokenProvider: forwards forceRenew on 401 and rejects mismatched renewed account identity', async () => {
+  const aliceSub = 'google-sub-alice-12345';
+  const aliceHash = await computeOwnerSubjectHash(aliceSub);
+
+  // 1. Setup LocalDatabase with Alice as established dataset owner
+  const db = new LocalDatabase('test_db_token_provider_reg');
+  db.seedDefaultEntities();
+  db.setDeviceIdentity('dev-alice', 'Alice Phone');
+  db.setIdentity(aliceHash);
+
+  // 2. Setup GoogleAuthManager with Alice profile
+  const auth = new GoogleAuthManager();
+  await auth.setTestProfileForTesting('alice@example.com', 'Alice', aliceSub, 'initial-unexpired-token');
+
+  // Verify initial auth token is marked unexpired locally
+  assert.equal(auth.isTokenExpired(), false, 'Token is locally unexpired');
+
+  let forceRenewReceivedByAuth: boolean | undefined = undefined;
+  const originalGetValidAccessToken = auth.getValidAccessToken.bind(auth);
+  auth.getValidAccessToken = async (forceRenew?: boolean) => {
+    forceRenewReceivedByAuth = forceRenew;
+    return originalGetValidAccessToken(forceRenew);
+  };
+
+  // Replicate the exact tokenProvider factory from AppContext.tsx
+  const createSecureTokenProvider = (targetDb: LocalDatabase) => {
+    return async (forceRenew?: boolean): Promise<string> => {
+      const token = await auth.getValidAccessToken(forceRenew);
+      const activeOwnerHash = targetDb.getIdentity()?.ownerSubjectHash;
+      const currentAuthOwnerHash = auth.getProfile()?.subjectHash;
+      if (activeOwnerHash && currentAuthOwnerHash && activeOwnerHash !== currentAuthOwnerHash) {
+        throw new Error(
+          `Security Error: Renewed Google account owner (${currentAuthOwnerHash}) does not match dataset owner (${activeOwnerHash}).`
+        );
+      }
+      return token;
+    };
+  };
+
+  // Case A: 401 occurs -> transport calls tokenProvider(true) -> forceRenew is forwarded -> renewal succeeds with same account
+  auth.simulatedRenewSubjectHash = aliceHash;
+  let fetchCountA = 0;
+  const mockFetchA = (async (input: RequestInfo | URL, init?: RequestInit): Promise<Response> => {
+    fetchCountA++;
+    const authHeader = (init?.headers as Record<string, string>)?.['Authorization'];
+    if (fetchCountA === 1) {
+      assert.equal(authHeader, 'Bearer initial-unexpired-token');
+      // Server returns 401 (token revoked or invalidated on server side)
+      return new Response(JSON.stringify({ error: { code: 401, message: 'Invalid Credentials' } }), {
+        status: 401,
+        headers: { 'Content-Type': 'application/json' },
+      });
+    }
+    if (fetchCountA === 2) {
+      assert.ok(authHeader?.startsWith('Bearer renewed-simulated-token-'), 'Must use renewed token');
+      return new Response(JSON.stringify({ files: [] }), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      });
+    }
+    return new Response('Not found', { status: 404 });
+  }) as typeof fetch;
+
+  const transportA = new RealGoogleDriveTransport('initial-unexpired-token', {
+    customFetch: mockFetchA,
+    tokenProvider: createSecureTokenProvider(db),
+  });
+
+  const filesA = await transportA.listAppDataFiles();
+  assert.equal(filesA.length, 0);
+  assert.equal(forceRenewReceivedByAuth, true, 'forceRenew=true must be forwarded to auth.getValidAccessToken');
+  assert.equal(fetchCountA, 2, 'Transport must retry after successful renewal');
+
+  // Case B: Mismatched dataset owner identity rejection in createSecureTokenProvider
+  const charlieHash = await computeOwnerSubjectHash('google-sub-charlie-999');
+  const dbCharlie = new LocalDatabase('test_db_charlie_owner');
+  dbCharlie.setIdentity(charlieHash);
+  const providerCharlie = createSecureTokenProvider(dbCharlie);
+
+  await assert.rejects(
+    async () => {
+      await providerCharlie(false);
+    },
+    /Security Error: Renewed Google account owner.*does not match dataset owner/,
+    'createSecureTokenProvider must reject when targetDb owner does not match auth profile owner'
+  );
+});
+

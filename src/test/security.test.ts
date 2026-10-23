@@ -109,10 +109,12 @@ test('Production isolation: SimulatedGoogleDriveTransport throws in production m
 
 test('RealGoogleDriveTransport: 401 Unauthorized triggers tokenProvider renewal and succeeds on retry', async () => {
   let renewCallCount = 0;
+  let forceRenewParam: boolean | undefined = undefined;
   let fetchCallCount = 0;
 
-  const mockTokenProvider = async () => {
+  const mockTokenProvider = async (forceRenew?: boolean) => {
     renewCallCount++;
+    forceRenewParam = forceRenew;
     return 'new-valid-token';
   };
 
@@ -150,6 +152,7 @@ test('RealGoogleDriveTransport: 401 Unauthorized triggers tokenProvider renewal 
   assert.equal(files.length, 1);
   assert.equal(files[0].id, 'f-1');
   assert.equal(renewCallCount, 1, 'tokenProvider must be called once on 401');
+  assert.equal(forceRenewParam, true, 'forceRenew must be passed as true to tokenProvider on 401');
   assert.equal(fetchCallCount, 2, 'fetch must be retried with the renewed token');
 });
 

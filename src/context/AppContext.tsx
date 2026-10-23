@@ -146,21 +146,26 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   );
 
   const auth = useMemo(() => new GoogleAuthManager(), []);
+
+  const createSecureTokenProvider = (targetDb: LocalDatabase = db) => {
+    return async (forceRenew?: boolean): Promise<string> => {
+      const token = await auth.getValidAccessToken(forceRenew);
+      const activeOwnerHash = targetDb.getIdentity()?.ownerSubjectHash;
+      const currentAuthOwnerHash = auth.getProfile()?.subjectHash;
+      if (activeOwnerHash && currentAuthOwnerHash && activeOwnerHash !== currentAuthOwnerHash) {
+        throw new Error(
+          `Security Error: Renewed Google account owner (${currentAuthOwnerHash}) does not match dataset owner (${activeOwnerHash}).`
+        );
+      }
+      return token;
+    };
+  };
+
   const sharedTransport = useMemo(() => {
     if (prod) {
       // In production mode, never instantiate simulated cloud storage
       return new RealGoogleDriveTransport('', {
-        tokenProvider: async (forceRenew?: boolean) => {
-          const token = await auth.getValidAccessToken(forceRenew);
-          const activeOwnerHash = db.getIdentity()?.ownerSubjectHash;
-          const currentAuthOwnerHash = auth.getProfile()?.subjectHash;
-          if (activeOwnerHash && currentAuthOwnerHash && activeOwnerHash !== currentAuthOwnerHash) {
-            throw new Error(
-              `Security Error: Renewed Google account owner (${currentAuthOwnerHash}) does not match dataset owner (${activeOwnerHash}).`
-            );
-          }
-          return token;
-        },
+        tokenProvider: createSecureTokenProvider(db),
       });
     }
     return new SimulatedGoogleDriveTransport();
@@ -248,7 +253,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     if (isRealGoogle && currentProf?.accessToken) {
       sync.setTransport(
         new RealGoogleDriveTransport(currentProf.accessToken, {
-          tokenProvider: () => auth.getValidAccessToken(),
+          tokenProvider: createSecureTokenProvider(db),
         })
       );
       sync.setAuthorized(true);
@@ -301,7 +306,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     const targetTransport =
       isRealGoogle && userProfile?.accessToken && !auth.isTokenExpired()
         ? new RealGoogleDriveTransport(userProfile.accessToken, {
-            tokenProvider: () => auth.getValidAccessToken(),
+            tokenProvider: createSecureTokenProvider(targetDb),
           })
         : sharedTransport;
     const targetSync = new SyncOrchestrator(targetDb, targetTransport);
@@ -405,17 +410,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       if (profile.accessToken) {
         sync.setTransport(
           new RealGoogleDriveTransport(profile.accessToken, {
-            tokenProvider: async (forceRenew?: boolean) => {
-              const token = await auth.getValidAccessToken(forceRenew);
-              const activeOwnerHash = db.getIdentity()?.ownerSubjectHash;
-              const currentAuthOwnerHash = auth.getProfile()?.subjectHash;
-              if (activeOwnerHash && currentAuthOwnerHash && activeOwnerHash !== currentAuthOwnerHash) {
-                throw new Error(
-                  `Security Error: Renewed Google account owner (${currentAuthOwnerHash}) does not match dataset owner (${activeOwnerHash}).`
-                );
-              }
-              return token;
-            },
+            tokenProvider: createSecureTokenProvider(db),
           })
         );
       }
