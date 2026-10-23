@@ -17,6 +17,9 @@ export interface DurableStorageDriver {
   removeItem(key: string): Promise<void>;
   isPersistent(): Promise<boolean>;
   getType(): StorageType;
+  beginTransaction?(): Promise<void>;
+  commitTransaction?(): Promise<void>;
+  rollbackTransaction?(): Promise<void>;
 }
 
 /**
@@ -67,7 +70,7 @@ export class CapacitorSqliteDriver implements DurableStorageDriver {
 
       this.isInitialized = true;
     } catch (err) {
-      console.warn('Native SQLite initialization failed or running in non-native environment:', err);
+      console.error('Native SQLite initialization failed or running in non-native environment:', err);
       throw err;
     }
   }
@@ -82,7 +85,9 @@ export class CapacitorSqliteDriver implements DurableStorageDriver {
   }
 
   public async setItem(key: string, value: string): Promise<void> {
-    if (!this.db) return;
+    if (!this.db) {
+      throw new Error('SQLite database is not initialized or connection was lost.');
+    }
     const now = new Date().toISOString();
     await this.db.run(
       'INSERT OR REPLACE INTO durable_kv (key, value, updated_at) VALUES (?, ?, ?);',
@@ -91,8 +96,29 @@ export class CapacitorSqliteDriver implements DurableStorageDriver {
   }
 
   public async removeItem(key: string): Promise<void> {
-    if (!this.db) return;
+    if (!this.db) {
+      throw new Error('SQLite database is not initialized or connection was lost.');
+    }
     await this.db.run('DELETE FROM durable_kv WHERE key = ?;', [key]);
+  }
+
+  public async beginTransaction(): Promise<void> {
+    if (!this.db) await this.init();
+    if (this.db && typeof this.db.beginTransaction === 'function') {
+      await this.db.beginTransaction();
+    }
+  }
+
+  public async commitTransaction(): Promise<void> {
+    if (this.db && typeof this.db.commitTransaction === 'function') {
+      await this.db.commitTransaction();
+    }
+  }
+
+  public async rollbackTransaction(): Promise<void> {
+    if (this.db && typeof this.db.rollbackTransaction === 'function') {
+      await this.db.rollbackTransaction();
+    }
   }
 
   public async isPersistent(): Promise<boolean> {
@@ -236,6 +262,8 @@ export class IndexedDBDurableDriver implements DurableStorageDriver {
  */
 export class LocalStorageFallbackDriver implements DurableStorageDriver {
   private mem = new Map<string, string>();
+  private txSnapshot: Map<string, string> | null = null;
+  public faultInjection: 'none' | 'throw_on_write' | 'throw_on_commit' = 'none';
 
   public async init(): Promise<void> {
     // No-op
@@ -249,6 +277,9 @@ export class LocalStorageFallbackDriver implements DurableStorageDriver {
   }
 
   public async setItem(key: string, value: string): Promise<void> {
+    if (this.faultInjection === 'throw_on_write') {
+      throw new Error('Storage write failed: disk I/O error or storage quota exceeded (fault injection).');
+    }
     if (typeof localStorage !== 'undefined') {
       localStorage.setItem(key, value);
     }
@@ -262,6 +293,24 @@ export class LocalStorageFallbackDriver implements DurableStorageDriver {
     this.mem.delete(key);
   }
 
+  public async beginTransaction(): Promise<void> {
+    this.txSnapshot = new Map(this.mem);
+  }
+
+  public async commitTransaction(): Promise<void> {
+    if (this.faultInjection === 'throw_on_commit') {
+      throw new Error('Storage transaction commit failed: SQLite disk full or locked (fault injection).');
+    }
+    this.txSnapshot = null;
+  }
+
+  public async rollbackTransaction(): Promise<void> {
+    if (this.txSnapshot) {
+      this.mem = new Map(this.txSnapshot);
+      this.txSnapshot = null;
+    }
+  }
+
   public async isPersistent(): Promise<boolean> {
     return false;
   }
@@ -273,19 +322,26 @@ export class LocalStorageFallbackDriver implements DurableStorageDriver {
 
 /**
  * Factory that selects the most durable storage available:
- * 1. Native Android SQLite when running on device/emulator
+ * 1. Native Android SQLite when running on device/emulator (throws on failure, never silently falls back)
  * 2. IndexedDB with StorageManager persistent lease on Web
- * 3. Fallback driver for Node.js unit tests
+ * 3. Fallback driver strictly for Node.js unit tests or when explicit
  */
-export async function createDurableStorageDriver(dbName?: string): Promise<DurableStorageDriver> {
+export async function createDurableStorageDriver(
+  dbName?: string,
+  options?: { allowUnsafeFallback?: boolean }
+): Promise<DurableStorageDriver> {
   // 1. Android Capacitor Native Platform Check
   if (Capacitor.isNativePlatform()) {
     try {
       const sqliteDriver = new CapacitorSqliteDriver(dbName);
       await sqliteDriver.init();
       return sqliteDriver;
-    } catch (err) {
-      console.warn('Native SQLite unavailable, attempting IndexedDB driver:', err);
+    } catch (err: any) {
+      console.error('CRITICAL: Native SQLite initialization failed on native Android:', err);
+      // NEVER silently fall back to unsafe storage on native Android!
+      throw new Error(
+        `Native SQLite storage initialization failed on Android device: ${err?.message || err}. Data safety requires SQLite.`
+      );
     }
   }
 
@@ -295,12 +351,15 @@ export async function createDurableStorageDriver(dbName?: string): Promise<Durab
       const idbDriver = new IndexedDBDurableDriver(dbName);
       await idbDriver.init();
       return idbDriver;
-    } catch (err) {
-      console.warn('IndexedDB unavailable, using fallback driver:', err);
+    } catch (err: any) {
+      console.error('IndexedDB durable driver failed to initialize:', err);
+      if (!options?.allowUnsafeFallback) {
+        throw new Error(`Durable IndexedDB storage initialization failed: ${err?.message || err}`);
+      }
     }
   }
 
-  // 3. Fallback (Node.js tests, headless, or private browsing restriction)
+  // 3. Fallback (Only in Node.js unit tests, headless test runs, or when explicitly allowed)
   const fallback = new LocalStorageFallbackDriver();
   await fallback.init();
   return fallback;

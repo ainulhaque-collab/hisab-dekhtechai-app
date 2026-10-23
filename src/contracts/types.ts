@@ -17,6 +17,9 @@ export interface Workspace {
   createdAt: string;
 }
 
+import { AccountClassification } from './ledger';
+export type { AccountClassification };
+
 export type AccountKind = 'cash' | 'bank' | 'bkash' | 'nagad' | 'rocket' | 'other';
 
 export interface Account {
@@ -25,6 +28,7 @@ export interface Account {
   ledgerId?: UUID | null;
   name: string;
   kind: AccountKind;
+  classification?: AccountClassification;
   accountNumberMasked?: string;
   openingBalanceMinor: PaisaString;
   archivedAt?: string | null;

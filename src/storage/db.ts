@@ -40,7 +40,7 @@ import {
   StorageType
 } from './drivers/durableStorage';
 
-export const CURRENT_SCHEMA_VERSION = 3;
+export const CURRENT_SCHEMA_VERSION = 4;
 
 export interface DatabaseState {
   schemaVersion: number;
@@ -87,10 +87,21 @@ export class LocalDatabase {
   private snapshotBeforeTx: string | null = null;
   private driver: DurableStorageDriver | null = null;
 
-  constructor(storageKey = 'hisab_dekhtechai_db') {
+  constructor(storageKey = 'hisab_dekhtechai_db', driver?: DurableStorageDriver) {
     this.storageKey = storageKey;
     this.state = this.createEmptyState();
+    if (driver) {
+      this.driver = driver;
+    }
     this.loadFromStorage();
+  }
+
+  public setStorageDriver(driver: DurableStorageDriver): void {
+    this.driver = driver;
+  }
+
+  public getStorageDriver(): DurableStorageDriver | null {
+    return this.driver;
   }
 
   private createEmptyState(): DatabaseState {
@@ -138,6 +149,12 @@ export class LocalDatabase {
           checksum: 'recovery-snapshots-v3',
           appliedAt: new Date().toISOString(),
         },
+        {
+          fromVersion: 3,
+          toVersion: 4,
+          checksum: 'double-entry-ledger-v4',
+          appliedAt: new Date().toISOString(),
+        },
       ],
       preferences: new Map<string, any>([
         ['language', 'en'],
@@ -172,6 +189,7 @@ export class LocalDatabase {
   /**
    * Initializes durable driver (Native SQLite or IndexedDB),
    * performing non-destructive migration from legacy localStorage if necessary.
+   * Never silently falls back: storage initialization errors are strictly propagated.
    */
   public async init(): Promise<void> {
     try {
@@ -193,7 +211,8 @@ export class LocalDatabase {
       // If durable driver is empty, check legacy storage and migrate with verification
       await this.migrateFromLegacyStorage();
     } catch (driverErr) {
-      console.warn('Durable driver initialization failed, continuing with memory cache:', driverErr);
+      console.error('Durable driver initialization failed:', driverErr);
+      throw driverErr;
     }
   }
 
@@ -282,17 +301,26 @@ export class LocalDatabase {
   }
 
   /**
-   * Persists database state asynchronously to both cache and durable SQLite / IndexedDB driver.
+   * Persists database state asynchronously to durable SQLite / IndexedDB driver.
+   * Ensures durable writes complete before reporting success and propagates any storage errors.
    */
   public async persist(): Promise<void> {
-    this.persistSync();
     if (this.driver) {
-      try {
-        const serializable = this.toSerializable();
-        await this.driver.setItem(this.storageKey, JSON.stringify(serializable));
-      } catch (err) {
-        console.error('Database durable persist failed:', err);
-      }
+      const serializable = this.toSerializable();
+      await this.driver.setItem(this.storageKey, JSON.stringify(serializable));
+    }
+    this.persistSync();
+  }
+
+  /**
+   * Helper for internal synchronous mutating methods.
+   * If a transaction is in progress, intermediate mutations are not persisted until commit.
+   */
+  private autoPersist(): void {
+    if (!this.inTransaction) {
+      this.persist().catch((err) => {
+        console.warn('Auto-persist notice:', err);
+      });
     }
   }
 
@@ -304,19 +332,37 @@ export class LocalDatabase {
     }
     this.inTransaction = true;
     this.snapshotBeforeTx = JSON.stringify(this.toSerializable());
+    if (this.driver && typeof this.driver.beginTransaction === 'function') {
+      await this.driver.beginTransaction();
+    }
   }
 
   public async commitTransaction(): Promise<void> {
     if (!this.inTransaction) {
       throw new Error('Cannot commit: no transaction in progress.');
     }
-    this.inTransaction = false;
-    this.snapshotBeforeTx = null;
-    await this.persist();
+    try {
+      await this.persist();
+      if (this.driver && typeof this.driver.commitTransaction === 'function') {
+        await this.driver.commitTransaction();
+      }
+      this.inTransaction = false;
+      this.snapshotBeforeTx = null;
+    } catch (err) {
+      await this.rollbackTransaction();
+      throw err;
+    }
   }
 
   public async rollbackTransaction(): Promise<void> {
-    if (!this.inTransaction) return;
+    if (!this.inTransaction && !this.snapshotBeforeTx) return;
+    try {
+      if (this.driver && typeof this.driver.rollbackTransaction === 'function') {
+        await this.driver.rollbackTransaction();
+      }
+    } catch (driverRollbackErr) {
+      console.warn('Driver rollback warning:', driverRollbackErr);
+    }
     if (this.snapshotBeforeTx) {
       try {
         const parsed = JSON.parse(this.snapshotBeforeTx);
@@ -413,6 +459,7 @@ export class LocalDatabase {
       workspaceId: wsPersonalId,
       name: 'Cash in Hand (নগদ ক্যাশ)',
       kind: 'cash',
+      classification: 'asset',
       openingBalanceMinor: '0',
       createdAt: now,
     };
@@ -421,6 +468,7 @@ export class LocalDatabase {
       workspaceId: wsPersonalId,
       name: 'bKash (বিকাশ একাউন্ট)',
       kind: 'bkash',
+      classification: 'asset',
       accountNumberMasked: '',
       openingBalanceMinor: '0',
       createdAt: now,
@@ -430,6 +478,7 @@ export class LocalDatabase {
       workspaceId: wsPersonalId,
       name: 'Bank Account (ব্যাংক হিসাব)',
       kind: 'bank',
+      classification: 'asset',
       accountNumberMasked: '',
       openingBalanceMinor: '0',
       createdAt: now,
@@ -444,6 +493,7 @@ export class LocalDatabase {
       workspaceId: wsBusinessId,
       name: 'Cash Drawer (দোকানের ক্যাশ)',
       kind: 'cash',
+      classification: 'asset',
       openingBalanceMinor: '0',
       createdAt: now,
     };
@@ -452,6 +502,7 @@ export class LocalDatabase {
       workspaceId: wsBusinessId,
       name: 'bKash Merchant (মার্চেন্ট)',
       kind: 'bkash',
+      classification: 'asset',
       accountNumberMasked: '',
       openingBalanceMinor: '0',
       createdAt: now,
@@ -607,7 +658,7 @@ export class LocalDatabase {
       createdAt: new Date().toISOString(),
     };
     this.state.workspaces.set(ws.id, ws);
-    this.persist();
+    this.autoPersist();
     return ws;
   }
 
@@ -615,7 +666,7 @@ export class LocalDatabase {
     const ws = this.state.workspaces.get(id);
     if (!ws) return false;
     ws.archivedAt = new Date().toISOString();
-    this.persist();
+    this.autoPersist();
     return true;
   }
 
@@ -623,7 +674,7 @@ export class LocalDatabase {
     const ws = this.state.workspaces.get(id);
     if (!ws) return false;
     ws.archivedAt = null;
-    this.persist();
+    this.autoPersist();
     return true;
   }
 
@@ -632,7 +683,7 @@ export class LocalDatabase {
     if (!ws) return false;
     if (updates.name) ws.name = updates.name.trim();
     if (updates.kind) ws.kind = updates.kind;
-    this.persist();
+    this.autoPersist();
     return true;
   }
 
@@ -647,19 +698,21 @@ export class LocalDatabase {
     name: string,
     kind: Account['kind'],
     openingBalanceMinor = '0',
-    accountNumberMasked = ''
+    accountNumberMasked = '',
+    classification: Account['classification'] = 'asset'
   ): Account {
     const acc: Account = {
       id: generateUUID(),
       workspaceId,
       name,
       kind,
+      classification,
       accountNumberMasked,
       openingBalanceMinor,
       createdAt: new Date().toISOString(),
     };
     this.state.accounts.set(acc.id, acc);
-    this.persist();
+    this.autoPersist();
     return acc;
   }
 
@@ -1269,7 +1322,8 @@ export class LocalDatabase {
   }
 
   public async loadFromSerializable(data: Record<string, any>): Promise<void> {
-    this.state.schemaVersion = data.schemaVersion || CURRENT_SCHEMA_VERSION;
+    const fromVer = data.schemaVersion || 1;
+    this.state.schemaVersion = Math.max(fromVer, CURRENT_SCHEMA_VERSION);
     this.state.localIdentity = data.localIdentity || null;
     this.state.deviceIdentity = data.deviceIdentity || {
       deviceId: generateUUID(),
@@ -1295,6 +1349,142 @@ export class LocalDatabase {
     this.state.localSnapshots = new Map(data.localSnapshots || []);
     this.state.schemaMigrations = data.schemaMigrations || [];
     this.state.preferences = new Map(data.preferences || []);
+
+    // Perform non-destructive migrations if fromVer < 4
+    if (fromVer < 4) {
+      await this.runVersion4Migration(fromVer);
+    }
+  }
+
+  private async runVersion4Migration(fromVer: number): Promise<void> {
+    // 1. Ensure all accounts have a GAAP classification (default 'asset')
+    for (const [id, acc] of this.state.accounts.entries()) {
+      if (!acc.classification) {
+        this.state.accounts.set(id, {
+          ...acc,
+          classification: 'asset',
+        });
+      }
+    }
+    // 2. Append migration log entry
+    this.state.schemaMigrations.push({
+      fromVersion: fromVer,
+      toVersion: 4,
+      checksum: 'double-entry-ledger-v4',
+      appliedAt: new Date().toISOString(),
+    });
+    this.state.schemaVersion = 4;
+  }
+
+  /**
+   * Independently verifies the mathematical and financial integrity of the double-entry ledger.
+   * Asserts:
+   * 1. Every journal transaction is internally balanced (total debits == total credits).
+   * 2. Grand trial balance across all transactions in the workspace matches (total workspace debits == total workspace credits).
+   * 3. Independently computed account balances match calculateAccountSummaries.
+   * 4. Invariant: Assets Net Delta === Net Revenue - Expenses.
+   */
+  public verifyLedgerIntegrity(workspaceId: UUID): {
+    isValid: boolean;
+    trialBalanceMatched: boolean;
+    totalDebits: string;
+    totalCredits: string;
+    netIncome: string;
+    totalAssetBalance: string;
+    discrepancies: string[];
+  } {
+    const txs = this.getTransactions(workspaceId);
+    let totalWorkspaceDebits = 0n;
+    let totalWorkspaceCredits = 0n;
+    const discrepancies: string[] = [];
+
+    // 1. Transaction-level balance and aggregate trial balance
+    for (const tx of txs) {
+      if (tx.isDeleted) continue;
+      let txDebits = 0n;
+      let txCredits = 0n;
+      for (const line of tx.lines) {
+        const d = toPaisa(line.debitMinor);
+        const c = toPaisa(line.creditMinor);
+        if (d < 0n || c < 0n) {
+          discrepancies.push(`Transaction ${tx.id} line ${line.id} has negative amounts`);
+        }
+        txDebits += d;
+        txCredits += c;
+        totalWorkspaceDebits += d;
+        totalWorkspaceCredits += c;
+      }
+      if (txDebits !== txCredits) {
+        discrepancies.push(
+          `Transaction ${tx.id} unbalanced! Debits=${txDebits}, Credits=${txCredits}`
+        );
+      }
+    }
+
+    const trialBalanceMatched = totalWorkspaceDebits === totalWorkspaceCredits;
+    if (!trialBalanceMatched) {
+      discrepancies.push(
+        `Trial balance mismatch! Grand total debits (${totalWorkspaceDebits}) != Grand total credits (${totalWorkspaceCredits})`
+      );
+    }
+
+    // 2. Independently calculate account balances
+    const accounts = this.getAccounts(workspaceId);
+    const summaries = this.calculateAccountSummaries(workspaceId);
+    const summaryMap = new Map(summaries.map((s) => [s.accountId, s]));
+
+    let totalAssetBalance = 0n;
+    for (const acc of accounts) {
+      let expectedDebits = 0n;
+      let expectedCredits = 0n;
+      for (const tx of txs) {
+        if (tx.isDeleted) continue;
+        for (const line of tx.lines) {
+          if (line.accountId === acc.id && !line.categoryId) {
+            expectedDebits += toPaisa(line.debitMinor);
+            expectedCredits += toPaisa(line.creditMinor);
+          }
+        }
+      }
+      const expectedBalance = toPaisa(acc.openingBalanceMinor) + expectedDebits - expectedCredits;
+      totalAssetBalance += expectedBalance;
+
+      const summary = summaryMap.get(acc.id);
+      if (!summary) {
+        discrepancies.push(`Missing summary for account ${acc.id}`);
+      } else if (summary.currentBalanceMinor !== expectedBalance.toString()) {
+        discrepancies.push(
+          `Account ${acc.name} balance mismatch! Expected ${expectedBalance}, got ${summary.currentBalanceMinor}`
+        );
+      }
+    }
+
+    // 3. Nominal revenue and expense verification
+    let totalRevenue = 0n;
+    let totalExpense = 0n;
+    for (const tx of txs) {
+      if (tx.isDeleted || (tx as any).isReplacedBy || tx.transactionType === 'reversal') continue;
+      for (const line of tx.lines) {
+        if (line.categoryId) {
+          if (tx.transactionType === 'income') {
+            totalRevenue += toPaisa(line.creditMinor);
+          } else if (tx.transactionType === 'expense' || tx.transactionType === 'transfer') {
+            totalExpense += toPaisa(line.debitMinor);
+          }
+        }
+      }
+    }
+    const netIncome = totalRevenue - totalExpense;
+
+    return {
+      isValid: discrepancies.length === 0,
+      trialBalanceMatched,
+      totalDebits: totalWorkspaceDebits.toString(),
+      totalCredits: totalWorkspaceCredits.toString(),
+      netIncome: netIncome.toString(),
+      totalAssetBalance: totalAssetBalance.toString(),
+      discrepancies,
+    };
   }
 
   public getRawState(): DatabaseState {

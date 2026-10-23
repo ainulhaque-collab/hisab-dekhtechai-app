@@ -20,6 +20,11 @@ import {
 } from '../domain/journal';
 import { computeOccurrenceId, evaluateBudget } from '../domain/recurring';
 import { sanitizeCSVCell } from '../domain/csv';
+import {
+  SYSTEM_ACCOUNTS,
+  normalBalanceIsDebit,
+  getSystemAccountClassification
+} from '../contracts/ledger';
 
 test('Money domain: integer paisa conversion and exact math', () => {
   // 1250.50 BDT = 125050 paisa
@@ -162,4 +167,62 @@ test('CSV formula injection protection', () => {
   assert.equal(sanitizeCSVCell('-250'), `'-250`);
   assert.equal(sanitizeCSVCell('+8801700000000'), `'+8801700000000`);
   assert.equal(sanitizeCSVCell('Normal text'), 'Normal text');
+});
+
+test('Double-entry: Distinct Asset, Revenue, Expense and Equity classifications and contra-accounts', () => {
+  // Verify normal balances
+  assert.equal(normalBalanceIsDebit('asset'), true, 'Assets have debit normal balances');
+  assert.equal(normalBalanceIsDebit('expense'), true, 'Expenses have debit normal balances');
+  assert.equal(normalBalanceIsDebit('liability'), false, 'Liabilities have credit normal balances');
+  assert.equal(normalBalanceIsDebit('equity'), false, 'Equity has credit normal balance');
+  assert.equal(normalBalanceIsDebit('revenue'), false, 'Revenue has credit normal balance');
+
+  // Verify system accounts classifications
+  assert.equal(getSystemAccountClassification(SYSTEM_ACCOUNTS.OPENING_EQUITY), 'equity');
+  assert.equal(getSystemAccountClassification(SYSTEM_ACCOUNTS.REVENUE_CLEARING), 'revenue');
+  assert.equal(getSystemAccountClassification(SYSTEM_ACCOUNTS.EXPENSE_CLEARING), 'expense');
+
+  // 1. Income posting contra-side
+  const incomeJournal = buildIncomeJournal({
+    workspaceId: 'ws-1',
+    assetAccountId: 'acc-cash',
+    revenueCategoryId: 'cat-sales',
+    amountMinor: '150000',
+    effectiveDate: '2026-10-23',
+    opId: 'op-inc',
+  });
+  const incAssetLine = incomeJournal.lines.find((l) => l.accountId === 'acc-cash');
+  const incNominalLine = incomeJournal.lines.find((l) => l.accountId === SYSTEM_ACCOUNTS.REVENUE_CLEARING);
+  assert.ok(incAssetLine && incAssetLine.debitMinor === '150000' && incAssetLine.categoryId === null);
+  assert.ok(incNominalLine && incNominalLine.creditMinor === '150000' && incNominalLine.categoryId === 'cat-sales');
+  assert.notEqual(incAssetLine.accountId, incNominalLine.accountId, 'Asset and Revenue accounts must be distinct');
+
+  // 2. Expense posting contra-side
+  const expJournal = buildExpenseJournal({
+    workspaceId: 'ws-1',
+    assetAccountId: 'acc-bank',
+    expenseCategoryId: 'cat-rent',
+    amountMinor: '45000',
+    effectiveDate: '2026-10-23',
+    opId: 'op-exp',
+  });
+  const expAssetLine = expJournal.lines.find((l) => l.accountId === 'acc-bank');
+  const expNominalLine = expJournal.lines.find((l) => l.accountId === SYSTEM_ACCOUNTS.EXPENSE_CLEARING);
+  assert.ok(expAssetLine && expAssetLine.creditMinor === '45000' && expAssetLine.categoryId === null);
+  assert.ok(expNominalLine && expNominalLine.debitMinor === '45000' && expNominalLine.categoryId === 'cat-rent');
+  assert.notEqual(expAssetLine.accountId, expNominalLine.accountId, 'Asset and Expense accounts must be distinct');
+
+  // 3. Opening balance posting contra-side
+  const openJournal = buildOpeningBalanceJournal({
+    workspaceId: 'ws-1',
+    assetAccountId: 'acc-bkash',
+    amountMinor: '200000',
+    effectiveDate: '2026-10-23',
+    opId: 'op-open',
+  });
+  const openAssetLine = openJournal.lines.find((l) => l.accountId === 'acc-bkash');
+  const openEquityLine = openJournal.lines.find((l) => l.accountId === SYSTEM_ACCOUNTS.OPENING_EQUITY);
+  assert.ok(openAssetLine && openAssetLine.debitMinor === '200000');
+  assert.ok(openEquityLine && openEquityLine.creditMinor === '200000');
+  assert.notEqual(openAssetLine.accountId, openEquityLine.accountId, 'Asset and Equity accounts must be distinct');
 });
