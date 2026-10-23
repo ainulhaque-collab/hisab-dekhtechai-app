@@ -79,7 +79,6 @@ function getOrCreateDeviceDb(deviceId: string, deviceName: string): LocalDatabas
   let db = deviceDatabases.get(deviceId);
   if (!db) {
     db = new LocalDatabase(`hisab_db_${deviceId}`);
-    db.seedDefaultEntities();
     db.setDeviceIdentity(deviceId, deviceName);
     deviceDatabases.set(deviceId, db);
   }

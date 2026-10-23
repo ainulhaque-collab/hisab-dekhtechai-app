@@ -83,6 +83,7 @@ export class LocalDatabase {
   constructor(storageKey = 'hisab_dekhtechai_db') {
     this.storageKey = storageKey;
     this.state = this.createEmptyState();
+    this.loadFromStorage();
   }
 
   private createEmptyState(): DatabaseState {
@@ -141,30 +142,37 @@ export class LocalDatabase {
   }
 
   /**
-   * Loads state from persistent storage (localStorage / IndexedDB wrapper).
+   * Automatically loads state from durable storage, seeding defaults only if empty.
    */
-  public async init(): Promise<void> {
+  public loadFromStorage(): boolean {
     if (typeof localStorage !== 'undefined') {
       try {
         const raw = localStorage.getItem(this.storageKey);
         if (raw) {
           const parsed = JSON.parse(raw);
-          await this.loadFromSerializable(parsed);
-          return;
+          this.loadFromSerializable(parsed);
+          return true;
         }
       } catch (err) {
         console.warn('Failed to parse saved database from storage, initializing fresh:', err);
       }
     }
-    // Seed initial defaults if completely empty
     this.seedDefaultEntities();
-    await this.persist();
+    this.persistSync();
+    return false;
   }
 
   /**
-   * Persists database state to durable storage.
+   * Loads state from persistent storage (localStorage wrapper).
    */
-  public async persist(): Promise<void> {
+  public async init(): Promise<void> {
+    this.loadFromStorage();
+  }
+
+  /**
+   * Persists database state synchronously to durable storage.
+   */
+  public persistSync(): void {
     if (typeof localStorage !== 'undefined') {
       try {
         const serializable = this.toSerializable();
@@ -173,6 +181,13 @@ export class LocalDatabase {
         console.error('Database persist failed:', e);
       }
     }
+  }
+
+  /**
+   * Persists database state to durable storage.
+   */
+  public async persist(): Promise<void> {
+    this.persistSync();
   }
 
   public getDeviceId(): UUID {

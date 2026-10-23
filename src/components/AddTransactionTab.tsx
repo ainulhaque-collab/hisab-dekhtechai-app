@@ -364,19 +364,19 @@ export const AddTransactionTab: React.FC<AddTransactionTabProps> = ({ onSuccess 
 
   return (
     <div className="max-w-lg mx-auto pb-36 animate-in fade-in">
-      <div className="bg-white rounded-2xl border border-slate-200 shadow-sm p-4 sm:p-5">
-        <h1 className="text-base font-bold text-slate-800 mb-4 tracking-tight">
-          {isEn ? 'Add New Transaction' : 'নতুন লেনদেন যোগ করুন'}
+      <div className="bg-white rounded-2xl border border-slate-200/80 shadow-xs p-4 sm:p-5">
+        <h1 className="text-base font-bold text-slate-900 mb-4 tracking-tight">
+          {isEn ? 'New Transaction' : 'নতুন লেনদেন'}
         </h1>
 
         {/* Transaction Type Segmented Switcher */}
-        <div className="grid grid-cols-3 gap-1.5 p-1 bg-slate-100 rounded-xl mb-4 text-xs font-semibold">
+        <div className="grid grid-cols-3 gap-1 p-1 bg-slate-100/90 rounded-xl mb-4 text-xs font-semibold">
           <button
             type="button"
             onClick={() => setType('expense')}
             className={`py-2 rounded-lg flex items-center justify-center gap-1.5 transition-all ${
               type === 'expense'
-                ? 'bg-rose-600 text-white shadow-xs'
+                ? 'bg-white text-rose-600 shadow-2xs'
                 : 'text-slate-600 hover:text-slate-900'
             }`}
           >
@@ -389,12 +389,12 @@ export const AddTransactionTab: React.FC<AddTransactionTabProps> = ({ onSuccess 
             onClick={() => setType('income')}
             className={`py-2 rounded-lg flex items-center justify-center gap-1.5 transition-all ${
               type === 'income'
-                ? 'bg-emerald-600 text-white shadow-xs'
+                ? 'bg-white text-emerald-600 shadow-2xs'
                 : 'text-slate-600 hover:text-slate-900'
             }`}
           >
             <TrendingUp className="w-3.5 h-3.5" />
-            <span>{isEn ? 'Income' : 'আয়'}</span>
+            <span>{isEn ? 'Income' : 'জমা'}</span>
           </button>
 
           <button
@@ -402,7 +402,7 @@ export const AddTransactionTab: React.FC<AddTransactionTabProps> = ({ onSuccess 
             onClick={() => setType('transfer')}
             className={`py-2 rounded-lg flex items-center justify-center gap-1.5 transition-all ${
               type === 'transfer'
-                ? 'bg-blue-700 text-white shadow-xs'
+                ? 'bg-white text-slate-900 shadow-2xs'
                 : 'text-slate-600 hover:text-slate-900'
             }`}
           >
@@ -422,21 +422,18 @@ export const AddTransactionTab: React.FC<AddTransactionTabProps> = ({ onSuccess 
           <div className="p-3 mb-4 rounded-xl bg-emerald-50 border border-emerald-200 text-emerald-800 text-xs flex items-center gap-2 animate-in zoom-in-95">
             <Check className="w-4 h-4 shrink-0 text-emerald-600" />
             <span className="font-semibold">
-              {isEn ? 'Saved to local ledger & queued for sync!' : 'ডিভাইসে সংরক্ষিত হয়েছে!'}
+              {isEn ? 'Transaction saved!' : 'লেনদেন সংরক্ষিত হয়েছে!'}
             </span>
           </div>
         )}
 
         <form onSubmit={handleSubmit} className="space-y-4 text-xs">
-          {/* Amount Input with Auto Bengali-to-English Digits Conversion */}
+          {/* Amount Input */}
           <div>
             <div className="flex items-center justify-between mb-1">
               <label className="text-slate-700 font-semibold">
-                {isEn ? 'Amount (BDT)' : 'টাকার পরিমাণ (BDT)'}
+                {isEn ? 'Amount (BDT)' : 'টাকার পরিমাণ'}
               </label>
-              <span className="text-[10px] text-slate-400">
-                {isEn ? 'Bengali digits auto-converted' : 'বাংলা লিখলেও ইংরেজিতে রূপান্তর হবে'}
-              </span>
             </div>
             <div className="relative">
               <span className="absolute left-3.5 top-1/2 -translate-y-1/2 text-xl font-bold text-slate-400">
@@ -579,14 +576,14 @@ export const AddTransactionTab: React.FC<AddTransactionTabProps> = ({ onSuccess 
             </div>
           )}
 
-          {/* Multiple Business Persons / Members Selector (Issue #3) */}
+          {/* Multiple Business Persons / Members Selector */}
           {isBusiness && (
-            <div className="p-3 bg-blue-50/40 rounded-xl border border-blue-100">
+            <div className="p-3 bg-slate-50/80 rounded-xl border border-slate-200/80">
               <div className="flex items-center justify-between mb-1.5">
                 <div className="flex items-center gap-1.5">
-                  <Users className="w-3.5 h-3.5 text-blue-700" />
-                  <label className="text-slate-800 font-bold">
-                    {isEn ? 'Associated Person / Member' : 'সংশ্লিষ্ট ব্যক্তি / সদস্য (পার্টনার, স্টাফ, কাস্টমার)'}
+                  <Users className="w-3.5 h-3.5 text-slate-600" />
+                  <label className="text-slate-800 font-semibold">
+                    {isEn ? 'Associated Member' : 'সংশ্লিষ্ট সদস্য'}
                   </label>
                 </div>
                 <button
@@ -597,10 +594,10 @@ export const AddTransactionTab: React.FC<AddTransactionTabProps> = ({ onSuccess 
                     setNewPartyRole('partner');
                     setShowAddPartyModal(true);
                   }}
-                  className="text-blue-700 hover:text-blue-900 font-bold flex items-center gap-1 text-[11px]"
+                  className="text-blue-700 hover:text-blue-900 font-semibold flex items-center gap-1 text-[11px]"
                 >
                   <UserPlus className="w-3 h-3" />
-                  <span>{isEn ? '+ Add Person' : '+ নতুন ব্যক্তি'}</span>
+                  <span>{isEn ? 'Add' : 'যোগ'}</span>
                 </button>
               </div>
 
@@ -610,7 +607,7 @@ export const AddTransactionTab: React.FC<AddTransactionTabProps> = ({ onSuccess 
                 className="w-full px-3 py-2 bg-white border border-slate-300 rounded-xl text-xs font-medium focus:bg-white focus:outline-none focus:ring-2 focus:ring-blue-600"
               >
                 <option value="">
-                  {isEn ? '-- None (General Business Transaction) --' : '-- কোনো ব্যক্তি নয় (সাধারণ ব্যবসা) --'}
+                  {isEn ? '-- None / General Business --' : '-- সাধারণ ব্যবসা (ব্যক্তি ছাড়া) --'}
                 </option>
                 {parties.map((p) => (
                   <option key={p.id} value={p.id}>
@@ -618,11 +615,6 @@ export const AddTransactionTab: React.FC<AddTransactionTabProps> = ({ onSuccess 
                   </option>
                 ))}
               </select>
-              <p className="text-[10px] text-slate-500 mt-1">
-                {isEn
-                  ? 'Track income/expenses per partner, employee salary, customer sales, or supplier payments'
-                  : '১ টি ব্যবসার খাতায় একাধিক অংশীদার, কর্মচারীর বেতন, কাস্টমার বা মহাজনের হিসাব রাখতে সংশ্লিষ্ট ব্যক্তি নির্বাচন করুন'}
-              </p>
             </div>
           )}
 
@@ -630,14 +622,14 @@ export const AddTransactionTab: React.FC<AddTransactionTabProps> = ({ onSuccess 
           {type === 'transfer' && (
             <div>
               <label className="block text-slate-700 font-semibold mb-1">
-                {isEn ? 'Cashout Charge / Fee (Optional)' : 'ক্যাশআউট চার্জ / ফি (ঐচ্ছিক Fee)'}
+                {isEn ? 'Transfer Fee (Optional)' : 'চার্জ বা ফি (ঐচ্ছিক)'}
               </label>
               <input
                 type="text"
                 placeholder="0.00"
                 value={feeStr}
                 onChange={(e) => setFeeStr(normalizeNumericAmountInput(e.target.value))}
-                className="w-full px-3 py-2 bg-slate-50 border border-slate-300 rounded-xl text-xs focus:bg-white focus:outline-none focus:ring-2 focus:ring-blue-600 tabular-nums"
+                className="w-full px-3 py-2 bg-slate-50 border border-slate-300 rounded-xl text-xs focus:bg-white focus:outline-none focus:ring-2 focus:ring-blue-600 font-mono tabular-nums"
               />
             </div>
           )}
@@ -646,7 +638,7 @@ export const AddTransactionTab: React.FC<AddTransactionTabProps> = ({ onSuccess 
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
             <div>
               <label className="block text-slate-700 font-semibold mb-1">
-                {isEn ? 'Date' : 'তারিখ (Date)'}
+                {isEn ? 'Date' : 'তারিখ'}
               </label>
               <input
                 type="date"
@@ -658,11 +650,11 @@ export const AddTransactionTab: React.FC<AddTransactionTabProps> = ({ onSuccess 
 
             <div>
               <label className="block text-slate-700 font-semibold mb-1">
-                {isEn ? 'Note / Description (Optional)' : 'বিবরণ / নোট (ঐচ্ছিক Note)'}
+                {isEn ? 'Note (Optional)' : 'বিবরণ (ঐচ্ছিক)'}
               </label>
               <input
                 type="text"
-                placeholder={isEn ? 'e.g., Grocery store, lunch...' : 'যেমন: দুপুরের খাবার, বিদ্যুৎ বিল...'}
+                placeholder={isEn ? 'e.g., Grocery, lunch, vendor bill' : 'যেমন: বাজার খরচ, মালামাল ক্রয়'}
                 value={note}
                 onChange={(e) => setNote(e.target.value)}
                 className="w-full px-3 py-2 bg-slate-50 border border-slate-300 rounded-xl text-xs focus:bg-white focus:outline-none focus:ring-2 focus:ring-blue-600"
@@ -673,13 +665,13 @@ export const AddTransactionTab: React.FC<AddTransactionTabProps> = ({ onSuccess 
           {/* Receipt Attachment */}
           <div>
             <label className="block text-slate-700 font-semibold mb-1">
-              {isEn ? 'Receipt / Voucher Photo' : 'রসিদ বা ভাউচার ছবি (Receipt Photo)'}
+              {isEn ? 'Receipt Photo (Optional)' : 'রসিদের ছবি (ঐচ্ছিক)'}
             </label>
             {!receiptName ? (
-              <label className="flex items-center justify-center gap-2 p-3 border-2 border-dashed border-slate-200 rounded-xl hover:border-blue-400 cursor-pointer bg-slate-50 transition-colors">
-                <Camera className="w-4 h-4 text-slate-500" />
+              <label className="flex items-center justify-center gap-2 p-3 border-2 border-dashed border-slate-200 rounded-xl hover:border-slate-400 cursor-pointer bg-slate-50/50 transition-colors">
+                <Camera className="w-4 h-4 text-slate-400" />
                 <span className="text-slate-600 font-medium">
-                  {isEn ? 'Take photo or upload receipt' : 'রসিদের ছবি তুলুন বা আপলোড করুন'}
+                  {isEn ? 'Upload receipt photo' : 'রসিদের ছবি তুলুন বা আপলোড করুন'}
                 </span>
                 <input
                   type="file"
@@ -689,7 +681,7 @@ export const AddTransactionTab: React.FC<AddTransactionTabProps> = ({ onSuccess 
                 />
               </label>
             ) : (
-              <div className="flex items-center justify-between p-2.5 bg-blue-50 border border-blue-200 rounded-xl text-xs text-blue-900">
+              <div className="flex items-center justify-between p-2.5 bg-slate-100 border border-slate-200 rounded-xl text-xs text-slate-900">
                 <span className="truncate max-w-[200px]">{receiptName}</span>
                 <button
                   type="button"
@@ -697,7 +689,7 @@ export const AddTransactionTab: React.FC<AddTransactionTabProps> = ({ onSuccess 
                     setReceiptName(null);
                     setReceiptBase64(null);
                   }}
-                  className="p-1 hover:bg-blue-100 rounded text-blue-700"
+                  className="p-1 hover:bg-slate-200 rounded text-slate-600"
                 >
                   <X className="w-3.5 h-3.5" />
                 </button>
@@ -709,10 +701,10 @@ export const AddTransactionTab: React.FC<AddTransactionTabProps> = ({ onSuccess 
           <button
             type="submit"
             disabled={isSubmitting}
-            className="w-full py-3 bg-blue-700 hover:bg-blue-800 active:scale-[0.99] text-white rounded-xl text-sm font-bold shadow-md shadow-blue-700/20 transition-all flex items-center justify-center gap-2 disabled:opacity-50"
+            className="w-full py-3 bg-slate-900 hover:bg-slate-800 active:scale-[0.99] text-white rounded-xl text-sm font-bold shadow-xs transition-all flex items-center justify-center gap-2 disabled:opacity-50"
           >
             <Check className="w-4 h-4" />
-            <span>{isEn ? 'Save Transaction' : 'সংরক্ষণ করুন (Save Transaction)'}</span>
+            <span>{isEn ? 'Save Transaction' : 'সংরক্ষণ করুন'}</span>
           </button>
         </form>
       </div>
@@ -745,39 +737,28 @@ export const AddTransactionTab: React.FC<AddTransactionTabProps> = ({ onSuccess 
 
             <form onSubmit={handleCreateCategory} className="space-y-3 pt-3">
               {/* If subcategory mode, show the parent category badge clearly */}
-              {categoryModalMode === 'subcategory' ? (
+              {categoryModalMode === 'subcategory' && (
                 <div>
-                  <label className="block text-slate-600 font-semibold mb-1 text-[11px]">
-                    {isEn ? 'Parent Category:' : 'মূল ক্যাটাগরি (Parent Category):'}
+                  <label className="block text-slate-500 font-medium mb-1 text-[11px]">
+                    {isEn ? 'Parent Category' : 'মূল ক্যাটাগরি'}
                   </label>
-                  <div className="p-2.5 bg-blue-50 border border-blue-200 rounded-xl text-blue-900 font-bold flex items-center gap-1.5">
+                  <div className="p-2.5 bg-slate-100 rounded-xl text-slate-800 font-semibold flex items-center gap-2">
                     <span className="w-2 h-2 rounded-full bg-blue-600" />
                     <span>{isEn && currentParentCat?.nameEn ? currentParentCat.nameEn : currentParentCat?.name || 'Category'}</span>
                   </div>
-                  <p className="text-[10px] text-slate-400 mt-1">
-                    {isEn
-                      ? 'This sub-category will belong under the selected main category above.'
-                      : 'এই সাব-ক্যাটাগরিটি ওপরের মূল ক্যাটাগরির অধীনে যুক্ত হবে।'}
-                  </p>
-                </div>
-              ) : (
-                <div className="p-2.5 bg-slate-50 border border-slate-200 rounded-xl text-slate-600 text-[11px]">
-                  {isEn
-                    ? 'Creating a top-level parent category. You can add sub-categories under it later.'
-                    : 'একটি মূল ক্যাটাগরি তৈরি হচ্ছে। পরবর্তীতে এর অধীনে সাব-ক্যাটাগরি যুক্ত করা যাবে।'}
                 </div>
               )}
 
-              {/* Single clean name input: No separate English input, no dual tabs */}
+              {/* Single clean name input */}
               <div>
-                <label className="block text-slate-700 font-bold mb-1">
+                <label className="block text-slate-700 font-semibold mb-1">
                   {categoryModalMode === 'subcategory'
                     ? isEn
                       ? 'Sub-Category Name'
-                      : 'সাব-ক্যাটাগরির নাম'
+                      : 'উপ-খাত / সাব-ক্যাটাগরির নাম'
                     : isEn
                     ? 'Category Name'
-                    : 'ক্যাটাগরির নাম'}
+                    : 'খাত / ক্যাটাগরির নাম'}
                 </label>
                 <input
                   type="text"
@@ -785,14 +766,14 @@ export const AddTransactionTab: React.FC<AddTransactionTabProps> = ({ onSuccess 
                     categoryModalMode === 'subcategory'
                       ? isEn
                         ? 'e.g. Bus Fare, Gas Bill...'
-                        : 'যেমন: বাস ভাড়া, গ্যাস বিল...'
+                        : 'যেমন: বাস ভাড়া, গ্যাস বিল'
                       : isEn
                       ? 'e.g. Transportation, Utilities...'
-                      : 'যেমন: যাতায়াত, বাড়ি ভাড়া, পাইকারি ক্রয়...'
+                      : 'যেমন: যাতায়াত, বাড়ি ভাড়া, পাইকারি ক্রয়'
                   }
                   value={singleCatName}
                   onChange={(e) => setSingleCatName(e.target.value)}
-                  className="w-full px-3 py-2.5 bg-slate-50 border border-slate-300 rounded-xl font-medium focus:bg-white focus:outline-none focus:ring-2 focus:ring-blue-600"
+                  className="w-full px-3 py-2 bg-slate-50 border border-slate-300 rounded-xl font-medium focus:bg-white focus:outline-none focus:ring-2 focus:ring-blue-600"
                   required
                   autoFocus
                 />
@@ -801,14 +782,14 @@ export const AddTransactionTab: React.FC<AddTransactionTabProps> = ({ onSuccess 
               <div className="flex gap-2 pt-2">
                 <button
                   type="submit"
-                  className="flex-1 py-2.5 bg-blue-700 hover:bg-blue-800 text-white rounded-xl font-bold shadow-xs transition-colors"
+                  className="flex-1 py-2.5 bg-slate-900 hover:bg-slate-800 text-white rounded-xl font-bold shadow-xs transition-colors"
                 >
                   {isEn ? 'Save' : 'সংরক্ষণ করুন'}
                 </button>
                 <button
                   type="button"
                   onClick={() => setCategoryModalMode(null)}
-                  className="px-3 py-2.5 text-slate-600 hover:bg-slate-100 rounded-xl font-semibold"
+                  className="px-4 py-2.5 text-slate-600 hover:bg-slate-100 rounded-xl font-semibold"
                 >
                   {isEn ? 'Cancel' : 'বাতিল'}
                 </button>

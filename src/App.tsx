@@ -20,6 +20,57 @@ import { AuthModal } from './components/AuthModal';
 import { PartiesModal } from './components/PartiesModal';
 import { JournalTransaction } from './contracts/types';
 
+interface ErrorBoundaryProps {
+  children: React.ReactNode;
+}
+
+interface ErrorBoundaryState {
+  hasError: boolean;
+  error?: Error;
+}
+
+class ErrorBoundary extends React.Component<ErrorBoundaryProps, ErrorBoundaryState> {
+  constructor(props: ErrorBoundaryProps) {
+    super(props);
+    this.state = { hasError: false };
+  }
+
+  static getDerivedStateFromError(error: Error): ErrorBoundaryState {
+    return { hasError: true, error };
+  }
+
+  componentDidCatch(error: Error, errorInfo: React.ErrorInfo) {
+    console.error('Captured by App ErrorBoundary:', error, errorInfo);
+  }
+
+  render() {
+    if (this.state.hasError) {
+      return (
+        <div className="p-6 text-center max-w-sm mx-auto my-12 bg-white rounded-2xl border border-rose-200 shadow-md space-y-3">
+          <div className="w-12 h-12 bg-rose-50 text-rose-600 rounded-full flex items-center justify-center mx-auto text-xl font-bold">
+            !
+          </div>
+          <h2 className="text-sm font-bold text-slate-800">সাময়িক ত্রুটি দেখা দিয়েছে</h2>
+          <p className="text-xs text-slate-500">
+            A temporary issue occurred while rendering this view.
+          </p>
+          <button
+            type="button"
+            onClick={() => {
+              this.setState({ hasError: false });
+              window.location.reload();
+            }}
+            className="px-4 py-2 bg-blue-700 text-white rounded-xl text-xs font-bold hover:bg-blue-800 shadow-xs"
+          >
+            পুনরায় লোড করুন (Reload Page)
+          </button>
+        </div>
+      );
+    }
+    return this.props.children;
+  }
+}
+
 function MainApp() {
   const [activeTab, setActiveTab] = useState<TabType>('home');
   const [selectedTx, setSelectedTx] = useState<JournalTransaction | null>(null);
@@ -47,32 +98,34 @@ function MainApp() {
       />
 
       {/* Main Content Area */}
-      <main className="flex-1 max-w-lg w-full mx-auto px-4 pt-4">
-        {activeTab === 'home' && (
-          <DashboardTab
-            onNavigateToAdd={() => setActiveTab('add')}
-            onNavigateToHistory={() => setActiveTab('history')}
-            onSelectTransaction={handleSelectTransactionFromDashboard}
-            onOpenSyncModal={() => setIsSyncModalOpen(true)}
-            onOpenPartiesModal={() => setIsPartiesModalOpen(true)}
-          />
-        )}
+      <ErrorBoundary>
+        <main className="flex-1 max-w-lg w-full mx-auto px-4 pt-4">
+          {activeTab === 'home' && (
+            <DashboardTab
+              onNavigateToAdd={() => setActiveTab('add')}
+              onNavigateToHistory={() => setActiveTab('history')}
+              onSelectTransaction={handleSelectTransactionFromDashboard}
+              onOpenSyncModal={() => setIsSyncModalOpen(true)}
+              onOpenPartiesModal={() => setIsPartiesModalOpen(true)}
+            />
+          )}
 
-        {activeTab === 'accounts' && <AccountsTab />}
+          {activeTab === 'accounts' && <AccountsTab />}
 
-        {activeTab === 'add' && (
-          <AddTransactionTab onSuccess={() => setActiveTab('home')} />
-        )}
+          {activeTab === 'add' && (
+            <AddTransactionTab onSuccess={() => setActiveTab('home')} />
+          )}
 
-        {activeTab === 'history' && (
-          <HistoryTab
-            selectedTransaction={selectedTx}
-            onClearSelected={() => setSelectedTx(null)}
-          />
-        )}
+          {activeTab === 'history' && (
+            <HistoryTab
+              selectedTransaction={selectedTx}
+              onClearSelected={() => setSelectedTx(null)}
+            />
+          )}
 
-        {activeTab === 'reports' && <ReportsTab />}
-      </main>
+          {activeTab === 'reports' && <ReportsTab />}
+        </main>
+      </ErrorBoundary>
 
       {/* 5-Tab Mobile Navigation Bar */}
       <BottomNav activeTab={activeTab} onChangeTab={setActiveTab} />

@@ -258,15 +258,15 @@ export const PartiesModal: React.FC<PartiesModalProps> = ({ isOpen, onClose }) =
               <div className="flex gap-2 pt-1">
                 <button
                   type="submit"
-                  className="flex-1 py-2 bg-blue-700 hover:bg-blue-800 text-white rounded-xl font-bold flex items-center justify-center gap-1.5 shadow-xs"
+                  className="flex-1 py-2 bg-slate-900 hover:bg-slate-800 text-white rounded-lg font-medium flex items-center justify-center gap-1.5 shadow-2xs transition-colors"
                 >
                   <Check className="w-3.5 h-3.5" />
-                  <span>{editingPartyId ? (isEn ? 'Update Person' : 'আপডেট করুন') : (isEn ? 'Save Person' : 'সংরক্ষণ করুন')}</span>
+                  <span>{editingPartyId ? (isEn ? 'Update' : 'আপডেট') : (isEn ? 'Save' : 'সংরক্ষণ')}</span>
                 </button>
                 <button
                   type="button"
                   onClick={() => setIsAdding(false)}
-                  className="px-3 py-2 text-slate-600 hover:bg-slate-200 rounded-xl font-semibold"
+                  className="px-3 py-2 text-slate-600 hover:bg-slate-100 rounded-lg font-medium border border-slate-200"
                 >
                   {isEn ? 'Cancel' : 'বাতিল'}
                 </button>
@@ -276,10 +276,10 @@ export const PartiesModal: React.FC<PartiesModalProps> = ({ isOpen, onClose }) =
             <button
               type="button"
               onClick={handleStartAdd}
-              className="w-full py-2.5 px-3 border border-dashed border-blue-300 bg-blue-50/50 hover:bg-blue-50 text-blue-700 rounded-xl font-bold flex items-center justify-center gap-2 transition-colors"
+              className="w-full py-2.5 px-3 border border-slate-200 bg-slate-50 hover:bg-slate-100 text-slate-800 rounded-xl font-medium flex items-center justify-center gap-2 transition-colors"
             >
-              <UserPlus className="w-4 h-4" />
-              <span>{isEn ? '+ Add New Person / Partner / Staff' : '+ নতুন ব্যক্তি / পার্টনার / কর্মচারী যোগ করুন'}</span>
+              <UserPlus className="w-4 h-4 text-slate-600" />
+              <span>{isEn ? '+ Add Member' : '+ নতুন সদস্য যোগ'}</span>
             </button>
           )}
 

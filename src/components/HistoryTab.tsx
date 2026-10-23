@@ -223,14 +223,9 @@ export const HistoryTab: React.FC<HistoryTabProps> = ({
   return (
     <div className="space-y-4 pb-24 animate-in fade-in text-xs">
       <div>
-        <h1 className="text-base font-bold text-slate-800 tracking-tight">
-          {isEn ? 'Transaction History & Search' : 'লেনদেনের ইতিহাস ও অনুসন্ধান'}
+        <h1 className="text-base font-bold text-slate-900 tracking-tight">
+          {isEn ? 'Transaction History' : 'লেনদেনের ইতিহাস'}
         </h1>
-        <p className="text-slate-500 text-[11px]">
-          {isEn
-            ? 'Complete double-entry journal with editable records and audit log'
-            : 'অডিট ট্রেইল এবং রদবদল রেকর্ডসহ পূর্ণ বিবরণ'}
-        </p>
       </div>
 
       {/* Search Bar */}
@@ -240,12 +235,12 @@ export const HistoryTab: React.FC<HistoryTabProps> = ({
           type="text"
           placeholder={
             isEn
-              ? 'Search by note, category, account, or person...'
-              : 'বিবরণ, খাত, অ্যাকাউন্ট বা ব্যক্তির নাম দিয়ে খুঁজুন...'
+              ? 'Search by note, category, or account...'
+              : 'বিবরণ, খাত বা অ্যাকাউন্ট দিয়ে খুঁজুন...'
           }
           value={searchTerm}
           onChange={(e) => setSearchTerm(e.target.value)}
-          className="w-full pl-9 pr-3.5 py-2.5 bg-white border border-slate-200 rounded-xl text-xs font-medium focus:outline-none focus:ring-2 focus:ring-blue-600 shadow-xs"
+          className="w-full pl-9 pr-3.5 py-2.5 bg-white border border-slate-200/80 rounded-xl text-xs font-medium focus:outline-none focus:ring-2 focus:ring-blue-600 shadow-2xs"
         />
         {searchTerm && (
           <button
@@ -260,7 +255,7 @@ export const HistoryTab: React.FC<HistoryTabProps> = ({
 
       {/* Filters: Period, Type & Party */}
       <div className="flex flex-wrap items-center justify-between gap-2">
-        {/* Period Chips */}
+        {/* Period Segmented Filter */}
         <div className="flex gap-1 bg-slate-100 p-0.5 rounded-lg font-medium">
           {(['all', 'today', 'month'] as const).map((p) => (
             <button
@@ -269,7 +264,7 @@ export const HistoryTab: React.FC<HistoryTabProps> = ({
               onClick={() => setPeriodFilter(p)}
               className={`px-2.5 py-1 rounded-md text-[11px] capitalize transition-colors ${
                 periodFilter === p
-                  ? 'bg-white text-slate-900 font-bold shadow-xs'
+                  ? 'bg-white text-slate-900 font-bold shadow-2xs'
                   : 'text-slate-600 hover:text-slate-900'
               }`}
             >
@@ -295,15 +290,15 @@ export const HistoryTab: React.FC<HistoryTabProps> = ({
             <select
               value={partyFilter}
               onChange={(e) => setPartyFilter(e.target.value)}
-              className="px-2.5 py-1 bg-white border border-slate-200 rounded-lg text-[11px] font-semibold text-slate-700 shadow-xs focus:outline-none"
+              className="px-2.5 py-1 bg-white border border-slate-200 rounded-lg text-[11px] font-medium text-slate-700 shadow-2xs focus:outline-none"
             >
-              <option value="all">{isEn ? 'All Persons / Parties' : 'সকল ব্যক্তি / সদস্য'}</option>
+              <option value="all">{isEn ? 'All Members' : 'সকল সদস্য'}</option>
               {parties.map((p) => (
                 <option key={p.id} value={p.id}>
                   {p.name} ({getRoleLabel(p.role)})
                 </option>
               ))}
-              <option value="none">{isEn ? 'General (No Person)' : 'ব্যক্তি ছাড়া (সাধারণ)'}</option>
+              <option value="none">{isEn ? 'General' : 'সাধারণ'}</option>
             </select>
           )}
 
@@ -311,13 +306,13 @@ export const HistoryTab: React.FC<HistoryTabProps> = ({
           <select
             value={typeFilter}
             onChange={(e) => setTypeFilter(e.target.value as any)}
-            className="px-2.5 py-1 bg-white border border-slate-200 rounded-lg text-[11px] font-semibold text-slate-700 shadow-xs focus:outline-none"
+            className="px-2.5 py-1 bg-white border border-slate-200 rounded-lg text-[11px] font-medium text-slate-700 shadow-2xs focus:outline-none"
           >
             <option value="all">{isEn ? 'All Types' : 'সকল ধরণ'}</option>
             <option value="expense">{isEn ? 'Expenses' : 'খরচ'}</option>
-            <option value="income">{isEn ? 'Income' : 'আয়'}</option>
+            <option value="income">{isEn ? 'Income' : 'জমা'}</option>
             <option value="transfer">{isEn ? 'Transfers' : 'স্থানান্তর'}</option>
-            <option value="correction">{isEn ? 'Reversals / Corrections' : 'রিভার্সাল / সংশোধন'}</option>
+            <option value="correction">{isEn ? 'Corrections' : 'সংশোধনী'}</option>
           </select>
         </div>
       </div>
@@ -325,21 +320,21 @@ export const HistoryTab: React.FC<HistoryTabProps> = ({
       {/* Transactions List */}
       <div className="space-y-2">
         {filteredTransactions.length === 0 ? (
-          <div className="text-center py-12 bg-white rounded-2xl border border-slate-200 p-6 space-y-2">
-            <div className="w-10 h-10 rounded-full bg-slate-100 text-slate-400 flex items-center justify-center mx-auto">
-              <Search className="w-5 h-5" />
+          <div className="text-center py-12 bg-white rounded-2xl border border-slate-200/80 p-6 space-y-1.5">
+            <div className="w-10 h-10 rounded-full bg-slate-100 text-slate-400 flex items-center justify-center mx-auto mb-1">
+              <Search className="w-4 h-4" />
             </div>
-            <div className="font-bold text-slate-700">
+            <div className="font-semibold text-slate-700 text-xs">
               {isEn ? 'No Transactions Found' : 'কোনো লেনদেন পাওয়া যায়নি'}
             </div>
             <p className="text-[11px] text-slate-400 max-w-xs mx-auto">
               {searchTerm || periodFilter !== 'all' || typeFilter !== 'all' || partyFilter !== 'all'
                 ? isEn
                   ? 'Try adjusting your filters or search keywords.'
-                  : 'অনুগ্রহ করে ফিল্টার পরিবর্তন করুন।'
+                  : 'ফিল্টার পরিবর্তন করে চেষ্টা করুন।'
                 : isEn
-                ? 'Fresh install has zero mock transactions. Add an entry or sync with Google Drive.'
-                : 'নতুন ইনস্টলে কোনো কৃত্রিম ডাটা নেই। নতুন লেনদেন যোগ করুন বা গুগল ড্রাইভে সিঙ্ক করুন।'}
+                ? 'Your transaction history is empty.'
+                : 'আপনার লেনদেনের তালিকা খালি রয়েছে।'}
             </p>
           </div>
         ) : (
@@ -384,7 +379,7 @@ export const HistoryTab: React.FC<HistoryTabProps> = ({
                     ? 'border-rose-200 bg-rose-50/30 opacity-75'
                     : isReversal
                     ? 'border-purple-200 bg-purple-50/20'
-                    : 'border-slate-200 hover:border-blue-300'
+                    : 'border-slate-200/80 hover:border-slate-300'
                 }`}
               >
                 <div className="flex items-center gap-3 min-w-0">
@@ -462,9 +457,6 @@ export const HistoryTab: React.FC<HistoryTabProps> = ({
                     {isExpense ? '-' : isIncome ? '+' : ''}
                     {formatBDT(displayAmountMinor, { locale: language })}
                   </div>
-                  <div className="text-[10px] text-slate-400">
-                    {isEn ? 'Tap to view / edit' : 'বিস্তারিত / এডিট'}
-                  </div>
                 </div>
               </div>
             );
@@ -478,19 +470,19 @@ export const HistoryTab: React.FC<HistoryTabProps> = ({
           <div className="bg-white rounded-2xl max-w-md w-full p-5 shadow-2xl border border-slate-200 animate-in zoom-in-95 max-h-[90vh] overflow-y-auto">
             <div className="flex items-center justify-between pb-3 border-b border-slate-100">
               <div className="flex items-center gap-2">
-                <Layers className="w-4 h-4 text-blue-700" />
-                <h3 className="font-bold text-slate-800">
+                <Layers className="w-4 h-4 text-slate-700" />
+                <h3 className="font-bold text-slate-900">
                   {isEditing
                     ? isEn
                       ? 'Edit Transaction'
-                      : 'লেনদেন এডিট করুন'
+                      : 'লেনদেন এডিট'
                     : showDeleteConfirm
                     ? isEn
                       ? 'Delete Confirmation'
-                      : 'লেনদেন মুছে ফেলার নিশ্চিতকরণ'
+                      : 'মুছে ফেলার নিশ্চিতকরণ'
                     : isEn
                     ? 'Transaction Details'
-                    : 'লেনদেনের বিস্তারিত ও অডিট ট্রেইল'}
+                    : 'লেনদেনের বিস্তারিত'}
                 </h3>
               </div>
               <button
@@ -505,33 +497,33 @@ export const HistoryTab: React.FC<HistoryTabProps> = ({
             {/* View Mode */}
             {!isEditing && !showDeleteConfirm && (
               <div className="space-y-4 pt-3">
-                <div className="grid grid-cols-2 gap-2.5 bg-slate-50 p-3 rounded-xl border border-slate-200">
+                <div className="grid grid-cols-2 gap-2.5 bg-slate-50/80 p-3 rounded-xl border border-slate-200/80">
                   <div>
-                    <span className="text-slate-400 text-[10px]">
+                    <span className="text-slate-400 text-[10px] font-medium">
                       {isEn ? 'Date' : 'তারিখ'}
                     </span>
                     <div className="font-semibold text-slate-800">{activeModalTx.effectiveDate}</div>
                   </div>
                   <div>
-                    <span className="text-slate-400 text-[10px]">
+                    <span className="text-slate-400 text-[10px] font-medium">
                       {isEn ? 'Type' : 'ধরণ'}
                     </span>
-                    <div className="font-semibold text-slate-800 uppercase">
+                    <div className="font-semibold text-slate-800 uppercase font-mono text-[11px]">
                       {activeModalTx.transactionType}
                     </div>
                   </div>
 
-                  {/* Associated Person / Party */}
+                  {/* Associated Member */}
                   {activeModalTx.partyId && partiesMap.get(activeModalTx.partyId) && (
-                    <div className="col-span-2 p-2.5 bg-blue-50/70 border border-blue-200 rounded-lg">
-                      <span className="text-blue-700 font-bold text-[10px] uppercase block mb-1">
-                        {isEn ? 'Associated Person / Party' : 'সংশ্লিষ্ট ব্যক্তি / পক্ষ'}
+                    <div className="col-span-2 p-2.5 bg-white border border-slate-200 rounded-lg">
+                      <span className="text-slate-400 font-medium text-[10px] uppercase block mb-1">
+                        {isEn ? 'Associated Member' : 'সংশ্লিষ্ট সদস্য'}
                       </span>
                       <div className="flex items-center justify-between">
                         <div className="flex items-center gap-1.5 font-bold text-slate-900">
-                          <User className="w-3.5 h-3.5 text-blue-700" />
+                          <User className="w-3.5 h-3.5 text-slate-600" />
                           <span>{partiesMap.get(activeModalTx.partyId)?.name}</span>
-                          <span className="text-[10px] px-1.5 py-0.2 bg-white rounded border border-blue-200 text-blue-700">
+                          <span className="text-[10px] px-1.5 py-0.2 bg-slate-100 rounded text-slate-600 font-medium">
                             {getRoleLabel(partiesMap.get(activeModalTx.partyId)!.role)}
                           </span>
                         </div>
@@ -549,30 +541,28 @@ export const HistoryTab: React.FC<HistoryTabProps> = ({
                   )}
 
                   <div className="col-span-2">
-                    <span className="text-slate-400 text-[10px]">
-                      {isEn ? 'Note / Description' : 'বিবরণ / নোট'}
+                    <span className="text-slate-400 text-[10px] font-medium">
+                      {isEn ? 'Note' : 'বিবরণ'}
                     </span>
-                    <div className="font-semibold text-slate-800">
-                      {activeModalTx.note || (isEn ? 'No note provided' : 'কোনো বিবরণ দেওয়া হয়নি')}
+                    <div className="font-medium text-slate-800">
+                      {activeModalTx.note || (isEn ? 'No note provided' : 'কোনো বিবরণ নেই')}
                     </div>
                   </div>
                 </div>
 
-                {/* Balanced Double-Entry Lines */}
+                {/* Journal Lines */}
                 <div>
-                  <h4 className="font-bold text-slate-700 mb-2 flex items-center gap-1.5 text-xs">
-                    <Layers className="w-3.5 h-3.5 text-blue-700" />
+                  <h4 className="font-bold text-slate-800 mb-2 flex items-center gap-1.5 text-xs">
+                    <Layers className="w-3.5 h-3.5 text-slate-600" />
                     <span>
-                      {isEn
-                        ? 'Balanced Journal Lines (Debits & Credits)'
-                        : 'জার্নাল এন্ট্রি লাইন (Balanced Debits & Credits)'}
+                      {isEn ? 'Journal Lines' : 'জার্নাল এন্ট্রি'}
                     </span>
                   </h4>
                   <div className="bg-white border border-slate-200 rounded-xl overflow-hidden divide-y divide-slate-100">
                     <div className="grid grid-cols-3 p-2 bg-slate-50 text-[10px] font-bold text-slate-500 uppercase">
-                      <span>{isEn ? 'Account / Category' : 'খাত / অ্যাকাউন্ট'}</span>
-                      <span className="text-right">{isEn ? 'Debit ৳' : 'ডেবিট ৳'}</span>
-                      <span className="text-right">{isEn ? 'Credit ৳' : 'ক্রেডিট ৳'}</span>
+                      <span>{isEn ? 'Account' : 'খাত / অ্যাকাউন্ট'}</span>
+                      <span className="text-right">{isEn ? 'Debit' : 'ডেবিট'}</span>
+                      <span className="text-right">{isEn ? 'Credit' : 'ক্রেডিট'}</span>
                     </div>
                     {activeModalTx.lines.map((line) => {
                       const acc = accountsMap.get(line.accountId);
@@ -582,12 +572,12 @@ export const HistoryTab: React.FC<HistoryTabProps> = ({
                           <span className="truncate font-medium text-slate-800">
                             {cat ? (isEn && cat.nameEn ? cat.nameEn : cat.name) : acc ? acc.name : line.accountId}
                           </span>
-                          <span className="text-right font-semibold text-slate-700 tabular-nums">
+                          <span className="text-right font-semibold text-slate-700 font-mono tabular-nums">
                             {line.debitMinor !== '0'
                               ? formatBDT(line.debitMinor, { locale: language })
                               : '-'}
                           </span>
-                          <span className="text-right font-semibold text-slate-700 tabular-nums">
+                          <span className="text-right font-semibold text-slate-700 font-mono tabular-nums">
                             {line.creditMinor !== '0'
                               ? formatBDT(line.creditMinor, { locale: language })
                               : '-'}
@@ -604,7 +594,7 @@ export const HistoryTab: React.FC<HistoryTabProps> = ({
                     <button
                       type="button"
                       onClick={() => setIsEditing(true)}
-                      className="flex-1 py-2.5 bg-blue-700 hover:bg-blue-800 text-white rounded-xl font-bold flex items-center justify-center gap-2 shadow-xs transition-colors"
+                      className="flex-1 py-2.5 bg-slate-900 hover:bg-slate-800 text-white rounded-xl font-bold flex items-center justify-center gap-2 shadow-xs transition-colors"
                     >
                       <Edit3 className="w-3.5 h-3.5" />
                       <span>{isEn ? 'Edit Entry' : 'এডিট করুন'}</span>
