@@ -7,6 +7,7 @@ on:
       - master
       - antigravity
       - 'stabilization/**'
+      - 'development/**'
   workflow_dispatch:
 
 jobs:

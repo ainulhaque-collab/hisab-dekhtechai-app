@@ -6,6 +6,7 @@ on:
       - main
       - master
       - 'stabilization/**'
+      - 'development/**'
   pull_request:
     branches:
       - '**'
