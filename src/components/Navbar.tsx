@@ -1,61 +1,108 @@
-import React, { useState } from 'react';
-import { useApp, SIMULATED_DEVICES } from '../context/AppContext';
+import React, { useState, useRef, useEffect } from 'react';
+import { useApp } from '../context/AppContext';
 import { formatAccountTitle } from '../domain/money';
 import {
   Wallet,
+  Menu,
   ChevronDown,
   Cloud,
   CloudOff,
   RefreshCw,
   AlertTriangle,
-  Smartphone,
-  Laptop,
   CheckCircle2,
   Settings,
   Plus,
-  ShieldCheck,
-  Database,
-  Globe
+  Shield,
+  User,
+  Users,
+  Info,
+  HelpCircle,
+  LogOut,
+  X
 } from 'lucide-react';
 
 interface NavbarProps {
   onOpenSyncModal: () => void;
   onOpenSettingsModal: () => void;
-  onOpenSnapshotModal: () => void;
+  onOpenSnapshotModal?: () => void;
+  onOpenProfileModal: () => void;
+  onOpenTeamSharingModal: () => void;
+  onOpenAboutModal: () => void;
+  onNavigateToAccounts: () => void;
 }
 
 export const Navbar: React.FC<NavbarProps> = ({
   onOpenSyncModal,
   onOpenSettingsModal,
-  onOpenSnapshotModal,
+  onOpenProfileModal,
+  onOpenTeamSharingModal,
+  onOpenAboutModal,
+  onNavigateToAccounts,
 }) => {
   const {
     currentWorkspace,
     workspaces,
     setCurrentWorkspaceId,
-    currentDevice,
-    switchDevice,
     syncStatus,
     isOnline,
-    setIsOnline,
     triggerManualSync,
     createWorkspace,
     language,
     setLanguage,
     conflicts,
+    userProfile,
+    isLiveGoogleAuth,
+    auth,
+    signOut,
   } = useApp();
 
+  const isEn = language === 'en';
+
   const [showWorkspaceMenu, setShowWorkspaceMenu] = useState(false);
-  const [showDeviceMenu, setShowDeviceMenu] = useState(false);
+  const [showHamburgerMenu, setShowHamburgerMenu] = useState(false);
   const [isCreatingWorkspace, setIsCreatingWorkspace] = useState(false);
   const [newWsName, setNewWsName] = useState('');
   const [newWsKind, setNewWsKind] = useState<'personal' | 'business'>('business');
   const [isSyncing, setIsSyncing] = useState(false);
 
-  const handleManualSyncClick = async () => {
+  const hamburgerRef = useRef<HTMLDivElement>(null);
+  const workspaceRef = useRef<HTMLDivElement>(null);
+
+  // Close menus on outside click or escape key
+  useEffect(() => {
+    const handleClickOutside = (event: MouseEvent) => {
+      if (hamburgerRef.current && !hamburgerRef.current.contains(event.target as Node)) {
+        setShowHamburgerMenu(false);
+      }
+      if (workspaceRef.current && !workspaceRef.current.contains(event.target as Node)) {
+        setShowWorkspaceMenu(false);
+      }
+    };
+
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') {
+        setShowHamburgerMenu(false);
+        setShowWorkspaceMenu(false);
+      }
+    };
+
+    document.addEventListener('mousedown', handleClickOutside);
+    document.addEventListener('keydown', handleKeyDown);
+    return () => {
+      document.removeEventListener('mousedown', handleClickOutside);
+      document.removeEventListener('keydown', handleKeyDown);
+    };
+  }, []);
+
+  const handleManualSyncClick = async (e: React.MouseEvent) => {
+    e.stopPropagation();
+    if (!isOnline || isSyncing) return;
     setIsSyncing(true);
-    await triggerManualSync();
-    setIsSyncing(false);
+    try {
+      await triggerManualSync();
+    } finally {
+      setIsSyncing(false);
+    }
   };
 
   const handleCreateWorkspaceSubmit = (e: React.FormEvent) => {
@@ -68,82 +115,127 @@ export const Navbar: React.FC<NavbarProps> = ({
     setShowWorkspaceMenu(false);
   };
 
-  // Honest sync status badge configuration
-  const getSyncBadge = () => {
+  /**
+   * BUG-006: Honest, comprehensive sync state representation
+   * Distinguishes offline local saves, unauthenticated states, expired tokens,
+   * actual sync failures, pending changes, and confirmed durable persistence.
+   */
+  const getHonestSyncBadge = () => {
     if (!isOnline) {
       return {
         icon: CloudOff,
-        text: language === 'bn' ? 'অফলাইন মোড' : 'Offline Mode',
-        bgColor: 'bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 border-slate-300',
+        text: isEn ? 'Offline / Saved Locally' : 'অফলাইন / ডিভাইসে সংরক্ষিত',
+        bgColor: 'bg-slate-100 text-slate-700 border-slate-300',
         dotColor: 'bg-slate-400',
+        title: isEn ? 'Offline mode: changes saved locally in SQLite' : 'অফলাইন মোড: সমস্ত হিসাব ডিভাইসে সুরক্ষিত',
+      };
+    }
+    if (!isLiveGoogleAuth && !userProfile) {
+      return {
+        icon: CloudOff,
+        text: isEn ? 'Drive Not Connected' : 'ড্রাইভ যুক্ত নয়',
+        bgColor: 'bg-amber-50 text-amber-800 border-amber-300',
+        dotColor: 'bg-amber-500',
+        title: isEn ? 'Connect Google Drive for cross-device sync' : 'সিঙ্ক করার জন্য গুগল ড্রাইভ যুক্ত করুন',
+      };
+    }
+    if (auth.isTokenExpired() && isLiveGoogleAuth) {
+      return {
+        icon: AlertTriangle,
+        text: isEn ? 'Auth Expired' : 'লগইন মেয়াদোত্তীর্ণ',
+        bgColor: 'bg-rose-50 text-rose-800 border-rose-300',
+        dotColor: 'bg-rose-500 animate-pulse',
+        title: isEn ? 'Google token expired. Tap to reconnect.' : 'গুগল টোকেনের মেয়াদ শেষ হয়েছে। পুনরায় যুক্ত করুন।',
       };
     }
     if (conflicts.some((c) => c.status === 'needs_review')) {
       return {
         icon: AlertTriangle,
-        text: language === 'bn' ? 'সংঘাত পর্যালোচনা' : 'Conflict Review',
+        text: isEn ? 'Conflict Review' : 'সংঘাত পর্যালোচনা',
         bgColor: 'bg-amber-50 text-amber-800 border-amber-300',
         dotColor: 'bg-amber-500 animate-pulse',
+        title: isEn ? 'Cloud conflict requires your review' : 'ক্লাউড সংঘাত পর্যালোচনা প্রয়োজন',
       };
     }
     if (syncStatus.state === 'syncing' || isSyncing) {
       return {
         icon: RefreshCw,
-        text: language === 'bn' ? 'সিঙ্ক হচ্ছে...' : 'Syncing...',
+        text: isEn ? 'Syncing...' : 'সিঙ্ক হচ্ছে...',
         bgColor: 'bg-blue-50 text-blue-800 border-blue-300',
         dotColor: 'bg-blue-600 animate-spin',
+        title: isEn ? 'Synchronizing with Google Drive' : 'গুগল ড্রাইভের সাথে সিঙ্ক হচ্ছে',
+      };
+    }
+    if (syncStatus.state === 'error_retryable' || !!syncStatus.lastError) {
+      return {
+        icon: AlertTriangle,
+        text: isEn ? 'Sync Failed / Retry' : 'সিঙ্ক ব্যর্থ / পুনরায় চেষ্টা',
+        bgColor: 'bg-rose-50 text-rose-800 border-rose-300',
+        dotColor: 'bg-rose-500',
+        title: syncStatus.lastError || (isEn ? 'Sync error occurred' : 'সিঙ্কে ত্রুটি ঘটেছে'),
       };
     }
     if (syncStatus.pendingOutboxCount > 0) {
       return {
         icon: Cloud,
-        text:
-          language === 'bn'
-            ? `${syncStatus.pendingOutboxCount}টি সিঙ্ক অপেক্ষারত`
-            : `${syncStatus.pendingOutboxCount} Pending Sync`,
+        text: isEn
+          ? `${syncStatus.pendingOutboxCount} Pending Sync`
+          : `${syncStatus.pendingOutboxCount}টি সিঙ্ক অপেক্ষারত`,
         bgColor: 'bg-amber-50 text-amber-800 border-amber-300',
         dotColor: 'bg-amber-500',
+        title: isEn ? 'Changes queued to sync to Google Drive' : 'পরিবর্তনগুলো ড্রাইভে প্রেরণের জন্য অপেক্ষারত',
       };
     }
+
+    const lastSyncTimeStr = syncStatus.lastSuccessfulSyncAt
+      ? new Date(syncStatus.lastSuccessfulSyncAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+      : '';
+
     return {
       icon: CheckCircle2,
-      text: language === 'bn' ? 'সিঙ্কড' : 'Synced',
+      text: isEn ? 'Synced' : 'সিঙ্কড',
       bgColor: 'text-slate-600 hover:text-slate-900 hover:bg-slate-100',
       dotColor: 'bg-emerald-500',
+      title: lastSyncTimeStr
+        ? (isEn ? `Successfully Synced (${lastSyncTimeStr})` : `সিঙ্ক সম্পন্ন (${lastSyncTimeStr})`)
+        : (isEn ? 'Successfully Synced' : 'সিঙ্ক সম্পন্ন'),
     };
   };
 
-  const badge = getSyncBadge();
+  const badge = getHonestSyncBadge();
   const BadgeIcon = badge.icon;
 
   return (
-    <header className="sticky top-0 z-40 bg-white/95 backdrop-blur-md border-b border-slate-200/80">
-      <div className="max-w-xl mx-auto px-4 py-2.5">
-        <div className="flex items-center justify-between gap-3">
+    <header className="sticky top-0 z-40 bg-white/95 backdrop-blur-md border-b border-slate-200/80 pt-safe header-safe">
+      <div className="max-w-xl mx-auto px-3 sm:px-4 py-2">
+        <div className="flex items-center justify-between gap-2">
           {/* Brand & Workspace Switcher */}
-          <div className="flex items-center gap-2.5 min-w-0">
+          <div className="flex items-center gap-2 min-w-0" ref={workspaceRef}>
             <div className="w-8 h-8 rounded-lg bg-slate-900 text-white flex items-center justify-center shrink-0 shadow-xs">
               <Wallet className="w-4 h-4" strokeWidth={2} />
             </div>
 
-            {/* Workspace Selector */}
+            {/* Workspace Selector Button */}
             <div className="relative min-w-0">
               <button
                 type="button"
                 onClick={() => setShowWorkspaceMenu(!showWorkspaceMenu)}
-                className="flex items-center gap-1.5 px-1.5 py-0.5 rounded-lg hover:bg-slate-100/80 transition-colors text-left group"
+                className="flex items-center gap-1 px-1.5 py-1 rounded-lg hover:bg-slate-100/80 transition-colors text-left group min-h-[44px]"
+                aria-haspopup="true"
+                aria-expanded={showWorkspaceMenu}
               >
-                <div className="min-w-0">
+                <div className="min-w-0 max-w-[120px] xs:max-w-[150px] sm:max-w-[220px]">
                   <div className="flex items-center gap-1">
-                    <span className="font-bold text-slate-900 text-sm tracking-tight truncate">
-                      {formatAccountTitle(currentWorkspace?.name || '', language) || (language === 'bn' ? 'হিসাব দেখতে চাই' : 'Hisab DekhteChai')}
+                    <span className="font-bold text-slate-900 text-xs sm:text-sm tracking-tight truncate">
+                      {formatAccountTitle(currentWorkspace?.name || '', language) ||
+                        (isEn ? 'Hisab DekhteChai' : 'হিসাব দেখতে চাই')}
                     </span>
                     <ChevronDown className="w-3.5 h-3.5 text-slate-400 group-hover:text-slate-600 shrink-0" />
                   </div>
-                  <span className="text-[11px] text-slate-500 font-medium block -mt-0.5">
+                  <span className="text-[10px] sm:text-[11px] text-slate-500 font-medium block -mt-0.5 truncate">
                     {currentWorkspace?.kind === 'personal'
-                      ? (language === 'bn' ? 'ব্যক্তিগত খাতা' : 'Personal')
-                      : (language === 'bn' ? 'ব্যবসার খাতা' : 'Business')}
+                      ? (isEn ? 'Personal' : 'ব্যক্তিগত খাতা')
+                      : (isEn ? 'Business' : 'ব্যবসার খাতা')}
                   </span>
                 </div>
               </button>
@@ -152,7 +244,7 @@ export const Navbar: React.FC<NavbarProps> = ({
               {showWorkspaceMenu && (
                 <div className="absolute left-0 mt-2 w-64 bg-white rounded-xl shadow-lg border border-slate-200/80 py-1.5 z-50 animate-in fade-in slide-from-top-1">
                   <div className="px-3 py-1.5 text-[11px] font-semibold text-slate-400 uppercase tracking-wider">
-                    {language === 'bn' ? 'হিসাব খাতা' : 'Workspaces'}
+                    {isEn ? 'Workspaces' : 'হিসাব খাতা'}
                   </div>
                   {workspaces.map((ws) => (
                     <button
@@ -162,17 +254,17 @@ export const Navbar: React.FC<NavbarProps> = ({
                         setCurrentWorkspaceId(ws.id);
                         setShowWorkspaceMenu(false);
                       }}
-                      className={`w-full text-left px-3 py-2 text-xs flex items-center justify-between transition-colors ${
+                      className={`w-full text-left px-3 py-2 text-xs flex items-center justify-between transition-colors min-h-[44px] ${
                         ws.id === currentWorkspace?.id
                           ? 'text-blue-700 font-bold bg-blue-50/70'
                           : 'text-slate-700 hover:bg-slate-50'
                       }`}
                     >
                       <span className="truncate">{formatAccountTitle(ws.name, language)}</span>
-                      <span className="text-[10px] text-slate-400 uppercase font-medium">
+                      <span className="text-[10px] text-slate-400 uppercase font-medium ml-2 shrink-0">
                         {ws.kind === 'personal'
-                          ? (language === 'bn' ? 'ব্যক্তিগত' : 'Personal')
-                          : (language === 'bn' ? 'ব্যবসা' : 'Business')}
+                          ? (isEn ? 'Personal' : 'ব্যক্তিগত')
+                          : (isEn ? 'Business' : 'ব্যবসা')}
                       </span>
                     </button>
                   ))}
@@ -182,16 +274,16 @@ export const Navbar: React.FC<NavbarProps> = ({
                       <button
                         type="button"
                         onClick={() => setIsCreatingWorkspace(true)}
-                        className="w-full text-left px-3 py-2 text-xs text-blue-700 font-semibold flex items-center gap-1.5 hover:bg-blue-50 transition-colors"
+                        className="w-full text-left px-3 py-2 text-xs text-blue-700 font-semibold flex items-center gap-1.5 hover:bg-blue-50 transition-colors min-h-[44px]"
                       >
                         <Plus className="w-3.5 h-3.5" />
-                        <span>{language === 'bn' ? 'নতুন খাতা যোগ করুন' : 'New Workspace'}</span>
+                        <span>{isEn ? 'New Workspace' : 'নতুন খাতা যোগ করুন'}</span>
                       </button>
                     ) : (
                       <form onSubmit={handleCreateWorkspaceSubmit} className="p-3 bg-slate-50/80 rounded-b-lg">
                         <input
                           type="text"
-                          placeholder={language === 'bn' ? 'খাতার নাম (যেমন: বাড়ি নির্মাণ)' : 'Workspace name'}
+                          placeholder={isEn ? 'Workspace name' : 'খাতার নাম (যেমন: বাড়ি নির্মাণ)'}
                           value={newWsName}
                           onChange={(e) => setNewWsName(e.target.value)}
                           className="w-full px-2.5 py-1.5 text-xs bg-white border border-slate-300 rounded-lg mb-2 focus:outline-none focus:ring-2 focus:ring-blue-600"
@@ -205,7 +297,7 @@ export const Navbar: React.FC<NavbarProps> = ({
                               checked={newWsKind === 'personal'}
                               onChange={() => setNewWsKind('personal')}
                             />
-                            <span>{language === 'bn' ? 'ব্যক্তিগত' : 'Personal'}</span>
+                            <span>{isEn ? 'Personal' : 'ব্যক্তিগত'}</span>
                           </label>
                           <label className="flex items-center gap-1.5 cursor-pointer text-slate-700">
                             <input
@@ -214,22 +306,22 @@ export const Navbar: React.FC<NavbarProps> = ({
                               checked={newWsKind === 'business'}
                               onChange={() => setNewWsKind('business')}
                             />
-                            <span>{language === 'bn' ? 'ব্যবসা' : 'Business'}</span>
+                            <span>{isEn ? 'Business' : 'ব্যবসা'}</span>
                           </label>
                         </div>
                         <div className="flex gap-2">
                           <button
                             type="submit"
-                            className="flex-1 px-3 py-1.5 bg-slate-900 text-white rounded-lg text-xs font-semibold hover:bg-slate-800"
+                            className="flex-1 px-3 py-1.5 bg-slate-900 text-white rounded-lg text-xs font-semibold hover:bg-slate-800 min-h-[40px]"
                           >
-                            {language === 'bn' ? 'তৈরি করুন' : 'Create'}
+                            {isEn ? 'Create' : 'তৈরি করুন'}
                           </button>
                           <button
                             type="button"
                             onClick={() => setIsCreatingWorkspace(false)}
-                            className="px-2.5 py-1.5 text-slate-600 rounded-lg text-xs hover:bg-slate-200"
+                            className="px-2.5 py-1.5 text-slate-600 rounded-lg text-xs hover:bg-slate-200 min-h-[40px]"
                           >
-                            {language === 'bn' ? 'বাতিল' : 'Cancel'}
+                            {isEn ? 'Cancel' : 'বাতিল'}
                           </button>
                         </div>
                       </form>
@@ -240,39 +332,41 @@ export const Navbar: React.FC<NavbarProps> = ({
             </div>
           </div>
 
-          {/* Right controls: Sync Indicator, Quick Sync, Language Switch & Settings */}
-          <div className="flex items-center gap-1.5 shrink-0">
-            {/* Sync Status Button */}
+          {/* Right Header Controls */}
+          <div className="flex items-center gap-1 sm:gap-1.5 shrink-0">
+            {/* Sync Status Badge (BUG-006) */}
             <button
               type="button"
               onClick={onOpenSyncModal}
-              className={`flex items-center gap-1.5 px-2 py-1 text-xs font-medium rounded-lg transition-colors ${badge.bgColor}`}
-              title={language === 'bn' ? 'গুগল ড্রাইভ সিঙ্ক স্থিতি' : 'Google Drive Sync'}
+              className={`flex items-center gap-1.5 px-2 py-1 text-xs font-medium rounded-lg transition-colors border ${badge.bgColor} min-h-[40px]`}
+              title={badge.title}
+              aria-label={badge.text}
             >
-              <span className={`w-1.5 h-1.5 rounded-full ${badge.dotColor}`} />
-              <span className="hidden sm:inline text-[11px] font-medium">{badge.text}</span>
+              <span className={`w-1.5 h-1.5 rounded-full shrink-0 ${badge.dotColor}`} />
+              <span className="hidden xs:inline text-[11px] font-medium max-w-[110px] truncate">{badge.text}</span>
+              <BadgeIcon className="w-3.5 h-3.5 shrink-0 xs:hidden text-slate-600" />
             </button>
 
-            {/* Quick Manual Sync */}
+            {/* Quick Manual Sync Refresh */}
             <button
               type="button"
               onClick={handleManualSyncClick}
               disabled={!isOnline || isSyncing}
-              className="p-1.5 rounded-lg text-slate-500 hover:text-slate-900 hover:bg-slate-100 transition-colors disabled:opacity-40"
-              title={language === 'bn' ? 'এখনই সিঙ্ক করুন' : 'Sync Now'}
+              className="p-2 rounded-lg text-slate-500 hover:text-slate-900 hover:bg-slate-100 transition-colors disabled:opacity-40 min-h-[44px] min-w-[44px] flex items-center justify-center"
+              title={isEn ? 'Sync Now' : 'এখনই সিঙ্ক করুন'}
               aria-label="Sync Now"
             >
-              <RefreshCw className={`w-3.5 h-3.5 ${isSyncing ? 'animate-spin text-blue-700' : ''}`} />
+              <RefreshCw className={`w-4 h-4 ${isSyncing ? 'animate-spin text-blue-700' : ''}`} />
             </button>
 
-            {/* Language Toggle: EN / বাং */}
+            {/* Language Switch: EN / বাং */}
             <div className="flex items-center rounded-lg border border-slate-200 bg-slate-100/80 p-0.5 text-[11px] font-semibold">
               <button
                 type="button"
                 onClick={() => setLanguage('en')}
-                className={`px-1.5 py-0.5 rounded-md transition-all ${
+                className={`px-1.5 py-1 rounded-md transition-all min-h-[36px] ${
                   language === 'en'
-                    ? 'bg-white text-slate-900 shadow-2xs'
+                    ? 'bg-white text-slate-900 shadow-2xs font-bold'
                     : 'text-slate-500 hover:text-slate-900'
                 }`}
                 title="English"
@@ -282,9 +376,9 @@ export const Navbar: React.FC<NavbarProps> = ({
               <button
                 type="button"
                 onClick={() => setLanguage('bn')}
-                className={`px-1.5 py-0.5 rounded-md transition-all ${
+                className={`px-1.5 py-1 rounded-md transition-all min-h-[36px] ${
                   language === 'bn'
-                    ? 'bg-white text-slate-900 shadow-2xs'
+                    ? 'bg-white text-slate-900 shadow-2xs font-bold'
                     : 'text-slate-500 hover:text-slate-900'
                 }`}
                 title="বাংলা"
@@ -293,16 +387,178 @@ export const Navbar: React.FC<NavbarProps> = ({
               </button>
             </div>
 
-            {/* Settings */}
-            <button
-              type="button"
-              onClick={onOpenSettingsModal}
-              className="p-1.5 rounded-lg text-slate-500 hover:text-slate-900 hover:bg-slate-100 transition-colors"
-              title={language === 'en' ? 'Settings & Security' : 'সেটিংস ও নিরাপত্তা'}
-              aria-label="Settings"
-            >
-              <Settings className="w-4 h-4" />
-            </button>
+            {/* FEAT-007: Top-Right ☰ Hamburger Menu */}
+            <div className="relative" ref={hamburgerRef}>
+              <button
+                type="button"
+                onClick={() => setShowHamburgerMenu(!showHamburgerMenu)}
+                className={`p-2 rounded-lg transition-colors min-h-[44px] min-w-[44px] flex items-center justify-center ${
+                  showHamburgerMenu
+                    ? 'bg-slate-900 text-white'
+                    : 'text-slate-700 hover:text-slate-900 hover:bg-slate-100'
+                }`}
+                title={isEn ? 'Main Menu' : 'প্রধান মেন্যু'}
+                aria-label="Menu"
+                aria-haspopup="true"
+                aria-expanded={showHamburgerMenu}
+              >
+                {/* ☰ Hamburger Icon (Three horizontal lines) */}
+                <Menu className="w-5 h-5" strokeWidth={2.2} />
+              </button>
+
+              {/* Right-Aligned Downward Compact Dropdown Menu */}
+              {showHamburgerMenu && (
+                <div
+                  className="absolute right-0 mt-2 w-64 bg-white rounded-2xl shadow-xl border border-slate-200/90 py-2 z-50 animate-in fade-in slide-from-top-1 text-xs divide-y divide-slate-100"
+                  role="menu"
+                  aria-orientation="vertical"
+                >
+                  {/* User Profile Teaser */}
+                  <div className="px-3 py-2 flex items-center gap-2.5">
+                    <div className="w-8 h-8 rounded-full bg-slate-900 text-white flex items-center justify-center font-bold text-xs shrink-0 overflow-hidden">
+                      {userProfile?.photoUrl ? (
+                        <img src={userProfile.photoUrl} alt="User" className="w-full h-full object-cover" />
+                      ) : (
+                        (userProfile?.displayName || 'H').slice(0, 2).toUpperCase()
+                      )}
+                    </div>
+                    <div className="min-w-0">
+                      <div className="font-bold text-slate-900 truncate">
+                        {userProfile?.displayName || (isEn ? 'Hisab User' : 'হিসাব ব্যবহারকারী')}
+                      </div>
+                      <div className="text-[10px] text-slate-400 truncate">
+                        {userProfile?.email || (isEn ? 'Local Device Mode' : 'লোকাল মোড')}
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Primary Nav Actions */}
+                  <div className="py-1">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setShowHamburgerMenu(false);
+                        onOpenProfileModal();
+                      }}
+                      className="w-full px-3 py-2 text-left flex items-center gap-2.5 text-slate-700 hover:bg-slate-50 hover:text-slate-900 transition-colors min-h-[44px]"
+                      role="menuitem"
+                    >
+                      <User className="w-4 h-4 text-slate-500" />
+                      <span className="font-medium">{isEn ? 'My Profile' : 'আমার প্রোফাইল'}</span>
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setShowHamburgerMenu(false);
+                        onNavigateToAccounts();
+                      }}
+                      className="w-full px-3 py-2 text-left flex items-center gap-2.5 text-slate-700 hover:bg-slate-50 hover:text-slate-900 transition-colors min-h-[44px]"
+                      role="menuitem"
+                    >
+                      <Wallet className="w-4 h-4 text-slate-500" />
+                      <span className="font-medium">{isEn ? 'Accounts & Workspaces' : 'অ্যাকাউন্ট ও খাতা'}</span>
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setShowHamburgerMenu(false);
+                        onOpenSyncModal();
+                      }}
+                      className="w-full px-3 py-2 text-left flex items-center gap-2.5 text-slate-700 hover:bg-slate-50 hover:text-slate-900 transition-colors min-h-[44px]"
+                      role="menuitem"
+                    >
+                      <Cloud className="w-4 h-4 text-blue-600" />
+                      <div className="flex-1 flex items-center justify-between">
+                        <span className="font-medium">{isEn ? 'Google Drive Sync & Backup' : 'গুগল ড্রাইভ সিঙ্ক ও ব্যাকআপ'}</span>
+                        {badge.dotColor && <span className={`w-2 h-2 rounded-full ${badge.dotColor}`} />}
+                      </div>
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setShowHamburgerMenu(false);
+                        onOpenSettingsModal();
+                      }}
+                      className="w-full px-3 py-2 text-left flex items-center gap-2.5 text-slate-700 hover:bg-slate-50 hover:text-slate-900 transition-colors min-h-[44px]"
+                      role="menuitem"
+                    >
+                      <Settings className="w-4 h-4 text-slate-500" />
+                      <span className="font-medium">{isEn ? 'Settings & Preferences' : 'সেটিংস ও পছন্দসমূহ'}</span>
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setShowHamburgerMenu(false);
+                        onOpenSettingsModal();
+                      }}
+                      className="w-full px-3 py-2 text-left flex items-center gap-2.5 text-slate-700 hover:bg-slate-50 hover:text-slate-900 transition-colors min-h-[44px]"
+                      role="menuitem"
+                    >
+                      <Shield className="w-4 h-4 text-indigo-600" />
+                      <span className="font-medium">{isEn ? 'Security & Privacy' : 'নিরাপত্তা ও গোপনীয়তা'}</span>
+                    </button>
+
+                    {/* Team & Sharing (Business Workspace) */}
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setShowHamburgerMenu(false);
+                        onOpenTeamSharingModal();
+                      }}
+                      className="w-full px-3 py-2 text-left flex items-center gap-2.5 text-slate-700 hover:bg-slate-50 hover:text-slate-900 transition-colors min-h-[44px]"
+                      role="menuitem"
+                    >
+                      <Users className="w-4 h-4 text-emerald-600" />
+                      <div className="flex-1 flex items-center justify-between">
+                        <span className="font-medium">{isEn ? 'Team & Sharing' : 'টিম ও কর্মী শেয়ারিং'}</span>
+                        {currentWorkspace?.kind === 'business' && (
+                          <span className="text-[9px] uppercase px-1.5 py-0.5 rounded bg-emerald-100 text-emerald-800 font-bold">
+                            {isEn ? 'Business' : 'ব্যবসা'}
+                          </span>
+                        )}
+                      </div>
+                    </button>
+                  </div>
+
+                  {/* Secondary info and sign out */}
+                  <div className="py-1">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setShowHamburgerMenu(false);
+                        onOpenAboutModal();
+                      }}
+                      className="w-full px-3 py-2 text-left flex items-center gap-2.5 text-slate-700 hover:bg-slate-50 hover:text-slate-900 transition-colors min-h-[44px]"
+                      role="menuitem"
+                    >
+                      <Info className="w-4 h-4 text-slate-500" />
+                      <span className="font-medium">{isEn ? 'About' : 'অ্যাপ পরিচিতি'}</span>
+                    </button>
+
+                    {userProfile && (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setShowHamburgerMenu(false);
+                          if (window.confirm(isEn ? 'Are you sure you want to sign out?' : 'আপনি কি সাইন আউট করতে চান?')) {
+                            signOut();
+                          }
+                        }}
+                        className="w-full px-3 py-2 text-left flex items-center gap-2.5 text-rose-600 hover:bg-rose-50 transition-colors min-h-[44px]"
+                        role="menuitem"
+                      >
+                        <LogOut className="w-4 h-4" />
+                        <span className="font-medium">{isEn ? 'Sign Out' : 'লগআউট'}</span>
+                      </button>
+                    )}
+                  </div>
+                </div>
+              )}
+            </div>
           </div>
         </div>
       </div>

@@ -25,6 +25,7 @@ export type AccountKind = 'cash' | 'bank' | 'bkash' | 'nagad' | 'rocket' | 'othe
 export interface Account {
   id: UUID;
   workspaceId: UUID;
+  groupId?: UUID | null; // Belongs to at most one primary group (FEAT-001)
   ledgerId?: UUID | null;
   name: string;
   kind: AccountKind;
@@ -33,6 +34,39 @@ export interface Account {
   openingBalanceMinor: PaisaString;
   archivedAt?: string | null;
   createdAt: string;
+}
+
+export interface AccountGroup {
+  id: UUID;
+  workspaceId: UUID;
+  name: string;
+  icon?: string;
+  description?: string;
+  archivedAt?: string | null;
+  createdAt: string;
+}
+
+export interface AccountGroupSummary {
+  group: AccountGroup;
+  accountCount: number;
+  totalOpeningBalanceMinor: PaisaString;
+  totalIncomeMinor: PaisaString;
+  totalExpenseMinor: PaisaString;
+  currentBalanceMinor: PaisaString;
+  accounts: Account[];
+}
+
+export type EmployeeRole = 'owner' | 'editor' | 'viewer';
+
+export interface AccountPermissionGrant {
+  id: UUID;
+  workspaceId: UUID;
+  accountIds: UUID[];
+  employeeEmail: string;
+  employeeSubjectHash: string;
+  role: EmployeeRole;
+  createdAt: string;
+  revokedAt?: string | null;
 }
 
 export interface LedgerGroup {
@@ -119,6 +153,14 @@ export type SyncOperationType =
   | 'account.create'
   | 'account.update'
   | 'account.archive'
+  | 'account.restore'
+  | 'account.delete'
+  | 'group.create'
+  | 'group.update'
+  | 'group.archive'
+  | 'group.restore'
+  | 'permission.grant'
+  | 'permission.revoke'
   | 'category.create'
   | 'category.update'
   | 'category.archive'
@@ -137,6 +179,8 @@ export type SyncOperationType =
 export interface SyncOperation {
   protocolVersion: 1;
   ownerHash: string;
+  authorSubjectHash?: string; // Authenticated employee / author identity (FEAT-003)
+  grantId?: UUID; // Permission grant reference if authored by employee
   deviceId: UUID;
   seq: number;
   operationId: UUID;

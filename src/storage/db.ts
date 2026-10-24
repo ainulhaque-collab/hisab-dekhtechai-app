@@ -24,7 +24,12 @@ import {
   DashboardData,
   PaisaString,
   BusinessParty,
-  PartyRole
+  PartyRole,
+  AccountGroup,
+  AccountGroupSummary,
+  AccountPermissionGrant,
+  EmployeeRole,
+  SyncOperationType
 } from '../contracts/types';
 import { toPaisa, addPaisa, subPaisa, paisaToDecimalString } from '../domain/money';
 import {
@@ -40,7 +45,7 @@ import {
   StorageType
 } from './drivers/durableStorage';
 
-export const CURRENT_SCHEMA_VERSION = 4;
+export const CURRENT_SCHEMA_VERSION = 5;
 
 export interface DatabaseState {
   schemaVersion: number;
@@ -57,6 +62,8 @@ export interface DatabaseState {
   };
   workspaces: Map<UUID, Workspace>;
   accounts: Map<UUID, Account>;
+  accountGroups: Map<UUID, AccountGroup>;
+  accountPermissions: Map<UUID, AccountPermissionGrant>;
   categories: Map<UUID, Category>;
   parties: Map<UUID, BusinessParty>;
   journalTransactions: Map<UUID, JournalTransaction>;
@@ -116,6 +123,8 @@ export class LocalDatabase {
       },
       workspaces: new Map(),
       accounts: new Map(),
+      accountGroups: new Map(),
+      accountPermissions: new Map(),
       categories: new Map(),
       parties: new Map(),
       journalTransactions: new Map(),
@@ -155,6 +164,12 @@ export class LocalDatabase {
           checksum: 'double-entry-ledger-v4',
           appliedAt: new Date().toISOString(),
         },
+        {
+          fromVersion: 4,
+          toVersion: 5,
+          checksum: 'account-groups-permissions-v5',
+          appliedAt: new Date().toISOString(),
+        },
       ],
       preferences: new Map<string, any>([
         ['language', 'en'],
@@ -167,18 +182,25 @@ export class LocalDatabase {
 
   /**
    * Automatically loads state from durable storage, seeding defaults only if empty.
+   * Never wipes data if parsing fails: preserves emergency backup and throws.
    */
   public loadFromStorage(): boolean {
     if (typeof localStorage !== 'undefined') {
-      try {
-        const raw = localStorage.getItem(this.storageKey);
-        if (raw) {
+      const raw = localStorage.getItem(this.storageKey);
+      if (raw) {
+        try {
           const parsed = JSON.parse(raw);
           this.loadFromSerializable(parsed);
           return true;
+        } catch (err) {
+          console.error('[CRITICAL] Failed to parse or migrate database from localStorage. Preserving data to prevent wipe:', err);
+          try {
+            const emergencyKey = `${this.storageKey}_emergency_backup_${Date.now()}`;
+            localStorage.setItem(emergencyKey, raw);
+            console.warn(`Preserved raw financial data in emergency key: ${emergencyKey}`);
+          } catch {}
+          throw err;
         }
-      } catch (err) {
-        console.warn('Failed to parse saved database from storage, initializing fresh:', err);
       }
     }
     this.seedDefaultEntities();
@@ -189,11 +211,13 @@ export class LocalDatabase {
   /**
    * Initializes durable driver (Native SQLite or IndexedDB),
    * performing non-destructive migration from legacy localStorage if necessary.
-   * Never silently falls back: storage initialization errors are strictly propagated.
+   * Never silently falls back or wipes: storage initialization errors are strictly propagated.
    */
   public async init(): Promise<void> {
     try {
-      this.driver = await createDurableStorageDriver(this.storageKey);
+      if (!this.driver) {
+        this.driver = await createDurableStorageDriver(this.storageKey);
+      }
 
       // Check if durable store already has records
       const durableData = await this.driver.getItem(this.storageKey);
@@ -204,7 +228,12 @@ export class LocalDatabase {
           this.persistSync();
           return;
         } catch (err) {
-          console.warn('Failed to parse durable storage state, attempting recovery:', err);
+          console.error('[CRITICAL] Failed to parse durable storage state. Preserving emergency snapshot before error:', err);
+          try {
+            await this.driver.setItem(`${this.storageKey}_emergency_corrupt_backup`, durableData);
+            await this.driver.setItem(`${this.storageKey}_emergency_backup_${Date.now()}`, durableData);
+          } catch {}
+          throw err;
         }
       }
 
@@ -689,6 +718,40 @@ export class LocalDatabase {
     }
   }
 
+  public getSchemaVersion(): number {
+    return this.state.schemaVersion;
+  }
+
+  public queueSyncOp(
+    opType: SyncOperationType,
+    entityId: UUID,
+    payload: Record<string, any>
+  ): SyncOperation {
+    const opId = generateUUID();
+    const op: SyncOperation = {
+      protocolVersion: 1,
+      ownerHash: this.getIdentity()?.ownerSubjectHash || 'local-owner',
+      deviceId: this.state.deviceIdentity.deviceId,
+      seq: this.getNextDeviceSeq(),
+      operationId: opId,
+      entityId,
+      type: opType,
+      createdAtUtc: new Date().toISOString(),
+      payload,
+      contentSha256: '',
+    };
+    this.state.syncOperations.set(opId, op);
+    this.state.syncOutbox.set(opId, {
+      opId,
+      uploadedStatus: 'pending',
+      retryCount: 0,
+      createdAt: new Date().toISOString(),
+    });
+    this.state.appliedOperations.add(opId);
+    this.state.syncDeviceHeads.set(op.deviceId, op.seq);
+    return op;
+  }
+
   // --- Query Engine ---
 
   public getWorkspaces(): Workspace[] {
@@ -742,9 +805,9 @@ export class LocalDatabase {
     return true;
   }
 
-  public getAccounts(workspaceId: UUID): Account[] {
+  public getAccounts(workspaceId: UUID, includeArchived = false): Account[] {
     return Array.from(this.state.accounts.values()).filter(
-      (a) => a.workspaceId === workspaceId && !a.archivedAt
+      (a) => a.workspaceId === workspaceId && (includeArchived || !a.archivedAt)
     );
   }
 
@@ -754,21 +817,356 @@ export class LocalDatabase {
     kind: Account['kind'],
     openingBalanceMinor = '0',
     accountNumberMasked = '',
-    classification: Account['classification'] = 'asset'
+    classification: Account['classification'] = 'asset',
+    groupId: UUID | null = null
   ): Account {
     const acc: Account = {
       id: generateUUID(),
       workspaceId,
+      groupId,
       name,
       kind,
       classification,
       accountNumberMasked,
       openingBalanceMinor,
+      archivedAt: null,
       createdAt: new Date().toISOString(),
     };
     this.state.accounts.set(acc.id, acc);
+    this.queueSyncOp('account.create', acc.id, { account: acc });
     this.autoPersist();
     return acc;
+  }
+
+  public getAllAccounts(workspaceId: UUID): Account[] {
+    return Array.from(this.state.accounts.values()).filter(
+      (a) => a.workspaceId === workspaceId
+    );
+  }
+
+  public getAccount(id: UUID): Account | undefined {
+    return this.state.accounts.get(id);
+  }
+
+  public updateAccount(
+    id: UUID,
+    updates: Partial<Pick<Account, 'name' | 'accountNumberMasked' | 'kind' | 'groupId'>>
+  ): Account | null {
+    const acc = this.state.accounts.get(id);
+    if (!acc) return null;
+    if (updates.name !== undefined) acc.name = updates.name.trim();
+    if (updates.accountNumberMasked !== undefined)
+      acc.accountNumberMasked = updates.accountNumberMasked.trim();
+    if (updates.kind !== undefined) acc.kind = updates.kind;
+    if (updates.groupId !== undefined) acc.groupId = updates.groupId;
+    this.queueSyncOp('account.update', id, updates);
+    this.autoPersist();
+    return acc;
+  }
+
+  public archiveAccount(id: UUID): boolean {
+    const acc = this.state.accounts.get(id);
+    if (!acc) return false;
+    acc.archivedAt = new Date().toISOString();
+    this.queueSyncOp('account.archive', id, { id, archivedAt: acc.archivedAt });
+    this.autoPersist();
+    return true;
+  }
+
+  public restoreAccount(id: UUID): boolean {
+    const acc = this.state.accounts.get(id);
+    if (!acc) return false;
+    acc.archivedAt = null;
+    this.queueSyncOp('account.restore', id, { id });
+    this.autoPersist();
+    return true;
+  }
+
+  public safeDeleteAccount(
+    id: UUID,
+    confirmationText: string
+  ): { success: boolean; mode: 'archived' | 'deleted'; error?: string } {
+    if (confirmationText !== 'DELET') {
+      return {
+        success: false,
+        mode: 'deleted',
+        error: 'Invalid confirmation text. Exactly "DELET" is required.',
+      };
+    }
+
+    const acc = this.state.accounts.get(id);
+    if (!acc) {
+      return { success: false, mode: 'deleted', error: 'Account not found.' };
+    }
+
+    let hasTransactions = false;
+    for (const line of this.state.journalLines.values()) {
+      if (line.accountId === id) {
+        hasTransactions = true;
+        break;
+      }
+    }
+
+    if (hasTransactions) {
+      acc.archivedAt = new Date().toISOString();
+      this.queueSyncOp('account.archive', id, { id, archivedAt: acc.archivedAt });
+      this.autoPersist();
+      return { success: true, mode: 'archived' };
+    } else {
+      this.state.accounts.delete(id);
+      this.queueSyncOp('account.delete', id, { id });
+      this.autoPersist();
+      return { success: true, mode: 'deleted' };
+    }
+  }
+
+  // --- Account Group Management (FEAT-001) ---
+
+  public createAccountGroup(
+    workspaceId: UUID,
+    name: string,
+    icon?: string,
+    description?: string
+  ): AccountGroup {
+    const group: AccountGroup = {
+      id: generateUUID(),
+      workspaceId,
+      name: name.trim(),
+      icon,
+      description: description?.trim(),
+      archivedAt: null,
+      createdAt: new Date().toISOString(),
+    };
+    this.state.accountGroups.set(group.id, group);
+    this.queueSyncOp('group.create', group.id, { group });
+    this.autoPersist();
+    return group;
+  }
+
+  public updateAccountGroup(
+    id: UUID,
+    updates: Partial<Pick<AccountGroup, 'name' | 'icon' | 'description'>>
+  ): AccountGroup | null {
+    const group = this.state.accountGroups.get(id);
+    if (!group) return null;
+    if (updates.name !== undefined) group.name = updates.name.trim();
+    if (updates.icon !== undefined) group.icon = updates.icon;
+    if (updates.description !== undefined) group.description = updates.description.trim();
+    this.queueSyncOp('group.update', id, updates);
+    this.autoPersist();
+    return group;
+  }
+
+  public archiveAccountGroup(id: UUID): boolean {
+    const group = this.state.accountGroups.get(id);
+    if (!group) return false;
+    group.archivedAt = new Date().toISOString();
+    this.queueSyncOp('group.archive', id, { id, archivedAt: group.archivedAt });
+    this.autoPersist();
+    return true;
+  }
+
+  public restoreAccountGroup(id: UUID): boolean {
+    const group = this.state.accountGroups.get(id);
+    if (!group) return false;
+    group.archivedAt = null;
+    this.queueSyncOp('group.restore', id, { id });
+    this.autoPersist();
+    return true;
+  }
+
+  public getAccountGroups(workspaceId: UUID, includeArchived = false): AccountGroup[] {
+    return Array.from(this.state.accountGroups.values()).filter(
+      (g) => g.workspaceId === workspaceId && (includeArchived || !g.archivedAt)
+    );
+  }
+
+  public getAccountGroup(id: UUID): AccountGroup | undefined {
+    return this.state.accountGroups.get(id);
+  }
+
+  public addAccountToGroup(accountId: UUID, groupId: UUID): boolean {
+    const acc = this.state.accounts.get(accountId);
+    const group = this.state.accountGroups.get(groupId);
+    if (!acc || !group || acc.workspaceId !== group.workspaceId) return false;
+    acc.groupId = groupId;
+    this.autoPersist();
+    return true;
+  }
+
+  public removeAccountFromGroup(accountId: UUID): boolean {
+    const acc = this.state.accounts.get(accountId);
+    if (!acc) return false;
+    acc.groupId = null;
+    this.autoPersist();
+    return true;
+  }
+
+  public getAccountGroupSummary(groupId: UUID): AccountGroupSummary | null {
+    const group = this.state.accountGroups.get(groupId);
+    if (!group) return null;
+
+    const groupAccounts = Array.from(this.state.accounts.values()).filter(
+      (a) => a.workspaceId === group.workspaceId && a.groupId === groupId && !a.archivedAt
+    );
+    const groupAccountIds = new Set(groupAccounts.map((a) => a.id));
+
+    let totalOpeningBalanceMinor = 0n;
+    for (const acc of groupAccounts) {
+      totalOpeningBalanceMinor += toPaisa(acc.openingBalanceMinor);
+    }
+
+    const txs = this.getTransactions(group.workspaceId);
+    let totalIncomeMinor = 0n;
+    let totalExpenseMinor = 0n;
+
+    for (const tx of txs) {
+      if (tx.isDeleted || (tx as any).isReplacedBy || tx.transactionType === 'reversal') continue;
+
+      if (tx.transactionType === 'income') {
+        for (const line of tx.lines) {
+          if (groupAccountIds.has(line.accountId)) {
+            totalIncomeMinor += toPaisa(line.debitMinor);
+          }
+        }
+      } else if (tx.transactionType === 'expense') {
+        for (const line of tx.lines) {
+          if (groupAccountIds.has(line.accountId)) {
+            totalExpenseMinor += toPaisa(line.creditMinor);
+          }
+        }
+      } else if (tx.transactionType === 'transfer') {
+        const fromLine = tx.lines.find((l) => !l.categoryId && toPaisa(l.creditMinor) > 0n);
+        const toLine = tx.lines.find((l) => !l.categoryId && toPaisa(l.debitMinor) > 0n);
+        const feeLine = tx.lines.find((l) => l.categoryId);
+
+        const fromInGroup = fromLine && groupAccountIds.has(fromLine.accountId);
+
+        if (fromInGroup && feeLine) {
+          totalExpenseMinor += toPaisa(feeLine.debitMinor);
+        }
+      }
+    }
+
+    const allSummaries = this.calculateAccountSummaries(group.workspaceId);
+    const summaryMap = new Map(allSummaries.map((s) => [s.accountId, s]));
+
+    let currentBalanceMinor = 0n;
+    for (const acc of groupAccounts) {
+      const s = summaryMap.get(acc.id);
+      if (s) {
+        currentBalanceMinor += toPaisa(s.currentBalanceMinor);
+      } else {
+        currentBalanceMinor += toPaisa(acc.openingBalanceMinor);
+      }
+    }
+
+    return {
+      group,
+      accountCount: groupAccounts.length,
+      totalOpeningBalanceMinor: totalOpeningBalanceMinor.toString(),
+      totalIncomeMinor: totalIncomeMinor.toString(),
+      totalExpenseMinor: totalExpenseMinor.toString(),
+      currentBalanceMinor: currentBalanceMinor.toString(),
+      accounts: groupAccounts,
+    };
+  }
+
+  // --- Employee Account Sharing and Permissions (FEAT-003) ---
+
+  public grantAccountPermission(
+    workspaceId: UUID,
+    employeeEmail: string,
+    employeeSubjectHash: string,
+    accountIds: UUID[],
+    role: EmployeeRole
+  ): AccountPermissionGrant {
+    const grant: AccountPermissionGrant = {
+      id: generateUUID(),
+      workspaceId,
+      accountIds,
+      employeeEmail: employeeEmail.trim().toLowerCase(),
+      employeeSubjectHash,
+      role,
+      createdAt: new Date().toISOString(),
+    };
+    this.state.accountPermissions.set(grant.id, grant);
+    this.queueSyncOp('permission.grant', grant.id, { grant });
+    this.autoPersist();
+    return grant;
+  }
+
+  public revokeAccountPermission(grantId: UUID): boolean {
+    const grant = this.state.accountPermissions.get(grantId);
+    if (!grant) return false;
+    grant.revokedAt = new Date().toISOString();
+    this.queueSyncOp('permission.revoke', grantId, { id: grantId });
+    this.autoPersist();
+    return true;
+  }
+
+  public getAccountPermissions(
+    workspaceId: UUID,
+    includeRevoked = false
+  ): AccountPermissionGrant[] {
+    return Array.from(this.state.accountPermissions.values()).filter(
+      (g) => g.workspaceId === workspaceId && (includeRevoked || !g.revokedAt)
+    );
+  }
+
+  public canUserReadAccount(userSubjectHash: string | undefined, accountId: UUID): boolean {
+    const acc = this.state.accounts.get(accountId);
+    if (!acc) return false;
+    const ws = this.state.workspaces.get(acc.workspaceId);
+    if (!ws) return false;
+
+    const localOwner = this.getIdentity()?.ownerSubjectHash;
+    if (
+      !userSubjectHash ||
+      userSubjectHash === 'local-owner' ||
+      userSubjectHash === ws.ownerSubjectHash ||
+      (localOwner && userSubjectHash === localOwner)
+    ) {
+      return true;
+    }
+
+    const grants = this.getAccountPermissions(ws.id, false);
+    return grants.some(
+      (g) => g.employeeSubjectHash === userSubjectHash && g.accountIds.includes(accountId)
+    );
+  }
+
+  public canUserWriteAccount(
+    userSubjectHash: string | undefined,
+    accountId: UUID,
+    opType: SyncOperationType = 'journal.post'
+  ): boolean {
+    const acc = this.state.accounts.get(accountId);
+    if (!acc) return false;
+    const ws = this.state.workspaces.get(acc.workspaceId);
+    if (!ws) return false;
+
+    const localOwner = this.getIdentity()?.ownerSubjectHash;
+    if (
+      !userSubjectHash ||
+      userSubjectHash === 'local-owner' ||
+      userSubjectHash === ws.ownerSubjectHash ||
+      (localOwner && userSubjectHash === localOwner)
+    ) {
+      return true;
+    }
+
+    if (opType === 'account.delete' || opType === 'account.archive') {
+      return false;
+    }
+
+    const grants = this.getAccountPermissions(ws.id, false);
+    return grants.some(
+      (g) =>
+        g.employeeSubjectHash === userSubjectHash &&
+        g.role === 'editor' &&
+        g.accountIds.includes(accountId)
+    );
   }
 
   public getCategories(workspaceId: UUID): Category[] {
@@ -1371,6 +1769,8 @@ export class LocalDatabase {
       deviceIdentity: this.state.deviceIdentity,
       workspaces: Array.from(this.state.workspaces.entries()),
       accounts: Array.from(this.state.accounts.entries()),
+      accountGroups: Array.from(this.state.accountGroups.entries()),
+      accountPermissions: Array.from(this.state.accountPermissions.entries()),
       categories: Array.from(this.state.categories.entries()),
       parties: Array.from(this.state.parties.entries()),
       journalTransactions: Array.from(this.state.journalTransactions.entries()),
@@ -1402,6 +1802,8 @@ export class LocalDatabase {
     };
     this.state.workspaces = new Map(data.workspaces || []);
     this.state.accounts = new Map(data.accounts || []);
+    this.state.accountGroups = new Map(data.accountGroups || []);
+    this.state.accountPermissions = new Map(data.accountPermissions || []);
     this.state.categories = new Map(data.categories || []);
     this.state.parties = new Map(data.parties || []);
     this.state.journalTransactions = new Map(data.journalTransactions || []);
@@ -1423,6 +1825,10 @@ export class LocalDatabase {
     if (fromVer < 4) {
       await this.runVersion4Migration(fromVer);
     }
+    // Perform non-destructive migrations if fromVer < 5
+    if (fromVer < 5) {
+      await this.runVersion5Migration(fromVer);
+    }
   }
 
   private async runVersion4Migration(fromVer: number): Promise<void> {
@@ -1443,6 +1849,54 @@ export class LocalDatabase {
       appliedAt: new Date().toISOString(),
     });
     this.state.schemaVersion = 4;
+  }
+
+  private async runVersion5Migration(fromVer: number): Promise<void> {
+    // Step 1: Pre-migration safety snapshot in a persistent recovery snapshot and driver backup
+    if (this.driver) {
+      const rawCurrent = await this.driver.getItem(this.storageKey);
+      if (rawCurrent) {
+        await this.driver.setItem(`${this.storageKey}_pre_migration_v5`, rawCurrent);
+      }
+    }
+    await this.captureRecoverySnapshot();
+
+    // Step 2: Non-destructive accounts schema updates
+    for (const [id, acc] of this.state.accounts.entries()) {
+      if (acc.groupId === undefined) {
+        this.state.accounts.set(id, {
+          ...acc,
+          groupId: null,
+        });
+      }
+    }
+
+    // Step 3: Ensure maps exist
+    if (!this.state.accountGroups) {
+      this.state.accountGroups = new Map();
+    }
+    if (!this.state.accountPermissions) {
+      this.state.accountPermissions = new Map();
+    }
+
+    // Step 4: Post-migration integrity verification across all workspaces
+    for (const ws of this.state.workspaces.values()) {
+      const integrity = this.verifyLedgerIntegrity(ws.id);
+      if (!integrity.isValid) {
+        throw new Error(
+          `Migration v5 failed integrity verification in workspace ${ws.id}: ${integrity.discrepancies.join(', ')}`
+        );
+      }
+    }
+
+    // Step 5: Append migration log entry
+    this.state.schemaMigrations.push({
+      fromVersion: Math.max(fromVer, 4),
+      toVersion: 5,
+      checksum: 'account-groups-permissions-v5',
+      appliedAt: new Date().toISOString(),
+    });
+    this.state.schemaVersion = 5;
   }
 
   /**

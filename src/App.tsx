@@ -18,6 +18,9 @@ import { SnapshotModal } from './components/SnapshotModal';
 import { SettingsModal } from './components/SettingsModal';
 import { AuthModal } from './components/AuthModal';
 import { PartiesModal } from './components/PartiesModal';
+import { ProfileModal } from './components/ProfileModal';
+import { TeamSharingModal } from './components/TeamSharingModal';
+import { AboutModal } from './components/AboutModal';
 import { PinLockScreen } from './components/PinLockScreen';
 import { pinLock } from './security/pinLock';
 import { JournalTransaction } from './contracts/types';
@@ -85,6 +88,9 @@ function MainApp() {
   const [isSettingsModalOpen, setIsSettingsModalOpen] = useState(false);
   const [isAuthModalOpen, setIsAuthModalOpen] = useState(false);
   const [isPartiesModalOpen, setIsPartiesModalOpen] = useState(false);
+  const [isProfileModalOpen, setIsProfileModalOpen] = useState(false);
+  const [isTeamSharingModalOpen, setIsTeamSharingModalOpen] = useState(false);
+  const [isAboutModalOpen, setIsAboutModalOpen] = useState(false);
 
   if (!isUnlocked) {
     return <PinLockScreen onUnlocked={() => setIsUnlocked(true)} />;
@@ -102,6 +108,10 @@ function MainApp() {
         onOpenSyncModal={() => setIsSyncModalOpen(true)}
         onOpenSettingsModal={() => setIsSettingsModalOpen(true)}
         onOpenSnapshotModal={() => setIsSnapshotModalOpen(true)}
+        onOpenProfileModal={() => setIsProfileModalOpen(true)}
+        onOpenTeamSharingModal={() => setIsTeamSharingModalOpen(true)}
+        onOpenAboutModal={() => setIsAboutModalOpen(true)}
+        onNavigateToAccounts={() => setActiveTab('accounts')}
       />
 
       {/* Main Content Area */}
@@ -175,6 +185,21 @@ function MainApp() {
       <PartiesModal
         isOpen={isPartiesModalOpen}
         onClose={() => setIsPartiesModalOpen(false)}
+      />
+
+      <ProfileModal
+        isOpen={isProfileModalOpen}
+        onClose={() => setIsProfileModalOpen(false)}
+      />
+
+      <TeamSharingModal
+        isOpen={isTeamSharingModalOpen}
+        onClose={() => setIsTeamSharingModalOpen(false)}
+      />
+
+      <AboutModal
+        isOpen={isAboutModalOpen}
+        onClose={() => setIsAboutModalOpen(false)}
       />
     </div>
   );

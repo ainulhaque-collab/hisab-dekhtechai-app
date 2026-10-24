@@ -18,6 +18,8 @@ export interface GoogleUserProfile {
   email: string;
   displayName: string;
   photoUrl?: string;
+  phone?: string;
+  address?: string;
   isDriveAuthorized: boolean;
   accessToken?: string;
   tokenExpiresAt?: number; // epoch ms
@@ -112,6 +114,8 @@ export class GoogleAuthManager {
           email: this.currentProfile.email,
           displayName: this.currentProfile.displayName,
           photoUrl: this.currentProfile.photoUrl,
+          phone: this.currentProfile.phone,
+          address: this.currentProfile.address,
           isDriveAuthorized: this.currentProfile.isDriveAuthorized,
         };
         localStorage.setItem('hisab_google_user', JSON.stringify(sanitized));
@@ -119,6 +123,37 @@ export class GoogleAuthManager {
         localStorage.removeItem('hisab_google_user');
       }
     }
+  }
+
+  /**
+   * Updates user profile fields (displayName, photoUrl, phone, address)
+   * without ever mutating the verified Google subject ID, subject hash, or OAuth tokens.
+   */
+  public updateEditableProfile(updates: {
+    displayName?: string;
+    photoUrl?: string;
+    phone?: string;
+    address?: string;
+  }): GoogleUserProfile {
+    if (!this.currentProfile) {
+      this.currentProfile = {
+        subjectId: 'local_user',
+        subjectHash: 'local_hash',
+        email: '',
+        displayName: updates.displayName || 'Hisab User',
+        photoUrl: updates.photoUrl,
+        phone: updates.phone,
+        address: updates.address,
+        isDriveAuthorized: false,
+      };
+    } else {
+      if (updates.displayName !== undefined) this.currentProfile.displayName = updates.displayName;
+      if (updates.photoUrl !== undefined) this.currentProfile.photoUrl = updates.photoUrl;
+      if (updates.phone !== undefined) this.currentProfile.phone = updates.phone;
+      if (updates.address !== undefined) this.currentProfile.address = updates.address;
+    }
+    this.saveProfile();
+    return this.currentProfile;
   }
 
   public getProfile(): GoogleUserProfile | null {

@@ -584,6 +584,20 @@ export class SyncOrchestrator {
       case 'journal.post': {
         const balanced: BalancedJournal = payload.balancedJournal;
         if (balanced && balanced.transaction && balanced.lines) {
+          const assetLine = balanced.lines.find((l) => !l.categoryId);
+          const assetAccId = assetLine?.accountId || balanced.lines[0]?.accountId;
+          // Check employee permissions only for non-owner employee operations
+          const isEmployeeOp = !!op.authorSubjectHash && op.authorSubjectHash !== op.ownerHash;
+          if (
+            isEmployeeOp &&
+            assetAccId &&
+            !this.db.canUserWriteAccount(op.authorSubjectHash, assetAccId, op.type)
+          ) {
+            console.warn(
+              `Permission Denied: Employee ${op.authorSubjectHash} cannot write account ${assetAccId}`
+            );
+            break;
+          }
           const fullTx: JournalTransaction = {
             ...balanced.transaction,
             createdOpId: op.operationId,
@@ -676,15 +690,139 @@ export class SyncOrchestrator {
         }
         break;
 
+      case 'workspace.update':
+        if (payload.id && this.db.getRawState().workspaces.has(payload.id)) {
+          const ws = this.db.getRawState().workspaces.get(payload.id)!;
+          if (payload.name) ws.name = payload.name;
+          if (payload.kind) ws.kind = payload.kind;
+        }
+        break;
+
+      case 'workspace.archive':
+        if (payload.id && this.db.getRawState().workspaces.has(payload.id)) {
+          this.db.getRawState().workspaces.get(payload.id)!.archivedAt =
+            payload.archivedAt || new Date().toISOString();
+        }
+        break;
+
       case 'account.create':
         if (payload.account) {
           this.db.getRawState().accounts.set(payload.account.id, payload.account);
         }
         break;
 
+      case 'account.update':
+        if (payload.id && this.db.getRawState().accounts.has(payload.id)) {
+          const acc = this.db.getRawState().accounts.get(payload.id)!;
+          if (payload.name) acc.name = payload.name;
+          if (payload.accountNumberMasked !== undefined) acc.accountNumberMasked = payload.accountNumberMasked;
+          if (payload.kind) acc.kind = payload.kind;
+          if (payload.groupId !== undefined) acc.groupId = payload.groupId;
+        }
+        break;
+
+      case 'account.archive':
+        if (payload.id && this.db.getRawState().accounts.has(payload.id)) {
+          this.db.getRawState().accounts.get(payload.id)!.archivedAt =
+            payload.archivedAt || new Date().toISOString();
+        }
+        break;
+
+      case 'account.restore':
+        if (payload.id && this.db.getRawState().accounts.has(payload.id)) {
+          this.db.getRawState().accounts.get(payload.id)!.archivedAt = null;
+        }
+        break;
+
+      case 'account.delete':
+        if (payload.id) {
+          this.db.getRawState().accounts.delete(payload.id);
+        }
+        break;
+
+      case 'group.create':
+        if (payload.group) {
+          this.db.getRawState().accountGroups.set(payload.group.id, payload.group);
+        }
+        break;
+
+      case 'group.update':
+        if (payload.id && this.db.getRawState().accountGroups.has(payload.id)) {
+          const g = this.db.getRawState().accountGroups.get(payload.id)!;
+          if (payload.name) g.name = payload.name;
+          if (payload.icon !== undefined) g.icon = payload.icon;
+          if (payload.description !== undefined) g.description = payload.description;
+        }
+        break;
+
+      case 'group.archive':
+        if (payload.id && this.db.getRawState().accountGroups.has(payload.id)) {
+          this.db.getRawState().accountGroups.get(payload.id)!.archivedAt =
+            payload.archivedAt || new Date().toISOString();
+        }
+        break;
+
+      case 'group.restore':
+        if (payload.id && this.db.getRawState().accountGroups.has(payload.id)) {
+          this.db.getRawState().accountGroups.get(payload.id)!.archivedAt = null;
+        }
+        break;
+
+      case 'permission.grant':
+        if (payload.grant) {
+          this.db.getRawState().accountPermissions.set(payload.grant.id, payload.grant);
+        }
+        break;
+
+      case 'permission.revoke':
+        if (payload.id && this.db.getRawState().accountPermissions.has(payload.id)) {
+          this.db.getRawState().accountPermissions.get(payload.id)!.revokedAt =
+            payload.revokedAt || new Date().toISOString();
+        }
+        break;
+
       case 'category.create':
         if (payload.category) {
           this.db.getRawState().categories.set(payload.category.id, payload.category);
+        }
+        break;
+
+      case 'category.update':
+        if (payload.id && this.db.getRawState().categories.has(payload.id)) {
+          const c = this.db.getRawState().categories.get(payload.id)!;
+          if (payload.name) c.name = payload.name;
+          if (payload.nameEn !== undefined) c.nameEn = payload.nameEn;
+          if (payload.color !== undefined) c.color = payload.color;
+        }
+        break;
+
+      case 'category.archive':
+        if (payload.id && this.db.getRawState().categories.has(payload.id)) {
+          this.db.getRawState().categories.get(payload.id)!.archivedAt =
+            payload.archivedAt || new Date().toISOString();
+        }
+        break;
+
+      case 'party.create':
+        if (payload.party) {
+          this.db.getRawState().parties.set(payload.party.id, payload.party);
+        }
+        break;
+
+      case 'party.update':
+        if (payload.id && this.db.getRawState().parties.has(payload.id)) {
+          const p = this.db.getRawState().parties.get(payload.id)!;
+          if (payload.name) p.name = payload.name;
+          if (payload.phone !== undefined) p.phone = payload.phone;
+          if (payload.role !== undefined) p.role = payload.role;
+          if (payload.notes !== undefined) p.notes = payload.notes;
+        }
+        break;
+
+      case 'party.archive':
+        if (payload.id && this.db.getRawState().parties.has(payload.id)) {
+          this.db.getRawState().parties.get(payload.id)!.archivedAt =
+            payload.archivedAt || new Date().toISOString();
         }
         break;
 

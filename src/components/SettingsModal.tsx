@@ -7,9 +7,13 @@ import {
   LogOut,
   User,
   X,
-  Info
+  Info,
+  Volume2,
+  VolumeX,
+  Smartphone,
+  Play
 } from 'lucide-react';
-
+import { soundService } from '../services/soundService';
 import { pinLock } from '../security/pinLock';
 
 interface SettingsModalProps {
@@ -30,6 +34,8 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
     auth,
     db,
     refreshState,
+    soundPrefs,
+    setSoundPrefs,
   } = useApp();
 
   const isEn = language === 'en';
@@ -38,7 +44,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
   const [pin, setPin] = useState('');
   const [confirmPin, setConfirmPin] = useState('');
   const [showPinSetup, setShowPinSetup] = useState(false);
-  const [activeSubTab, setActiveSubTab] = useState<'general' | 'security' | 'privacy'>('general');
+  const [activeSubTab, setActiveSubTab] = useState<'general' | 'sound' | 'security' | 'privacy'>('general');
 
   if (!isOpen) return null;
 
@@ -95,7 +101,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
         </div>
 
         {/* Subtabs */}
-        <div className="grid grid-cols-3 gap-1 p-1 bg-slate-100 rounded-xl my-3 text-xs font-medium">
+        <div className="grid grid-cols-4 gap-1 p-1 bg-slate-100 rounded-xl my-3 text-[11px] font-medium">
           <button
             type="button"
             onClick={() => setActiveSubTab('general')}
@@ -106,6 +112,17 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
             }`}
           >
             {isEn ? 'General' : 'সাধারণ'}
+          </button>
+          <button
+            type="button"
+            onClick={() => setActiveSubTab('sound')}
+            className={`py-1.5 rounded-lg transition-all ${
+              activeSubTab === 'sound'
+                ? 'bg-white text-slate-900 shadow-2xs font-semibold'
+                : 'text-slate-500 hover:text-slate-800'
+            }`}
+          >
+            {isEn ? 'Sound' : 'শব্দ'}
           </button>
           <button
             type="button"
@@ -230,6 +247,116 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                 <span>Hisab DekhteChai v1.0</span>
               </div>
               <span className="text-slate-400">SQLite + Drive AppData</span>
+            </div>
+          </div>
+        )}
+
+        {/* Sound & Haptics Tab */}
+        {activeSubTab === 'sound' && (
+          <div className="space-y-3 pt-1">
+            {/* Sound Effects Toggle */}
+            <div className="p-3.5 bg-slate-50 rounded-xl border border-slate-200/80 space-y-2">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-2">
+                  {soundPrefs.soundsEnabled ? (
+                    <Volume2 className="w-4 h-4 text-blue-600" />
+                  ) : (
+                    <VolumeX className="w-4 h-4 text-slate-400" />
+                  )}
+                  <span className="font-medium text-slate-800">
+                    {isEn ? 'Transaction Sounds' : 'লেনদেন শব্দ সংকেত'}
+                  </span>
+                </div>
+                <input
+                  type="checkbox"
+                  checked={soundPrefs.soundsEnabled}
+                  onChange={(e) => setSoundPrefs({ soundsEnabled: e.target.checked })}
+                  className="w-4 h-4 rounded text-blue-600 focus:ring-blue-600"
+                />
+              </div>
+              <p className="text-[11px] text-slate-500">
+                {isEn
+                  ? 'Plays subtle chimes on successful local transaction commits.'
+                  : 'সফলভাবে লেনদেন সংরক্ষণের পর হালকা ইতিবাচক সাউন্ড প্লে করে।'}
+              </p>
+            </div>
+
+            {/* Volume Slider */}
+            <div className="p-3.5 bg-slate-50 rounded-xl border border-slate-200/80 space-y-2">
+              <div className="flex items-center justify-between">
+                <span className="font-medium text-slate-800">
+                  {isEn ? 'Sound Volume' : 'শব্দের মাত্রা'}
+                </span>
+                <span className="text-xs font-semibold text-slate-700">
+                  {Math.round(soundPrefs.soundVolume * 100)}%
+                </span>
+              </div>
+              <input
+                type="range"
+                min="0"
+                max="1"
+                step="0.05"
+                disabled={!soundPrefs.soundsEnabled}
+                value={soundPrefs.soundVolume}
+                onChange={(e) => setSoundPrefs({ soundVolume: parseFloat(e.target.value) })}
+                className="w-full accent-blue-600 disabled:opacity-40"
+              />
+            </div>
+
+            {/* Haptics Toggle */}
+            <div className="p-3.5 bg-slate-50 rounded-xl border border-slate-200/80 space-y-2">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-2">
+                  <Smartphone className="w-4 h-4 text-slate-600" />
+                  <span className="font-medium text-slate-800">
+                    {isEn ? 'Haptic Feedback' : 'হ্যাপটিক কম্পন'}
+                  </span>
+                </div>
+                <input
+                  type="checkbox"
+                  checked={soundPrefs.hapticsEnabled}
+                  onChange={(e) => setSoundPrefs({ hapticsEnabled: e.target.checked })}
+                  className="w-4 h-4 rounded text-blue-600 focus:ring-blue-600"
+                />
+              </div>
+              <p className="text-[11px] text-slate-500">
+                {isEn
+                  ? 'Vibrate gently when committing transactions on mobile devices.'
+                  : 'মোবাইলে লেনদেন সম্পন্নের সময় মৃদু কম্পন অনুভব হবে।'}
+              </p>
+            </div>
+
+            {/* Test Sounds Demo */}
+            <div className="p-3.5 bg-slate-50 rounded-xl border border-slate-200/80 space-y-2">
+              <span className="font-medium text-slate-800 block text-xs">
+                {isEn ? 'Test Chimes' : 'সাউন্ড টেস্ট'}
+              </span>
+              <div className="grid grid-cols-3 gap-2">
+                <button
+                  type="button"
+                  onClick={() => soundService.playTransactionSuccess('income')}
+                  className="py-1.5 px-2 bg-emerald-50 text-emerald-800 border border-emerald-200 rounded-lg text-[11px] font-semibold hover:bg-emerald-100 flex items-center justify-center gap-1"
+                >
+                  <Play className="w-3 h-3 text-emerald-600" />
+                  <span>{isEn ? 'Income' : 'আয়'}</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => soundService.playTransactionSuccess('expense')}
+                  className="py-1.5 px-2 bg-rose-50 text-rose-800 border border-rose-200 rounded-lg text-[11px] font-semibold hover:bg-rose-100 flex items-center justify-center gap-1"
+                >
+                  <Play className="w-3 h-3 text-rose-600" />
+                  <span>{isEn ? 'Expense' : 'ব্যয়'}</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => soundService.playTransactionSuccess('transfer')}
+                  className="py-1.5 px-2 bg-blue-50 text-blue-800 border border-blue-200 rounded-lg text-[11px] font-semibold hover:bg-blue-100 flex items-center justify-center gap-1"
+                >
+                  <Play className="w-3 h-3 text-blue-600" />
+                  <span>{isEn ? 'Transfer' : 'স্থানান্তর'}</span>
+                </button>
+              </div>
             </div>
           </div>
         )}

@@ -14,6 +14,10 @@ import { generateUUID } from '../domain/journal';
 import {
   Workspace,
   Account,
+  AccountGroup,
+  AccountGroupSummary,
+  AccountPermissionGrant,
+  EmployeeRole,
   Category,
   JournalTransaction,
   ConflictRecord,
@@ -24,6 +28,7 @@ import {
   BusinessParty,
   PartyRole
 } from '../contracts/types';
+import { soundService, SoundPreferences } from '../services/soundService';
 
 export interface DeviceProfile {
   id: string;
@@ -47,6 +52,8 @@ interface AppContextType {
   setCurrentWorkspaceId: (id: UUID) => void;
   workspaces: Workspace[];
   accounts: Account[];
+  accountGroups: AccountGroup[];
+  accountPermissions: AccountPermissionGrant[];
   categories: Category[];
   parties: BusinessParty[];
   transactions: JournalTransaction[];
@@ -69,6 +76,22 @@ interface AppContextType {
   durabilityInfo: { type: string; isPersistent: boolean; warning?: string };
   createCategory: (name: string, kind: Category['kind'], parentId?: UUID | null, nameEn?: string) => Category;
   deleteCategory: (id: UUID) => void;
+  createAccount: (name: string, kind: Account['kind'], openingBalanceMinor?: string, accountNumberMasked?: string, classification?: Account['classification'], groupId?: UUID | null) => Account;
+  updateAccount: (id: UUID, updates: Partial<Pick<Account, 'name' | 'accountNumberMasked' | 'kind' | 'groupId'>>) => Account | null;
+  archiveAccount: (id: UUID) => boolean;
+  restoreAccount: (id: UUID) => boolean;
+  safeDeleteAccount: (id: UUID, confirmationText: string) => { success: boolean; mode: 'archived' | 'deleted'; error?: string };
+  createAccountGroup: (name: string, icon?: string, description?: string) => AccountGroup;
+  updateAccountGroup: (id: UUID, updates: Partial<Pick<AccountGroup, 'name' | 'icon' | 'description'>>) => AccountGroup | null;
+  archiveAccountGroup: (id: UUID) => boolean;
+  restoreAccountGroup: (id: UUID) => boolean;
+  addAccountToGroup: (accountId: UUID, groupId: UUID) => boolean;
+  removeAccountFromGroup: (accountId: UUID) => boolean;
+  getAccountGroupSummary: (groupId: UUID) => AccountGroupSummary | null;
+  grantAccountPermission: (employeeEmail: string, employeeSubjectHash: string, accountIds: UUID[], role: EmployeeRole) => AccountPermissionGrant;
+  revokeAccountPermission: (grantId: UUID) => boolean;
+  soundPrefs: SoundPreferences;
+  setSoundPrefs: (prefs: Partial<SoundPreferences>) => void;
   createParty: (name: string, role: PartyRole, phone?: string, notes?: string) => BusinessParty;
   deleteParty: (id: UUID) => void;
   editParty: (id: UUID, updates: Partial<Pick<BusinessParty, 'name' | 'phone' | 'role' | 'notes'>>) => void;
@@ -76,6 +99,13 @@ interface AppContextType {
   editTransaction: (id: UUID, cmd: any) => Promise<void>;
   signInWithGoogle: () => Promise<GoogleUserProfile>;
   bootstrapWithTestProfile: (profile: GoogleUserProfile) => Promise<void>;
+  updateUserProfile: (updates: {
+    displayName?: string;
+    photoUrl?: string;
+    phone?: string;
+    address?: string;
+  }) => GoogleUserProfile;
+  signOut: () => void;
 }
 
 const AppContext = createContext<AppContextType | null>(null);
@@ -176,6 +206,17 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   const [currentWorkspaceId, setCurrentWorkspaceId] = useState<UUID>('ws-personal-default');
   const [workspaces, setWorkspaces] = useState<Workspace[]>([]);
   const [accounts, setAccounts] = useState<Account[]>([]);
+  const [accountGroups, setAccountGroups] = useState<AccountGroup[]>([]);
+  const [accountPermissions, setAccountPermissions] = useState<AccountPermissionGrant[]>([]);
+  const [soundPrefs, setSoundPrefsState] = useState<SoundPreferences>(() =>
+    soundService.getPreferences()
+  );
+
+  const setSoundPrefs = (prefs: Partial<SoundPreferences>) => {
+    soundService.setPreferences(prefs);
+    setSoundPrefsState(soundService.getPreferences());
+  };
+
   const [categories, setCategories] = useState<Category[]>([]);
   const [parties, setParties] = useState<BusinessParty[]>([]);
   const [transactions, setTransactions] = useState<JournalTransaction[]>([]);
@@ -234,6 +275,8 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         setCurrentWorkspaceId(activeWs.id);
       }
       setAccounts(db.getAccounts(activeWs.id));
+      setAccountGroups(db.getAccountGroups(activeWs.id));
+      setAccountPermissions(db.getAccountPermissions(activeWs.id));
       setCategories(db.getCategories(activeWs.id));
       setParties(db.getParties(activeWs.id));
       setTransactions(db.getTransactions(activeWs.id));
@@ -388,6 +431,120 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     refreshState();
   };
 
+  const createAccount = (
+    name: string,
+    kind: Account['kind'],
+    openingBalanceMinor = '0',
+    accountNumberMasked = '',
+    classification: Account['classification'] = 'asset',
+    groupId?: UUID | null
+  ) => {
+    const acc = db.createAccount(
+      currentWorkspaceId,
+      name,
+      kind,
+      openingBalanceMinor,
+      accountNumberMasked,
+      classification,
+      groupId || null
+    );
+    refreshState();
+    return acc;
+  };
+
+  const updateAccount = (
+    id: UUID,
+    updates: Partial<Pick<Account, 'name' | 'accountNumberMasked' | 'kind' | 'groupId'>>
+  ) => {
+    const res = db.updateAccount(id, updates);
+    refreshState();
+    return res;
+  };
+
+  const archiveAccount = (id: UUID) => {
+    const res = db.archiveAccount(id);
+    refreshState();
+    return res;
+  };
+
+  const restoreAccount = (id: UUID) => {
+    const res = db.restoreAccount(id);
+    refreshState();
+    return res;
+  };
+
+  const safeDeleteAccount = (id: UUID, confirmationText: string) => {
+    const res = db.safeDeleteAccount(id, confirmationText);
+    refreshState();
+    return res;
+  };
+
+  const createAccountGroup = (name: string, icon?: string, description?: string) => {
+    const group = db.createAccountGroup(currentWorkspaceId, name, icon, description);
+    refreshState();
+    return group;
+  };
+
+  const updateAccountGroup = (
+    id: UUID,
+    updates: Partial<Pick<AccountGroup, 'name' | 'icon' | 'description'>>
+  ) => {
+    const res = db.updateAccountGroup(id, updates);
+    refreshState();
+    return res;
+  };
+
+  const archiveAccountGroup = (id: UUID) => {
+    const res = db.archiveAccountGroup(id);
+    refreshState();
+    return res;
+  };
+
+  const restoreAccountGroup = (id: UUID) => {
+    const res = db.restoreAccountGroup(id);
+    refreshState();
+    return res;
+  };
+
+  const addAccountToGroup = (accountId: UUID, groupId: UUID) => {
+    const res = db.addAccountToGroup(accountId, groupId);
+    refreshState();
+    return res;
+  };
+
+  const removeAccountFromGroup = (accountId: UUID) => {
+    const res = db.removeAccountFromGroup(accountId);
+    refreshState();
+    return res;
+  };
+
+  const getAccountGroupSummary = (groupId: UUID) => {
+    return db.getAccountGroupSummary(groupId);
+  };
+
+  const grantAccountPermission = (
+    employeeEmail: string,
+    employeeSubjectHash: string,
+    accountIds: UUID[],
+    role: EmployeeRole
+  ) => {
+    const grant = db.grantAccountPermission(
+      currentWorkspaceId,
+      employeeEmail,
+      employeeSubjectHash,
+      accountIds,
+      role
+    );
+    refreshState();
+    return grant;
+  };
+
+  const revokeAccountPermission = (grantId: UUID) => {
+    const res = db.revokeAccountPermission(grantId);
+    refreshState();
+    return res;
+  };
+
   const deleteTransaction = async (id: UUID, reason?: string) => {
     await db.deleteTransaction(id, reason);
     refreshState();
@@ -435,6 +592,23 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     }
   };
 
+  const updateUserProfile = (updates: {
+    displayName?: string;
+    photoUrl?: string;
+    phone?: string;
+    address?: string;
+  }) => {
+    const updated = auth.updateEditableProfile(updates);
+    refreshState();
+    return updated;
+  };
+
+  const signOut = () => {
+    auth.signOut();
+    sync.setAuthorized(false);
+    refreshState();
+  };
+
   const currentWorkspace = useMemo(() => {
     return workspaces.find((w) => w.id === currentWorkspaceId) || workspaces[0] || null;
   }, [workspaces, currentWorkspaceId]);
@@ -451,6 +625,8 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         setCurrentWorkspaceId,
         workspaces,
         accounts,
+        accountGroups,
+        accountPermissions,
         categories,
         parties,
         transactions,
@@ -473,6 +649,22 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         durabilityInfo,
         createCategory,
         deleteCategory,
+        createAccount,
+        updateAccount,
+        archiveAccount,
+        restoreAccount,
+        safeDeleteAccount,
+        createAccountGroup,
+        updateAccountGroup,
+        archiveAccountGroup,
+        restoreAccountGroup,
+        addAccountToGroup,
+        removeAccountFromGroup,
+        getAccountGroupSummary,
+        grantAccountPermission,
+        revokeAccountPermission,
+        soundPrefs,
+        setSoundPrefs,
         createParty,
         deleteParty,
         editParty,
@@ -480,6 +672,8 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         editTransaction,
         signInWithGoogle,
         bootstrapWithTestProfile,
+        updateUserProfile,
+        signOut,
       }}
     >
       {children}

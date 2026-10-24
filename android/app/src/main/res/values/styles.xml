@@ -6,6 +6,10 @@
         <item name="colorPrimaryDark">#1D4ED8</item>
         <item name="colorAccent">#3B82F6</item>
         <item name="android:windowBackground">@android:color/white</item>
+        <item name="android:statusBarColor">@android:color/white</item>
+        <item name="android:windowLightStatusBar">true</item>
+        <item name="android:navigationBarColor">@android:color/white</item>
+        <item name="android:windowLightNavigationBar">true</item>
     </style>
 
     <!-- Launch screen theme (no action bar, clean white background) -->
