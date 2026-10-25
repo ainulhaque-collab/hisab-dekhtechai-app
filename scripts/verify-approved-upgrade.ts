@@ -1,4 +1,6 @@
 import assert from 'node:assert/strict';
+import { PinLockManager } from '../src/security/pinLock';
+import { soundService } from '../src/services/soundService';
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { LocalDatabase } from '../src/storage/db';
 import { LocalStorageFallbackDriver } from '../src/storage/drivers/durableStorage';
@@ -6,6 +8,14 @@ import { buildIncomeJournal, buildExpenseJournal, buildTransferJournal, generate
 import { canonicalJson, computeSha256 } from '../src/sync/canonical';
 
 // Synthetic fixture only. No installed app storage, customer data, or Google account is accessed.
+const syntheticPreferences = new Map<string, string>();
+Object.defineProperty(globalThis, 'localStorage', { configurable: true, value: {
+  getItem: (key: string) => syntheticPreferences.get(key) ?? null,
+  setItem: (key: string, value: string) => syntheticPreferences.set(key, value),
+  removeItem: (key: string) => syntheticPreferences.delete(key),
+} });
+const pin = new PinLockManager(); await pin.setPin('6284');
+soundService.setPreferences({ soundsEnabled: true, soundVolume: 0.4, hapticsEnabled: false });
 const driver = new LocalStorageFallbackDriver();
 const key = 'approved-upgrade-synthetic';
 const db = new LocalDatabase(key, driver); await db.init();
@@ -35,7 +45,7 @@ function snapshot(target: LocalDatabase) {
     balances: target.calculateAccountSummaries(ws.id), groupTotal: target.getAccountGroupSummary(group.id)?.currentBalanceMinor,
     consolidated: target.getDashboardData(ws.id).totalConsolidatedBalanceMinor,
     pendingOperationIds: target.getPendingOutbox().map(o => o.operationId), ownerIdentity: target.getIdentity(),
-    financialIntegrity: target.verifyLedgerIntegrity(ws.id).isValid, preferences: Array.from(raw.preferences.entries()) };
+    financialIntegrity: target.verifyLedgerIntegrity(ws.id).isValid, pinEnabled: new PinLockManager().isEnabled(), soundPreferences: soundService.getPreferences(), mediaReferences: [], preferences: Array.from(raw.preferences.entries()) };
 }
 const before = snapshot(db);
 const serializedBaseline = db.toSerializable();
@@ -44,11 +54,14 @@ assert.deepEqual(snapshot(upgraded), before);
 upgraded.editWorkspace(ws.id, { name: 'Renamed synthetic business' });
 upgraded.archiveWorkspace(ws.id); upgraded.restoreWorkspace(ws.id); await upgraded.waitForPendingWrites();
 const after = snapshot(upgraded);
-for (const field of ['workspaces', 'accounts', 'transactions', 'journalLines', 'balances', 'groupTotal', 'consolidated', 'ownerIdentity', 'financialIntegrity', 'preferences'] as const) assert.deepEqual(after[field], before[field], field);
+for (const field of ['workspaces', 'accounts', 'transactions', 'journalLines', 'balances', 'groupTotal', 'consolidated', 'ownerIdentity', 'financialIntegrity', 'preferences', 'pinEnabled', 'soundPreferences', 'mediaReferences'] as const) assert.deepEqual(after[field], before[field], field);
 assert.ok(before.pendingOperationIds.every(id => after.pendingOperationIds.includes(id)));
 assert.equal(after.consolidated, '343000');
 assert.equal(after.groupTotal, '343000');
+assert.equal((await new PinLockManager().verifyPin('6284')).success, true);
+assert.equal(after.pinEnabled, true);
+assert.equal(after.soundPreferences.soundVolume, 0.4);
 mkdirSync('docs/qa', { recursive: true });
-writeFileSync('docs/qa/synthetic-v5-baseline.json', JSON.stringify(serializedBaseline, null, 2));
-writeFileSync('docs/qa/upgrade-evidence.json', JSON.stringify({ fixture: 'Synthetic Node fallback driver; not physical SQLite or APK upgrade', baselineCommit: '35e0b7c499bdb0f0e271fe2ec7de5e7dc6b3b415', before, after, recordAndBalanceParity: true, originalPendingOperationsRetained: true, apkUpgrade: 'BLOCKED — REAL DEVICE / GOOGLE AUTH VERIFICATION REQUIRED' }, null, 2));
+writeFileSync('docs/qa/synthetic-v5-baseline-with-security.json', JSON.stringify(serializedBaseline, null, 2));
+writeFileSync('docs/qa/upgrade-with-security-evidence.json', JSON.stringify({ fixture: 'Synthetic Node fallback driver; not physical SQLite or APK upgrade', baselineCommit: '35e0b7c499bdb0f0e271fe2ec7de5e7dc6b3b415', before, after, recordAndBalanceParity: true, originalPendingOperationsRetained: true, apkUpgrade: 'BLOCKED — REAL DEVICE / GOOGLE AUTH VERIFICATION REQUIRED' }, null, 2));
 console.log(`Synthetic upgrade PASS: ${after.accounts} accounts, ${after.transactions} transactions, ${after.journalLines} journal lines; BDT 3430.00 reconciled; all ${before.pendingOperationIds.length} original pending operations retained.`);

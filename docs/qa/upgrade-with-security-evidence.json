@@ -1,0 +1,158 @@
+{
+  "fixture": "Synthetic Node fallback driver; not physical SQLite or APK upgrade",
+  "baselineCommit": "35e0b7c499bdb0f0e271fe2ec7de5e7dc6b3b415",
+  "before": {
+    "schema": 5,
+    "workspaces": 3,
+    "accounts": 7,
+    "transactions": 3,
+    "journalLines": 6,
+    "balances": [
+      {
+        "accountId": "5dc90d11-7f9a-4b58-87fb-3d6b329af456",
+        "name": "QA cash",
+        "kind": "cash",
+        "openingBalanceMinor": "100000",
+        "currentBalanceMinor": "139000",
+        "totalDebitsMinor": "50000",
+        "totalCreditsMinor": "11000"
+      },
+      {
+        "accountId": "3b00148a-5f0d-4d2d-addf-0c09b22714ef",
+        "name": "QA bank",
+        "kind": "bank",
+        "openingBalanceMinor": "200000",
+        "currentBalanceMinor": "204000",
+        "totalDebitsMinor": "11000",
+        "totalCreditsMinor": "7000"
+      }
+    ],
+    "groupTotal": "343000",
+    "consolidated": "343000",
+    "pendingOperationIds": [
+      "cd88f7d2-c821-4909-ac2e-b403aac0b34e",
+      "e6df5395-b1a9-461d-8398-616099892386",
+      "f9c1505f-5042-4349-bcac-ecd743bc9a24",
+      "e34974b8-561a-4cb9-b2c2-e0d59f299f3f",
+      "a10a3b4d-4f82-43fd-95be-a83c0a9cccf2",
+      "b43ce49b-22fc-46b2-87f9-8475e3233352",
+      "8af47746-7319-41a1-a5d8-56c1700ec975",
+      "9accdbd9-0da6-4ad2-b6ed-6bb7b284a07f"
+    ],
+    "ownerIdentity": null,
+    "financialIntegrity": true,
+    "pinEnabled": true,
+    "soundPreferences": {
+      "soundsEnabled": true,
+      "soundVolume": 0.4,
+      "hapticsEnabled": false
+    },
+    "mediaReferences": [],
+    "preferences": [
+      [
+        "language",
+        "en"
+      ],
+      [
+        "theme",
+        "light"
+      ],
+      [
+        "pin_lock_enabled",
+        false
+      ],
+      [
+        "pin_hash",
+        ""
+      ],
+      [
+        "soundVolume",
+        0.4
+      ],
+      [
+        "syntheticProfile",
+        "QA preferences"
+      ]
+    ]
+  },
+  "after": {
+    "schema": 5,
+    "workspaces": 3,
+    "accounts": 7,
+    "transactions": 3,
+    "journalLines": 6,
+    "balances": [
+      {
+        "accountId": "5dc90d11-7f9a-4b58-87fb-3d6b329af456",
+        "name": "QA cash",
+        "kind": "cash",
+        "openingBalanceMinor": "100000",
+        "currentBalanceMinor": "139000",
+        "totalDebitsMinor": "50000",
+        "totalCreditsMinor": "11000"
+      },
+      {
+        "accountId": "3b00148a-5f0d-4d2d-addf-0c09b22714ef",
+        "name": "QA bank",
+        "kind": "bank",
+        "openingBalanceMinor": "200000",
+        "currentBalanceMinor": "204000",
+        "totalDebitsMinor": "11000",
+        "totalCreditsMinor": "7000"
+      }
+    ],
+    "groupTotal": "343000",
+    "consolidated": "343000",
+    "pendingOperationIds": [
+      "cd88f7d2-c821-4909-ac2e-b403aac0b34e",
+      "e6df5395-b1a9-461d-8398-616099892386",
+      "f9c1505f-5042-4349-bcac-ecd743bc9a24",
+      "e34974b8-561a-4cb9-b2c2-e0d59f299f3f",
+      "a10a3b4d-4f82-43fd-95be-a83c0a9cccf2",
+      "b43ce49b-22fc-46b2-87f9-8475e3233352",
+      "8af47746-7319-41a1-a5d8-56c1700ec975",
+      "9accdbd9-0da6-4ad2-b6ed-6bb7b284a07f",
+      "f42a2800-f390-4b33-bf1e-2c947f06fd6e",
+      "c03dcc38-0490-4b7d-b07d-8add23dd46b7",
+      "6c7461ec-c36f-44d6-8711-e6f7e7eb86e9"
+    ],
+    "ownerIdentity": null,
+    "financialIntegrity": true,
+    "pinEnabled": true,
+    "soundPreferences": {
+      "soundsEnabled": true,
+      "soundVolume": 0.4,
+      "hapticsEnabled": false
+    },
+    "mediaReferences": [],
+    "preferences": [
+      [
+        "language",
+        "en"
+      ],
+      [
+        "theme",
+        "light"
+      ],
+      [
+        "pin_lock_enabled",
+        false
+      ],
+      [
+        "pin_hash",
+        ""
+      ],
+      [
+        "soundVolume",
+        0.4
+      ],
+      [
+        "syntheticProfile",
+        "QA preferences"
+      ]
+    ]
+  },
+  "recordAndBalanceParity": true,
+  "originalPendingOperationsRetained": true,
+  "apkUpgrade": "BLOCKED — REAL DEVICE / GOOGLE AUTH VERIFICATION REQUIRED"
+}
