@@ -215,20 +215,20 @@ export class RealGoogleDriveTransport implements DriveTransport {
 
   public async getQuotaStatus(): Promise<{ usedBytes: number; totalBytes: number; isFull: boolean }> {
     const url = `${this.baseUrl}/about?fields=storageQuota`;
-    const res = await fetch(url, {
+    const res = await this.fetchWithRetry(url, {
       headers: {
         Authorization: `Bearer ${this.accessToken}`,
       },
     });
 
     if (!res.ok) {
-      return { usedBytes: 0, totalBytes: 15 * 1024 * 1024 * 1024, isFull: false };
+      this.handleHttpError(res.status, await res.text());
     }
 
     const data = await res.json();
     const quota = data.storageQuota;
     const used = Number(quota?.usage || 0);
-    const limit = Number(quota?.limit || 15 * 1024 * 1024 * 1024);
+    const limit = Number(quota?.limit || 0);
     return {
       usedBytes: used,
       totalBytes: limit,

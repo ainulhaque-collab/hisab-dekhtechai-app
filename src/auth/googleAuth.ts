@@ -46,7 +46,7 @@ declare global {
             client_id: string;
             scope: string;
             hint?: string;
-            callback: (response: { access_token?: string; error?: any; expires_in?: number }) => void;
+            callback: (response: { access_token?: string; error?: any; expires_in?: number; scope?: string }) => void;
             error_callback?: (error: any) => void;
           }) => {
             requestAccessToken: (overrideConfig?: { prompt?: string; hint?: string }) => void;
@@ -227,6 +227,9 @@ export class GoogleAuthManager {
             }
 
             try {
+              if (!resp.scope?.split(/\s+/).includes('https://www.googleapis.com/auth/drive.appdata')) {
+                throw new Error('Private Drive app storage permission is required. Reconnect and allow Drive access.');
+              }
               // Fetch authenticated user profile using the access token
               const userInfoRes = await this.fetchFn('https://www.googleapis.com/oauth2/v3/userinfo', {
                 headers: {
@@ -346,6 +349,9 @@ export class GoogleAuthManager {
             }
 
             try {
+              if (!resp.scope?.split(/\s+/).includes('https://www.googleapis.com/auth/drive.appdata')) {
+                throw new Error('Private Drive app storage permission is required. Reconnect Google Drive.');
+              }
               // Verify identity of renewed token to prevent account switching
               if (this.currentProfile?.subjectHash) {
                 const userRes = await this.fetchFn('https://www.googleapis.com/oauth2/v3/userinfo', {

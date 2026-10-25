@@ -216,10 +216,6 @@ export const Navbar: React.FC<NavbarProps> = ({
         <div className="flex items-center justify-between gap-2">
           {/* Brand & Workspace Switcher */}
           <div className="flex items-center gap-2 min-w-0" ref={workspaceRef}>
-            <div className="w-8 h-8 rounded-lg bg-slate-900 text-white flex items-center justify-center shrink-0 shadow-xs">
-              <Wallet className="w-4 h-4" strokeWidth={2} />
-            </div>
-
             <WorkspaceAvatar workspace={currentWorkspace} />
             {/* Workspace Selector Button */}
             <div className="relative min-w-0">

@@ -42,7 +42,7 @@ export class WorkspaceMediaStore {
     const raw = await (await this.getDriver()).getItem(`workspace:${workspaceId}`);
     if (!raw) return null;
     const asset = JSON.parse(raw);
-    if (asset.ownerHash !== ownerHash && asset.ownerHash !== 'local-owner') return null;
+    if (asset.ownerHash !== ownerHash) return null;
     if (typeof asset.data !== 'string' || !asset.data.startsWith('data:image/jpeg;base64,') || asset.data.length > 256 * 1024) return null;
     return asset.data;
   }
@@ -51,12 +51,23 @@ export class WorkspaceMediaStore {
     const existing = await driver.getItem(`workspace:${workspaceId}`);
     if (existing) {
       const owner = JSON.parse(existing).ownerHash;
-      if (owner !== ownerHash && owner !== 'local-owner') throw new Error('This image belongs to another owner.');
+      if (owner !== ownerHash) throw new Error('This image belongs to another owner.');
     }
     if (data === null) await driver.removeItem(`workspace:${workspaceId}`);
     else {
       if (!data.startsWith('data:image/jpeg;base64,') || data.length > 256 * 1024) throw new Error('Invalid optimized workspace image.');
       await driver.setItem(`workspace:${workspaceId}`, JSON.stringify({ version: 1, ownerHash, data }));
+    }
+    if (typeof window !== 'undefined') window.dispatchEvent(new Event('hisab-workspace-media'));
+  }
+  /** Called only after verified, consented database ownership binding has committed. */
+  async claimOfflineAssets(workspaceIds: string[], verifiedOwner: string) {
+    const driver = await this.getDriver();
+    for (const id of workspaceIds) {
+      const key = `workspace:${id}`;
+      const raw = await driver.getItem(key); if (!raw) continue;
+      const asset = JSON.parse(raw);
+      if (asset.ownerHash === 'local-owner') await driver.setItem(key, JSON.stringify({ ...asset, ownerHash: verifiedOwner }));
     }
     if (typeof window !== 'undefined') window.dispatchEvent(new Event('hisab-workspace-media'));
   }

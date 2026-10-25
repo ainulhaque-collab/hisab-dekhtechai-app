@@ -20,6 +20,7 @@ import {
 import { canonicalJson, computeSha256 } from './canonical';
 import { generateUUID } from '../domain/journal';
 import { GoogleUserProfile, computeOwnerSubjectHash } from '../auth/googleAuth';
+import { workspaceMedia } from '../storage/workspaceMedia';
 
 export type SyncStatusState =
   | 'idle'
@@ -232,6 +233,9 @@ export class SyncOrchestrator {
       this.lastError = msg;
 
       if (msg.includes('401') || msg.includes('Unauthorized')) {
+        this.currentState = 'auth_required';
+        this.isAuthorized = false;
+      } else if (msg.includes('403') && msg.includes('Forbidden')) {
         this.currentState = 'auth_required';
         this.isAuthorized = false;
       } else if (msg.includes('403') || msg.includes('Quota')) {
@@ -494,7 +498,7 @@ export class SyncOrchestrator {
       throw new Error('Bootstrap and restore requires a verified Google user profile with subjectHash.');
     }
     await this.db.waitForPendingWrites();
-    if (!profile.accessToken || profile.subjectHash !== await computeOwnerSubjectHash(profile.subjectId)) {
+    if (!profile.accessToken || !profile.isDriveAuthorized || profile.subjectHash !== await computeOwnerSubjectHash(profile.subjectId)) {
       throw new Error('Verified Google authorization is required before binding this dataset.');
     }
 
@@ -553,6 +557,9 @@ export class SyncOrchestrator {
     this.db.setIdentity(profile.subjectHash, profile.displayName);
     await this.db.commitTransaction();
     } catch (error) { await this.db.rollbackTransaction(); throw error; }
+    // Independent asset-store failure keeps originals intact; reconnect retries the claim.
+    await workspaceMedia.claimOfflineAssets(Array.from(this.db.getRawState().workspaces.keys()), profile.subjectHash)
+      .catch(() => console.warn('Workspace image ownership migration will retry on reconnect.'));
     this.isAuthorized = true;
 
     // 4. Trigger sync to download and apply all remote batches belonging to this verified owner,
