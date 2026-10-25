@@ -1,0 +1,1037 @@
+{
+  "schemaVersion": 5,
+  "localIdentity": null,
+  "deviceIdentity": {
+    "deviceId": "aed2e190-2352-4e32-915f-4207b18b1f8e",
+    "deviceName": "Android Device (Primary)",
+    "counter": 9,
+    "createdAt": "2026-10-25T14:35:41.222Z"
+  },
+  "workspaces": [
+    [
+      "ws-personal-default",
+      {
+        "id": "ws-personal-default",
+        "ownerSubjectHash": "local-owner",
+        "name": "ব্যক্তিগত (Personal)",
+        "kind": "personal",
+        "currency": "BDT",
+        "createdAt": "2026-10-25T14:35:41.224Z"
+      }
+    ],
+    [
+      "ws-business-default",
+      {
+        "id": "ws-business-default",
+        "ownerSubjectHash": "local-owner",
+        "name": "দোকান / ব্যবসা (Business)",
+        "kind": "business",
+        "currency": "BDT",
+        "createdAt": "2026-10-25T14:35:41.224Z"
+      }
+    ],
+    [
+      "d6560fce-8e3c-4b13-889b-453ffb80c44d",
+      {
+        "id": "d6560fce-8e3c-4b13-889b-453ffb80c44d",
+        "ownerSubjectHash": "local-owner",
+        "name": "Synthetic business",
+        "kind": "business",
+        "currency": "BDT",
+        "createdAt": "2026-10-25T14:35:41.226Z"
+      }
+    ]
+  ],
+  "accounts": [
+    [
+      "acc-cash-1",
+      {
+        "id": "acc-cash-1",
+        "workspaceId": "ws-personal-default",
+        "name": "Cash in Hand (নগদ ক্যাশ)",
+        "kind": "cash",
+        "classification": "asset",
+        "openingBalanceMinor": "0",
+        "createdAt": "2026-10-25T14:35:41.224Z"
+      }
+    ],
+    [
+      "acc-bkash-1",
+      {
+        "id": "acc-bkash-1",
+        "workspaceId": "ws-personal-default",
+        "name": "bKash (বিকাশ একাউন্ট)",
+        "kind": "bkash",
+        "classification": "asset",
+        "accountNumberMasked": "",
+        "openingBalanceMinor": "0",
+        "createdAt": "2026-10-25T14:35:41.224Z"
+      }
+    ],
+    [
+      "acc-bank-1",
+      {
+        "id": "acc-bank-1",
+        "workspaceId": "ws-personal-default",
+        "name": "Bank Account (ব্যাংক হিসাব)",
+        "kind": "bank",
+        "classification": "asset",
+        "accountNumberMasked": "",
+        "openingBalanceMinor": "0",
+        "createdAt": "2026-10-25T14:35:41.224Z"
+      }
+    ],
+    [
+      "acc-biz-cash",
+      {
+        "id": "acc-biz-cash",
+        "workspaceId": "ws-business-default",
+        "name": "Cash Drawer (দোকানের ক্যাশ)",
+        "kind": "cash",
+        "classification": "asset",
+        "openingBalanceMinor": "0",
+        "createdAt": "2026-10-25T14:35:41.224Z"
+      }
+    ],
+    [
+      "acc-biz-bkash",
+      {
+        "id": "acc-biz-bkash",
+        "workspaceId": "ws-business-default",
+        "name": "bKash Merchant (মার্চেন্ট)",
+        "kind": "bkash",
+        "classification": "asset",
+        "accountNumberMasked": "",
+        "openingBalanceMinor": "0",
+        "createdAt": "2026-10-25T14:35:41.224Z"
+      }
+    ],
+    [
+      "5dc90d11-7f9a-4b58-87fb-3d6b329af456",
+      {
+        "id": "5dc90d11-7f9a-4b58-87fb-3d6b329af456",
+        "workspaceId": "d6560fce-8e3c-4b13-889b-453ffb80c44d",
+        "groupId": "5e107058-888b-4e7b-a113-0e5738ed5772",
+        "name": "QA cash",
+        "kind": "cash",
+        "classification": "asset",
+        "accountNumberMasked": "",
+        "openingBalanceMinor": "100000",
+        "archivedAt": null,
+        "createdAt": "2026-10-25T14:35:41.227Z"
+      }
+    ],
+    [
+      "3b00148a-5f0d-4d2d-addf-0c09b22714ef",
+      {
+        "id": "3b00148a-5f0d-4d2d-addf-0c09b22714ef",
+        "workspaceId": "d6560fce-8e3c-4b13-889b-453ffb80c44d",
+        "groupId": "5e107058-888b-4e7b-a113-0e5738ed5772",
+        "name": "QA bank",
+        "kind": "bank",
+        "classification": "asset",
+        "accountNumberMasked": "",
+        "openingBalanceMinor": "200000",
+        "archivedAt": "2026-10-25T14:35:41.239Z",
+        "createdAt": "2026-10-25T14:35:41.227Z"
+      }
+    ]
+  ],
+  "accountGroups": [
+    [
+      "5e107058-888b-4e7b-a113-0e5738ed5772",
+      {
+        "id": "5e107058-888b-4e7b-a113-0e5738ed5772",
+        "workspaceId": "d6560fce-8e3c-4b13-889b-453ffb80c44d",
+        "name": "Synthetic wallets",
+        "archivedAt": null,
+        "createdAt": "2026-10-25T14:35:41.227Z"
+      }
+    ]
+  ],
+  "accountPermissions": [],
+  "categories": [
+    [
+      "cat-food",
+      {
+        "id": "cat-food",
+        "kind": "expense",
+        "name": "খাবার ও রেস্তোরাঁ",
+        "nameEn": "Food & Dining",
+        "icon": "Utensils",
+        "color": "#EF4444",
+        "workspaceId": "ws-personal-default"
+      }
+    ],
+    [
+      "cat-food-restaurant",
+      {
+        "id": "cat-food-restaurant",
+        "parentId": "cat-food",
+        "kind": "expense",
+        "name": "রেস্তোরাঁ ও ডাইনিং",
+        "nameEn": "Restaurant & Dining",
+        "icon": "Utensils",
+        "color": "#EF4444",
+        "workspaceId": "ws-personal-default"
+      }
+    ],
+    [
+      "cat-food-snacks",
+      {
+        "id": "cat-food-snacks",
+        "parentId": "cat-food",
+        "kind": "expense",
+        "name": "চা ও নাশতা",
+        "nameEn": "Tea & Snacks",
+        "icon": "Coffee",
+        "color": "#EF4444",
+        "workspaceId": "ws-personal-default"
+      }
+    ],
+    [
+      "cat-groceries",
+      {
+        "id": "cat-groceries",
+        "kind": "expense",
+        "name": "কাঁচাবাজার ও মুদি",
+        "nameEn": "Groceries",
+        "icon": "ShoppingCart",
+        "color": "#F97316",
+        "workspaceId": "ws-personal-default"
+      }
+    ],
+    [
+      "cat-groc-veg",
+      {
+        "id": "cat-groc-veg",
+        "parentId": "cat-groceries",
+        "kind": "expense",
+        "name": "শাকসবজি ও ফলমূল",
+        "nameEn": "Vegetables & Fruits",
+        "icon": "Apple",
+        "color": "#F97316",
+        "workspaceId": "ws-personal-default"
+      }
+    ],
+    [
+      "cat-groc-fish",
+      {
+        "id": "cat-groc-fish",
+        "parentId": "cat-groceries",
+        "kind": "expense",
+        "name": "মাছ, মাংস ও চাল-ডাল",
+        "nameEn": "Meat, Fish & Rice",
+        "icon": "Package",
+        "color": "#F97316",
+        "workspaceId": "ws-personal-default"
+      }
+    ],
+    [
+      "cat-transport",
+      {
+        "id": "cat-transport",
+        "kind": "expense",
+        "name": "যাতায়াত ও ভাড়া",
+        "nameEn": "Transport & Commute",
+        "icon": "Bus",
+        "color": "#3B82F6",
+        "workspaceId": "ws-personal-default"
+      }
+    ],
+    [
+      "cat-transport-bus",
+      {
+        "id": "cat-transport-bus",
+        "parentId": "cat-transport",
+        "kind": "expense",
+        "name": "বাস / রিকশা ভাড়া",
+        "nameEn": "Bus & Rickshaw",
+        "icon": "Bus",
+        "color": "#3B82F6",
+        "workspaceId": "ws-personal-default"
+      }
+    ],
+    [
+      "cat-transport-fuel",
+      {
+        "id": "cat-transport-fuel",
+        "parentId": "cat-transport",
+        "kind": "expense",
+        "name": "বাইক / গাড়ির জ্বালানি",
+        "nameEn": "Fuel & Gas",
+        "icon": "Fuel",
+        "color": "#3B82F6",
+        "workspaceId": "ws-personal-default"
+      }
+    ],
+    [
+      "cat-utility",
+      {
+        "id": "cat-utility",
+        "kind": "expense",
+        "name": "বিদ্যুৎ ও গ্যাস বিল",
+        "nameEn": "Utility Bills",
+        "icon": "Zap",
+        "color": "#EAB308",
+        "workspaceId": "ws-personal-default"
+      }
+    ],
+    [
+      "cat-medical",
+      {
+        "id": "cat-medical",
+        "kind": "expense",
+        "name": "ওষুধ ও চিকিৎসা",
+        "nameEn": "Medical & Healthcare",
+        "icon": "HeartPulse",
+        "color": "#EC4899",
+        "workspaceId": "ws-personal-default"
+      }
+    ],
+    [
+      "cat-rent",
+      {
+        "id": "cat-rent",
+        "kind": "expense",
+        "name": "বাসা ভাড়া",
+        "nameEn": "House Rent",
+        "icon": "Home",
+        "color": "#8B5CF6",
+        "workspaceId": "ws-personal-default"
+      }
+    ],
+    [
+      "cat-salary",
+      {
+        "id": "cat-salary",
+        "kind": "income",
+        "name": "মাসিক বেতন",
+        "nameEn": "Monthly Salary",
+        "icon": "Briefcase",
+        "color": "#10B981",
+        "workspaceId": "ws-personal-default"
+      }
+    ],
+    [
+      "cat-freelance",
+      {
+        "id": "cat-freelance",
+        "kind": "income",
+        "name": "ফ্রিল্যান্সিং ও বোনাস",
+        "nameEn": "Freelance & Bonus",
+        "icon": "Laptop",
+        "color": "#06B6D4",
+        "workspaceId": "ws-personal-default"
+      }
+    ],
+    [
+      "cat-investment",
+      {
+        "id": "cat-investment",
+        "kind": "income",
+        "name": "বিনিয়োগ ও লভ্যাংশ",
+        "nameEn": "Investments & Profit",
+        "icon": "TrendingUp",
+        "color": "#14B8A6",
+        "workspaceId": "ws-personal-default"
+      }
+    ],
+    [
+      "cat-transfer-fee",
+      {
+        "id": "cat-transfer-fee",
+        "kind": "expense",
+        "name": "ক্যাশআউট চার্জ ও ব্যাংক ফি",
+        "nameEn": "Transfer & Cashout Fee",
+        "icon": "Percent",
+        "color": "#64748B",
+        "workspaceId": "ws-personal-default"
+      }
+    ],
+    [
+      "cat-biz-sales",
+      {
+        "id": "cat-biz-sales",
+        "kind": "income",
+        "name": "পণ্য বিক্রয়",
+        "nameEn": "Sales Revenue",
+        "icon": "Store",
+        "color": "#10B981",
+        "workspaceId": "ws-business-default"
+      }
+    ],
+    [
+      "cat-biz-purchase",
+      {
+        "id": "cat-biz-purchase",
+        "kind": "expense",
+        "name": "মাল ক্রয় ও স্টক",
+        "nameEn": "Stock Purchase",
+        "icon": "Package",
+        "color": "#F97316",
+        "workspaceId": "ws-business-default"
+      }
+    ],
+    [
+      "cat-biz-salary",
+      {
+        "id": "cat-biz-salary",
+        "kind": "expense",
+        "name": "কর্মচারীর বেতন",
+        "nameEn": "Staff Salary",
+        "icon": "Users",
+        "color": "#EF4444",
+        "workspaceId": "ws-business-default"
+      }
+    ],
+    [
+      "cat-biz-rent",
+      {
+        "id": "cat-biz-rent",
+        "kind": "expense",
+        "name": "দোকান ভাড়া",
+        "nameEn": "Shop Rent",
+        "icon": "Building2",
+        "color": "#8B5CF6",
+        "workspaceId": "ws-business-default"
+      }
+    ],
+    [
+      "c8d37e4b-418e-430e-92eb-3cc9ca89aa07",
+      {
+        "id": "c8d37e4b-418e-430e-92eb-3cc9ca89aa07",
+        "workspaceId": "d6560fce-8e3c-4b13-889b-453ffb80c44d",
+        "parentId": null,
+        "name": "QA income",
+        "nameEn": "QA income",
+        "kind": "income",
+        "icon": "Tag",
+        "color": "#3B82F6"
+      }
+    ],
+    [
+      "49d300cd-f0ff-49fd-8191-9cab70542c11",
+      {
+        "id": "49d300cd-f0ff-49fd-8191-9cab70542c11",
+        "workspaceId": "d6560fce-8e3c-4b13-889b-453ffb80c44d",
+        "parentId": null,
+        "name": "QA expense",
+        "nameEn": "QA expense",
+        "kind": "expense",
+        "icon": "Tag",
+        "color": "#3B82F6"
+      }
+    ]
+  ],
+  "parties": [
+    [
+      "party-partner-1",
+      {
+        "id": "party-partner-1",
+        "workspaceId": "ws-business-default",
+        "name": "করিম সাহেব (পার্টনার)",
+        "role": "partner",
+        "phone": "01711-000000",
+        "openingBalanceMinor": "0",
+        "createdAt": "2026-10-25T14:35:41.224Z"
+      }
+    ],
+    [
+      "party-staff-1",
+      {
+        "id": "party-staff-1",
+        "workspaceId": "ws-business-default",
+        "name": "রাশেদ (কর্মচারী)",
+        "role": "staff",
+        "phone": "01811-000000",
+        "openingBalanceMinor": "0",
+        "createdAt": "2026-10-25T14:35:41.224Z"
+      }
+    ]
+  ],
+  "journalTransactions": [
+    [
+      "4b6553de-8405-4ad6-adc3-6683e5801ab5",
+      {
+        "id": "4b6553de-8405-4ad6-adc3-6683e5801ab5",
+        "workspaceId": "d6560fce-8e3c-4b13-889b-453ffb80c44d",
+        "transactionType": "income",
+        "effectiveDate": "2026-10-25",
+        "occurredAtUtc": "2026-10-25T14:35:41.228Z",
+        "partyId": null,
+        "createdOpId": "a10a3b4d-4f82-43fd-95be-a83c0a9cccf2",
+        "receiptBlobSha256": null,
+        "receiptName": null,
+        "lines": [
+          {
+            "id": "7b4f2222-188e-4733-b671-f53d0dbf0032",
+            "transactionId": "4b6553de-8405-4ad6-adc3-6683e5801ab5",
+            "accountId": "5dc90d11-7f9a-4b58-87fb-3d6b329af456",
+            "debitMinor": "50000",
+            "creditMinor": "0",
+            "categoryId": null
+          },
+          {
+            "id": "fc1ea0b2-ce5e-4e06-9e3e-1bcf5a2e7348",
+            "transactionId": "4b6553de-8405-4ad6-adc3-6683e5801ab5",
+            "accountId": "__system__revenue_clearing",
+            "debitMinor": "0",
+            "creditMinor": "50000",
+            "categoryId": "c8d37e4b-418e-430e-92eb-3cc9ca89aa07"
+          }
+        ]
+      }
+    ],
+    [
+      "b0390924-fb00-4a5b-bcc1-1331e57810ef",
+      {
+        "id": "b0390924-fb00-4a5b-bcc1-1331e57810ef",
+        "workspaceId": "d6560fce-8e3c-4b13-889b-453ffb80c44d",
+        "transactionType": "expense",
+        "effectiveDate": "2026-10-25",
+        "occurredAtUtc": "2026-10-25T14:35:41.228Z",
+        "partyId": null,
+        "createdOpId": "b43ce49b-22fc-46b2-87f9-8475e3233352",
+        "receiptBlobSha256": null,
+        "receiptName": null,
+        "lines": [
+          {
+            "id": "d397c65b-a27d-4853-8971-d4ff19e8eece",
+            "transactionId": "b0390924-fb00-4a5b-bcc1-1331e57810ef",
+            "accountId": "3b00148a-5f0d-4d2d-addf-0c09b22714ef",
+            "debitMinor": "0",
+            "creditMinor": "7000",
+            "categoryId": null
+          },
+          {
+            "id": "9ae6b51a-6416-459c-be4d-76b0271a0c7b",
+            "transactionId": "b0390924-fb00-4a5b-bcc1-1331e57810ef",
+            "accountId": "__system__expense_clearing",
+            "debitMinor": "7000",
+            "creditMinor": "0",
+            "categoryId": "49d300cd-f0ff-49fd-8191-9cab70542c11"
+          }
+        ]
+      }
+    ],
+    [
+      "8bad9bd3-9b9e-499f-8909-1146816956b3",
+      {
+        "id": "8bad9bd3-9b9e-499f-8909-1146816956b3",
+        "workspaceId": "d6560fce-8e3c-4b13-889b-453ffb80c44d",
+        "transactionType": "transfer",
+        "effectiveDate": "2026-10-25",
+        "occurredAtUtc": "2026-10-25T14:35:41.229Z",
+        "partyId": null,
+        "createdOpId": "8af47746-7319-41a1-a5d8-56c1700ec975",
+        "receiptBlobSha256": null,
+        "receiptName": null,
+        "lines": [
+          {
+            "id": "2aa26c08-f0aa-4702-9d9f-b1ec7e79c456",
+            "transactionId": "8bad9bd3-9b9e-499f-8909-1146816956b3",
+            "accountId": "5dc90d11-7f9a-4b58-87fb-3d6b329af456",
+            "debitMinor": "0",
+            "creditMinor": "11000",
+            "categoryId": null
+          },
+          {
+            "id": "5304ad02-03f1-42b1-ad76-10e47816a365",
+            "transactionId": "8bad9bd3-9b9e-499f-8909-1146816956b3",
+            "accountId": "3b00148a-5f0d-4d2d-addf-0c09b22714ef",
+            "debitMinor": "11000",
+            "creditMinor": "0",
+            "categoryId": null
+          }
+        ]
+      }
+    ]
+  ],
+  "journalLines": [
+    [
+      "7b4f2222-188e-4733-b671-f53d0dbf0032",
+      {
+        "id": "7b4f2222-188e-4733-b671-f53d0dbf0032",
+        "transactionId": "4b6553de-8405-4ad6-adc3-6683e5801ab5",
+        "accountId": "5dc90d11-7f9a-4b58-87fb-3d6b329af456",
+        "debitMinor": "50000",
+        "creditMinor": "0",
+        "categoryId": null
+      }
+    ],
+    [
+      "fc1ea0b2-ce5e-4e06-9e3e-1bcf5a2e7348",
+      {
+        "id": "fc1ea0b2-ce5e-4e06-9e3e-1bcf5a2e7348",
+        "transactionId": "4b6553de-8405-4ad6-adc3-6683e5801ab5",
+        "accountId": "__system__revenue_clearing",
+        "debitMinor": "0",
+        "creditMinor": "50000",
+        "categoryId": "c8d37e4b-418e-430e-92eb-3cc9ca89aa07"
+      }
+    ],
+    [
+      "d397c65b-a27d-4853-8971-d4ff19e8eece",
+      {
+        "id": "d397c65b-a27d-4853-8971-d4ff19e8eece",
+        "transactionId": "b0390924-fb00-4a5b-bcc1-1331e57810ef",
+        "accountId": "3b00148a-5f0d-4d2d-addf-0c09b22714ef",
+        "debitMinor": "0",
+        "creditMinor": "7000",
+        "categoryId": null
+      }
+    ],
+    [
+      "9ae6b51a-6416-459c-be4d-76b0271a0c7b",
+      {
+        "id": "9ae6b51a-6416-459c-be4d-76b0271a0c7b",
+        "transactionId": "b0390924-fb00-4a5b-bcc1-1331e57810ef",
+        "accountId": "__system__expense_clearing",
+        "debitMinor": "7000",
+        "creditMinor": "0",
+        "categoryId": "49d300cd-f0ff-49fd-8191-9cab70542c11"
+      }
+    ],
+    [
+      "2aa26c08-f0aa-4702-9d9f-b1ec7e79c456",
+      {
+        "id": "2aa26c08-f0aa-4702-9d9f-b1ec7e79c456",
+        "transactionId": "8bad9bd3-9b9e-499f-8909-1146816956b3",
+        "accountId": "5dc90d11-7f9a-4b58-87fb-3d6b329af456",
+        "debitMinor": "0",
+        "creditMinor": "11000",
+        "categoryId": null
+      }
+    ],
+    [
+      "5304ad02-03f1-42b1-ad76-10e47816a365",
+      {
+        "id": "5304ad02-03f1-42b1-ad76-10e47816a365",
+        "transactionId": "8bad9bd3-9b9e-499f-8909-1146816956b3",
+        "accountId": "3b00148a-5f0d-4d2d-addf-0c09b22714ef",
+        "debitMinor": "11000",
+        "creditMinor": "0",
+        "categoryId": null
+      }
+    ]
+  ],
+  "syncOperations": [
+    [
+      "cd88f7d2-c821-4909-ac2e-b403aac0b34e",
+      {
+        "protocolVersion": 1,
+        "ownerHash": "local-owner",
+        "deviceId": "aed2e190-2352-4e32-915f-4207b18b1f8e",
+        "seq": 1,
+        "operationId": "cd88f7d2-c821-4909-ac2e-b403aac0b34e",
+        "entityId": "d6560fce-8e3c-4b13-889b-453ffb80c44d",
+        "type": "workspace.create",
+        "createdAtUtc": "2026-10-25T14:35:41.226Z",
+        "payload": {
+          "workspace": {
+            "id": "d6560fce-8e3c-4b13-889b-453ffb80c44d",
+            "ownerSubjectHash": "local-owner",
+            "name": "Synthetic business",
+            "kind": "business",
+            "currency": "BDT",
+            "createdAt": "2026-10-25T14:35:41.226Z"
+          }
+        },
+        "contentSha256": ""
+      }
+    ],
+    [
+      "e6df5395-b1a9-461d-8398-616099892386",
+      {
+        "protocolVersion": 1,
+        "ownerHash": "local-owner",
+        "deviceId": "aed2e190-2352-4e32-915f-4207b18b1f8e",
+        "seq": 2,
+        "operationId": "e6df5395-b1a9-461d-8398-616099892386",
+        "entityId": "5e107058-888b-4e7b-a113-0e5738ed5772",
+        "type": "group.create",
+        "createdAtUtc": "2026-10-25T14:35:41.227Z",
+        "payload": {
+          "group": {
+            "id": "5e107058-888b-4e7b-a113-0e5738ed5772",
+            "workspaceId": "d6560fce-8e3c-4b13-889b-453ffb80c44d",
+            "name": "Synthetic wallets",
+            "archivedAt": null,
+            "createdAt": "2026-10-25T14:35:41.227Z"
+          }
+        },
+        "contentSha256": ""
+      }
+    ],
+    [
+      "f9c1505f-5042-4349-bcac-ecd743bc9a24",
+      {
+        "protocolVersion": 1,
+        "ownerHash": "local-owner",
+        "deviceId": "aed2e190-2352-4e32-915f-4207b18b1f8e",
+        "seq": 3,
+        "operationId": "f9c1505f-5042-4349-bcac-ecd743bc9a24",
+        "entityId": "5dc90d11-7f9a-4b58-87fb-3d6b329af456",
+        "type": "account.create",
+        "createdAtUtc": "2026-10-25T14:35:41.227Z",
+        "payload": {
+          "account": {
+            "id": "5dc90d11-7f9a-4b58-87fb-3d6b329af456",
+            "workspaceId": "d6560fce-8e3c-4b13-889b-453ffb80c44d",
+            "groupId": "5e107058-888b-4e7b-a113-0e5738ed5772",
+            "name": "QA cash",
+            "kind": "cash",
+            "classification": "asset",
+            "accountNumberMasked": "",
+            "openingBalanceMinor": "100000",
+            "archivedAt": null,
+            "createdAt": "2026-10-25T14:35:41.227Z"
+          }
+        },
+        "contentSha256": ""
+      }
+    ],
+    [
+      "e34974b8-561a-4cb9-b2c2-e0d59f299f3f",
+      {
+        "protocolVersion": 1,
+        "ownerHash": "local-owner",
+        "deviceId": "aed2e190-2352-4e32-915f-4207b18b1f8e",
+        "seq": 4,
+        "operationId": "e34974b8-561a-4cb9-b2c2-e0d59f299f3f",
+        "entityId": "3b00148a-5f0d-4d2d-addf-0c09b22714ef",
+        "type": "account.create",
+        "createdAtUtc": "2026-10-25T14:35:41.227Z",
+        "payload": {
+          "account": {
+            "id": "3b00148a-5f0d-4d2d-addf-0c09b22714ef",
+            "workspaceId": "d6560fce-8e3c-4b13-889b-453ffb80c44d",
+            "groupId": "5e107058-888b-4e7b-a113-0e5738ed5772",
+            "name": "QA bank",
+            "kind": "bank",
+            "classification": "asset",
+            "accountNumberMasked": "",
+            "openingBalanceMinor": "200000",
+            "archivedAt": "2026-10-25T14:35:41.239Z",
+            "createdAt": "2026-10-25T14:35:41.227Z"
+          }
+        },
+        "contentSha256": ""
+      }
+    ],
+    [
+      "a10a3b4d-4f82-43fd-95be-a83c0a9cccf2",
+      {
+        "protocolVersion": 1,
+        "ownerHash": "local-owner",
+        "deviceId": "aed2e190-2352-4e32-915f-4207b18b1f8e",
+        "seq": 5,
+        "operationId": "a10a3b4d-4f82-43fd-95be-a83c0a9cccf2",
+        "entityId": "4b6553de-8405-4ad6-adc3-6683e5801ab5",
+        "type": "journal.post",
+        "createdAtUtc": "2026-10-25T14:35:41.229Z",
+        "payload": {
+          "balancedJournal": {
+            "transaction": {
+              "id": "4b6553de-8405-4ad6-adc3-6683e5801ab5",
+              "workspaceId": "d6560fce-8e3c-4b13-889b-453ffb80c44d",
+              "transactionType": "income",
+              "effectiveDate": "2026-10-25",
+              "occurredAtUtc": "2026-10-25T14:35:41.228Z",
+              "partyId": null,
+              "createdOpId": "a10a3b4d-4f82-43fd-95be-a83c0a9cccf2",
+              "receiptBlobSha256": null,
+              "receiptName": null
+            },
+            "lines": [
+              {
+                "id": "7b4f2222-188e-4733-b671-f53d0dbf0032",
+                "transactionId": "4b6553de-8405-4ad6-adc3-6683e5801ab5",
+                "accountId": "5dc90d11-7f9a-4b58-87fb-3d6b329af456",
+                "debitMinor": "50000",
+                "creditMinor": "0",
+                "categoryId": null
+              },
+              {
+                "id": "fc1ea0b2-ce5e-4e06-9e3e-1bcf5a2e7348",
+                "transactionId": "4b6553de-8405-4ad6-adc3-6683e5801ab5",
+                "accountId": "__system__revenue_clearing",
+                "debitMinor": "0",
+                "creditMinor": "50000",
+                "categoryId": "c8d37e4b-418e-430e-92eb-3cc9ca89aa07"
+              }
+            ]
+          }
+        },
+        "contentSha256": "a05bf70f6a279170387f7d6685b74118ff40cb8d4e503a40ab758f57ba8a3b90"
+      }
+    ],
+    [
+      "b43ce49b-22fc-46b2-87f9-8475e3233352",
+      {
+        "protocolVersion": 1,
+        "ownerHash": "local-owner",
+        "deviceId": "aed2e190-2352-4e32-915f-4207b18b1f8e",
+        "seq": 6,
+        "operationId": "b43ce49b-22fc-46b2-87f9-8475e3233352",
+        "entityId": "b0390924-fb00-4a5b-bcc1-1331e57810ef",
+        "type": "journal.post",
+        "createdAtUtc": "2026-10-25T14:35:41.237Z",
+        "payload": {
+          "balancedJournal": {
+            "transaction": {
+              "id": "b0390924-fb00-4a5b-bcc1-1331e57810ef",
+              "workspaceId": "d6560fce-8e3c-4b13-889b-453ffb80c44d",
+              "transactionType": "expense",
+              "effectiveDate": "2026-10-25",
+              "occurredAtUtc": "2026-10-25T14:35:41.228Z",
+              "partyId": null,
+              "createdOpId": "b43ce49b-22fc-46b2-87f9-8475e3233352",
+              "receiptBlobSha256": null,
+              "receiptName": null
+            },
+            "lines": [
+              {
+                "id": "d397c65b-a27d-4853-8971-d4ff19e8eece",
+                "transactionId": "b0390924-fb00-4a5b-bcc1-1331e57810ef",
+                "accountId": "3b00148a-5f0d-4d2d-addf-0c09b22714ef",
+                "debitMinor": "0",
+                "creditMinor": "7000",
+                "categoryId": null
+              },
+              {
+                "id": "9ae6b51a-6416-459c-be4d-76b0271a0c7b",
+                "transactionId": "b0390924-fb00-4a5b-bcc1-1331e57810ef",
+                "accountId": "__system__expense_clearing",
+                "debitMinor": "7000",
+                "creditMinor": "0",
+                "categoryId": "49d300cd-f0ff-49fd-8191-9cab70542c11"
+              }
+            ]
+          }
+        },
+        "contentSha256": "e274aefcf99b374229a7c2cc7e5f65af729c8fd1e0f2625f739b740e7f46a7a1"
+      }
+    ],
+    [
+      "8af47746-7319-41a1-a5d8-56c1700ec975",
+      {
+        "protocolVersion": 1,
+        "ownerHash": "local-owner",
+        "deviceId": "aed2e190-2352-4e32-915f-4207b18b1f8e",
+        "seq": 7,
+        "operationId": "8af47746-7319-41a1-a5d8-56c1700ec975",
+        "entityId": "8bad9bd3-9b9e-499f-8909-1146816956b3",
+        "type": "journal.post",
+        "createdAtUtc": "2026-10-25T14:35:41.238Z",
+        "payload": {
+          "balancedJournal": {
+            "transaction": {
+              "id": "8bad9bd3-9b9e-499f-8909-1146816956b3",
+              "workspaceId": "d6560fce-8e3c-4b13-889b-453ffb80c44d",
+              "transactionType": "transfer",
+              "effectiveDate": "2026-10-25",
+              "occurredAtUtc": "2026-10-25T14:35:41.229Z",
+              "partyId": null,
+              "createdOpId": "8af47746-7319-41a1-a5d8-56c1700ec975",
+              "receiptBlobSha256": null,
+              "receiptName": null
+            },
+            "lines": [
+              {
+                "id": "2aa26c08-f0aa-4702-9d9f-b1ec7e79c456",
+                "transactionId": "8bad9bd3-9b9e-499f-8909-1146816956b3",
+                "accountId": "5dc90d11-7f9a-4b58-87fb-3d6b329af456",
+                "debitMinor": "0",
+                "creditMinor": "11000",
+                "categoryId": null
+              },
+              {
+                "id": "5304ad02-03f1-42b1-ad76-10e47816a365",
+                "transactionId": "8bad9bd3-9b9e-499f-8909-1146816956b3",
+                "accountId": "3b00148a-5f0d-4d2d-addf-0c09b22714ef",
+                "debitMinor": "11000",
+                "creditMinor": "0",
+                "categoryId": null
+              }
+            ]
+          }
+        },
+        "contentSha256": "f38cb7c63eeee73f113b44aabe7b4d5e7823885a2eee2c294df3a46ccd77c267"
+      }
+    ],
+    [
+      "9accdbd9-0da6-4ad2-b6ed-6bb7b284a07f",
+      {
+        "protocolVersion": 1,
+        "ownerHash": "local-owner",
+        "deviceId": "aed2e190-2352-4e32-915f-4207b18b1f8e",
+        "seq": 8,
+        "operationId": "9accdbd9-0da6-4ad2-b6ed-6bb7b284a07f",
+        "entityId": "3b00148a-5f0d-4d2d-addf-0c09b22714ef",
+        "type": "account.archive",
+        "createdAtUtc": "2026-10-25T14:35:41.239Z",
+        "payload": {
+          "id": "3b00148a-5f0d-4d2d-addf-0c09b22714ef",
+          "archivedAt": "2026-10-25T14:35:41.239Z"
+        },
+        "contentSha256": ""
+      }
+    ]
+  ],
+  "syncOutbox": [
+    [
+      "cd88f7d2-c821-4909-ac2e-b403aac0b34e",
+      {
+        "opId": "cd88f7d2-c821-4909-ac2e-b403aac0b34e",
+        "uploadedStatus": "pending",
+        "retryCount": 0,
+        "createdAt": "2026-10-25T14:35:41.226Z"
+      }
+    ],
+    [
+      "e6df5395-b1a9-461d-8398-616099892386",
+      {
+        "opId": "e6df5395-b1a9-461d-8398-616099892386",
+        "uploadedStatus": "pending",
+        "retryCount": 0,
+        "createdAt": "2026-10-25T14:35:41.227Z"
+      }
+    ],
+    [
+      "f9c1505f-5042-4349-bcac-ecd743bc9a24",
+      {
+        "opId": "f9c1505f-5042-4349-bcac-ecd743bc9a24",
+        "uploadedStatus": "pending",
+        "retryCount": 0,
+        "createdAt": "2026-10-25T14:35:41.227Z"
+      }
+    ],
+    [
+      "e34974b8-561a-4cb9-b2c2-e0d59f299f3f",
+      {
+        "opId": "e34974b8-561a-4cb9-b2c2-e0d59f299f3f",
+        "uploadedStatus": "pending",
+        "retryCount": 0,
+        "createdAt": "2026-10-25T14:35:41.227Z"
+      }
+    ],
+    [
+      "a10a3b4d-4f82-43fd-95be-a83c0a9cccf2",
+      {
+        "opId": "a10a3b4d-4f82-43fd-95be-a83c0a9cccf2",
+        "uploadedStatus": "pending",
+        "retryCount": 0,
+        "createdAt": "2026-10-25T14:35:41.236Z"
+      }
+    ],
+    [
+      "b43ce49b-22fc-46b2-87f9-8475e3233352",
+      {
+        "opId": "b43ce49b-22fc-46b2-87f9-8475e3233352",
+        "uploadedStatus": "pending",
+        "retryCount": 0,
+        "createdAt": "2026-10-25T14:35:41.238Z"
+      }
+    ],
+    [
+      "8af47746-7319-41a1-a5d8-56c1700ec975",
+      {
+        "opId": "8af47746-7319-41a1-a5d8-56c1700ec975",
+        "uploadedStatus": "pending",
+        "retryCount": 0,
+        "createdAt": "2026-10-25T14:35:41.239Z"
+      }
+    ],
+    [
+      "9accdbd9-0da6-4ad2-b6ed-6bb7b284a07f",
+      {
+        "opId": "9accdbd9-0da6-4ad2-b6ed-6bb7b284a07f",
+        "uploadedStatus": "pending",
+        "retryCount": 0,
+        "createdAt": "2026-10-25T14:35:41.239Z"
+      }
+    ]
+  ],
+  "appliedOperations": [
+    "cd88f7d2-c821-4909-ac2e-b403aac0b34e",
+    "e6df5395-b1a9-461d-8398-616099892386",
+    "f9c1505f-5042-4349-bcac-ecd743bc9a24",
+    "e34974b8-561a-4cb9-b2c2-e0d59f299f3f",
+    "a10a3b4d-4f82-43fd-95be-a83c0a9cccf2",
+    "b43ce49b-22fc-46b2-87f9-8475e3233352",
+    "8af47746-7319-41a1-a5d8-56c1700ec975",
+    "9accdbd9-0da6-4ad2-b6ed-6bb7b284a07f"
+  ],
+  "syncDeviceHeads": [
+    [
+      "aed2e190-2352-4e32-915f-4207b18b1f8e",
+      8
+    ]
+  ],
+  "conflicts": [],
+  "budgets": [],
+  "recurringRules": [],
+  "recurringOccurrences": [],
+  "receiptBlobs": [],
+  "localSnapshots": [],
+  "schemaMigrations": [
+    {
+      "fromVersion": 0,
+      "toVersion": 1,
+      "checksum": "init-v1",
+      "appliedAt": "2026-10-25T14:35:41.223Z"
+    },
+    {
+      "fromVersion": 1,
+      "toVersion": 2,
+      "checksum": "budget-receipt-v2",
+      "appliedAt": "2026-10-25T14:35:41.223Z"
+    },
+    {
+      "fromVersion": 2,
+      "toVersion": 3,
+      "checksum": "recovery-snapshots-v3",
+      "appliedAt": "2026-10-25T14:35:41.223Z"
+    },
+    {
+      "fromVersion": 3,
+      "toVersion": 4,
+      "checksum": "double-entry-ledger-v4",
+      "appliedAt": "2026-10-25T14:35:41.223Z"
+    },
+    {
+      "fromVersion": 4,
+      "toVersion": 5,
+      "checksum": "account-groups-permissions-v5",
+      "appliedAt": "2026-10-25T14:35:41.223Z"
+    }
+  ],
+  "preferences": [
+    [
+      "language",
+      "en"
+    ],
+    [
+      "theme",
+      "light"
+    ],
+    [
+      "pin_lock_enabled",
+      false
+    ],
+    [
+      "pin_hash",
+      ""
+    ],
+    [
+      "soundVolume",
+      0.4
+    ],
+    [
+      "syntheticProfile",
+      "QA preferences"
+    ]
+  ]
+}

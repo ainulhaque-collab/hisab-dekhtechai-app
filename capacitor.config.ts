@@ -2,7 +2,7 @@ import type { CapacitorConfig } from '@capacitor/cli';
 
 const config: CapacitorConfig = {
   appId: 'com.hisabdekhtechai.app',
-  appName: 'হিসাব দেখতে চাই (Hisab DekhteChai)',
+  appName: 'Hisab Dekhtechai',
   webDir: 'dist',
   server: {
     androidScheme: 'https',

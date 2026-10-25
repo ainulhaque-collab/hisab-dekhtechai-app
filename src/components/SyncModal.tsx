@@ -1,382 +1,49 @@
 import React, { useState } from 'react';
-import { useApp, SIMULATED_DEVICES } from '../context/AppContext';
-import { SimulatedGoogleDriveTransport } from '../drive/transport';
-import {
-  Cloud,
-  RefreshCw,
-  Pause,
-  Play,
-  AlertTriangle,
-  CheckCircle2,
-  Clock,
-  HardDrive,
-  X,
-  Smartphone,
-  Laptop,
-  Flame,
-  ShieldAlert
-} from 'lucide-react';
+import { Cloud, CloudOff, CheckCheck, RefreshCw, Clock3, ShieldCheck, ArrowRight, AlertCircle, HelpCircle, ChevronDown } from 'lucide-react';
+import { useApp } from '../context/AppContext';
+import { ModalShell, primaryButton, secondaryButton } from './ModalShell';
 
-interface SyncModalProps {
-  isOpen: boolean;
-  onClose: () => void;
-  onOpenConflictModal: () => void;
-  onOpenAuthModal?: () => void;
-}
-
-export const SyncModal: React.FC<SyncModalProps> = ({
-  isOpen,
-  onClose,
-  onOpenConflictModal,
-  onOpenAuthModal,
-}) => {
-  const {
-    sync,
-    syncStatus,
-    db,
-    isOnline,
-    setIsOnline,
-    currentDevice,
-    switchDevice,
-    triggerManualSync,
-    conflicts,
-    userProfile,
-    language,
-  } = useApp();
-
-  const [isSyncing, setIsSyncing] = useState(false);
-  const [selectedFault, setSelectedFault] = useState<string>('none');
-
+export function SyncModal({ isOpen, onClose, onOpenConflictModal, onOpenAuthModal }: {
+  isOpen: boolean; onClose: () => void; onOpenConflictModal: () => void; onOpenAuthModal?: () => void;
+}) {
+  const { syncStatus, isOnline, isLiveGoogleAuth, triggerManualSync, conflicts, language } = useApp();
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState(false);
   if (!isOpen) return null;
-
-  const handleManualSync = async () => {
-    setIsSyncing(true);
-    await triggerManualSync();
-    setIsSyncing(false);
-  };
-
-  const handleFaultChange = (fault: any) => {
-    setSelectedFault(fault);
-    const transport = (sync as any).transport as SimulatedGoogleDriveTransport;
-    if (transport && transport.simulateFault !== undefined) {
-      transport.simulateFault = fault;
-    }
-    if (fault === 'none') {
-      sync.setAuthorized(true);
-    }
-    handleManualSync();
-  };
-
-  const pendingOps = db.getPendingOutbox();
-  const unresolvedConflicts = conflicts.filter((c) => c.status === 'needs_review');
-
-  return (
-    <div className="fixed inset-0 z-50 bg-black/50 backdrop-blur-xs flex items-center justify-center p-4">
-      <div className="bg-white rounded-2xl max-w-lg w-full p-5 shadow-2xl border border-slate-200 text-xs animate-in zoom-in-95 max-h-[90vh] overflow-y-auto relative">
-        <div className="sticky top-0 bg-white/95 backdrop-blur-xs z-20 flex items-center justify-between pb-3 border-b border-slate-100 -mt-1 pt-1">
-          <div className="flex items-center gap-2">
-            <Cloud className="w-5 h-5 text-blue-700" />
-            <div>
-              <h2 className="text-sm font-bold text-slate-800">
-                {language === 'en' ? 'Google Drive Sync Dashboard' : 'গুগল ড্রাইভ সিঙ্ক ড্যাশবোর্ড'}
-              </h2>
-              <div className="text-[10px] text-slate-500 font-medium">
-                {userProfile?.accessToken && userProfile.accessToken.startsWith('ya29.') ? (
-                  <span className="text-emerald-700 font-semibold">● {language === 'en' ? 'Live Google Drive REST API Active' : 'লাইভ গুগল ড্রাইভ REST API সক্রিয়'}</span>
-                ) : (
-                  <span className="text-blue-700 font-semibold">● {language === 'en' ? 'Multi-Device Test Mode Active' : 'মাল্টি-ডিভাইস টেস্ট মোড সক্রিয়'}</span>
-                )}
-              </div>
-            </div>
-          </div>
-          <button
-            type="button"
-            onClick={onClose}
-            className="p-1 rounded-lg hover:bg-slate-100 text-slate-500"
-          >
-            <X className="w-4 h-4" />
-          </button>
+  const en = language === 'en';
+  const verified = isOnline && isLiveGoogleAuth && syncStatus.state === 'synced_verified' && !!syncStatus.lastSuccessfulSyncAt;
+  const needsAuth = !isLiveGoogleAuth || syncStatus.state === 'auth_required';
+  const title = !isOnline ? (en ? 'Saved on this device' : 'এই ডিভাইসে সংরক্ষিত') : verified ? (en ? 'Everything is up to date' : 'সব পরিবর্তন সিঙ্ক হয়েছে') : syncStatus.state === 'quota_full' ? (en ? 'Drive storage needs attention' : 'ড্রাইভের স্টোরেজ পরীক্ষা করুন') : needsAuth ? (en ? 'Connect your Google Drive' : 'আপনার গুগল ড্রাইভ যুক্ত করুন') : syncStatus.state === 'syncing' ? (en ? 'Syncing your changes…' : 'আপনার পরিবর্তন সিঙ্ক হচ্ছে…') : (en ? 'Your changes are waiting' : 'আপনার পরিবর্তন অপেক্ষায় আছে');
+  const description = !isOnline ? (en ? 'You can keep recording offline. Sync when you reconnect.' : 'অফলাইনেও হিসাব রাখুন। ইন্টারনেট ফিরলে সিঙ্ক করুন।') : verified ? (en ? 'Your latest sync was verified with Google Drive.' : 'গুগল ড্রাইভে সর্বশেষ সিঙ্ক যাচাই হয়েছে।') : needsAuth ? (en ? 'Keep a private copy and continue across your devices.' : 'ব্যক্তিগত কপি রাখুন, অন্য ডিভাইসেও হিসাব দেখুন।') : (en ? 'Local records stay safe while synchronization completes.' : 'সিঙ্ক শেষ হওয়ার অপেক্ষায় স্থানীয় হিসাব সুরক্ষিত আছে।');
+  const StatusIcon = !isOnline ? CloudOff : verified ? CheckCheck : Cloud;
+  const connect = () => { onClose(); onOpenAuthModal?.(); };
+  async function syncNow() { setBusy(true); setError(false); try { await triggerManualSync(); } catch { setError(true); } finally { setBusy(false); } }
+  return <ModalShell title={en ? 'Google Drive Sync' : 'গুগল ড্রাইভ সিঙ্ক'} description={en ? 'Your records. Your private Drive.' : 'আপনার হিসাব, আপনার ব্যক্তিগত ড্রাইভ।'} icon={<Cloud className="h-5 w-5" />} onClose={onClose} busy={busy}
+    footer={<div className="space-y-2.5">
+      <button className={`${primaryButton} w-full`} disabled={!isOnline || busy || (!needsAuth && !isLiveGoogleAuth)} onClick={needsAuth ? connect : syncNow}>
+        {needsAuth ? <><span>{en ? 'Connect Google Drive' : 'গুগল ড্রাইভ যুক্ত করুন'}</span><ArrowRight className="h-4 w-4" /></> : <><RefreshCw className={`h-4 w-4 ${busy ? 'animate-spin' : ''}`} /><span>{en ? 'Sync Now' : 'এখন সিঙ্ক করুন'}</span></>}
+      </button>
+      {!needsAuth && <button className={`${secondaryButton} w-full`} onClick={connect}>{en ? 'Reconnect Google Drive' : 'গুগল ড্রাইভ পুনরায় যুক্ত করুন'}</button>}
+      <p className="flex items-center justify-center gap-1.5 text-[10px] text-slate-400"><ShieldCheck className="h-3 w-3" />{en ? 'Private app storage · Accessible only to you' : 'ব্যক্তিগত অ্যাপ স্টোরেজ · শুধু আপনার জন্য'}</p>
+    </div>}>
+    <div className="space-y-4">
+      <div role="status" className={`rounded-2xl border p-4 ${verified ? 'border-emerald-100 bg-emerald-50/60' : 'border-blue-100/80 bg-blue-50/50'}`}>
+        <div className="mb-3 flex items-center justify-between">
+          <StatusIcon className={`h-6 w-6 ${verified ? 'text-emerald-600' : 'text-blue-600'}`} />
+          <span className={`rounded-full bg-white px-2.5 py-1 text-[10px] font-semibold ring-1 ${verified ? 'text-emerald-700 ring-emerald-100' : 'text-slate-600 ring-slate-200/70'}`}>
+            <span className={`mr-1.5 inline-block h-1.5 w-1.5 rounded-full ${verified ? 'bg-emerald-500' : !isOnline ? 'bg-slate-400' : 'bg-amber-400'}`} />
+            {!isOnline ? (en ? 'Offline' : 'অফলাইন') : needsAuth ? (en ? 'Not connected' : 'সংযোগ নেই') : (en ? 'Connected' : 'সংযুক্ত')}
+          </span>
         </div>
-
-        <div className="space-y-4 pt-3">
-          {/* Honest Status Overview */}
-          <div className="bg-slate-50 p-3.5 rounded-xl border border-slate-200 space-y-2">
-            <div className="flex items-center justify-between">
-              <span className="text-slate-500 font-medium">বর্তমান অবস্থা:</span>
-              <span
-                className={`font-bold px-2 py-0.5 rounded-full ${
-                  !isOnline
-                    ? 'bg-slate-200 text-slate-700'
-                    : syncStatus.state === 'synced_verified'
-                    ? 'bg-emerald-100 text-emerald-800'
-                    : syncStatus.state === 'conflict'
-                    ? 'bg-amber-100 text-amber-800'
-                    : syncStatus.state === 'quota_full'
-                    ? 'bg-rose-100 text-rose-800'
-                    : 'bg-blue-100 text-blue-800'
-                }`}
-              >
-                {!isOnline
-                  ? 'অফলাইন (লোকাল সংরক্ষিত)'
-                  : syncStatus.state === 'synced_verified'
-                  ? 'ড্রাইভে সম্পূর্ণ সিঙ্কড'
-                  : syncStatus.state === 'conflict'
-                  ? 'সংঘাত পর্যালোচনা প্রয়োজন'
-                  : syncStatus.state === 'quota_full'
-                  ? 'গুগল ড্রাইভ কোটা পূর্ণ'
-                  : syncStatus.state === 'auth_required'
-                  ? 'পুনরায় লগইন প্রয়োজন'
-                  : 'সিঙ্ক অপেক্ষারত'}
-              </span>
-            </div>
-
-            <div className="flex items-center justify-between text-[11px] text-slate-500">
-              <span>সর্বশেষ সফল সিঙ্ক:</span>
-              <span className="font-mono text-slate-700">
-                {syncStatus.lastSuccessfulSyncAt
-                  ? new Date(syncStatus.lastSuccessfulSyncAt).toLocaleTimeString()
-                  : 'এখনও সিঙ্ক হয়নি'}
-              </span>
-            </div>
-
-            <div className="flex items-center justify-between text-[11px] text-slate-500">
-              <span>ডিভাইস আউটবক্সে পেন্ডিং:</span>
-              <span className="font-bold text-blue-700">{pendingOps.length}টি অপারেশন</span>
-            </div>
-
-            {syncStatus.lastError && (
-              <div className="p-2 bg-rose-50 border border-rose-200 rounded-lg text-rose-800 text-[11px]">
-                ত্রুটি: {syncStatus.lastError}
-              </div>
-            )}
-
-            {syncStatus.state === 'auth_required' && onOpenAuthModal && (
-              <button
-                type="button"
-                onClick={() => {
-                  onClose();
-                  onOpenAuthModal();
-                }}
-                className="w-full mt-2 py-2 bg-amber-600 hover:bg-amber-700 text-white rounded-lg font-bold flex items-center justify-center gap-2 transition-colors shadow-xs"
-              >
-                <ShieldAlert className="w-3.5 h-3.5" />
-                <span>গুগল ড্রাইভ পুনরায় অথোরাইজ করুন</span>
-              </button>
-            )}
-          </div>
-
-          {/* Conflict Alert if any */}
-          {unresolvedConflicts.length > 0 && (
-            <div className="p-3 bg-amber-50 border border-amber-200 rounded-xl flex items-center justify-between text-amber-900">
-              <div className="flex items-center gap-2">
-                <AlertTriangle className="w-4 h-4 text-amber-600 shrink-0" />
-                <span>
-                  <strong>{unresolvedConflicts.length}টি সংঘাত</strong> পাওয়া গেছে (সমসাময়িক সংশোধন)
-                </span>
-              </div>
-              <button
-                type="button"
-                onClick={onOpenConflictModal}
-                className="px-2.5 py-1 bg-amber-700 text-white rounded-lg font-bold"
-              >
-                পর্যালোচনা
-              </button>
-            </div>
-          )}
-
-          {/* Action Buttons: Sync Now & Pause */}
-          <div className="flex gap-2">
-            <button
-              type="button"
-              onClick={handleManualSync}
-              disabled={!isOnline || isSyncing}
-              className="flex-1 py-2.5 bg-blue-700 hover:bg-blue-800 disabled:opacity-50 text-white rounded-xl font-bold flex items-center justify-center gap-2 shadow-sm transition-colors"
-            >
-              <RefreshCw className={`w-3.5 h-3.5 ${isSyncing ? 'animate-spin' : ''}`} />
-              <span>এখনই সিঙ্ক করুন (Sync Now)</span>
-            </button>
-
-            <button
-              type="button"
-              onClick={() => sync.setPaused(!syncStatus.isPaused)}
-              className={`px-3 py-2.5 rounded-xl border font-semibold flex items-center gap-1.5 transition-colors ${
-                syncStatus.isPaused
-                  ? 'bg-amber-100 text-amber-800 border-amber-300'
-                  : 'bg-slate-100 text-slate-700 border-slate-300 hover:bg-slate-200'
-              }`}
-            >
-              {syncStatus.isPaused ? (
-                <>
-                  <Play className="w-3.5 h-3.5" />
-                  <span>চালু করুন</span>
-                </>
-              ) : (
-                <>
-                  <Pause className="w-3.5 h-3.5" />
-                  <span>বিরতি</span>
-                </>
-              )}
-            </button>
-          </div>
-
-          {/* Multi-Device Testing Simulator Controls */}
-          <div className="p-3.5 bg-slate-50 rounded-xl border border-slate-200 space-y-2.5">
-            <h3 className="font-bold text-slate-800 flex items-center gap-1.5">
-              <Smartphone className="w-3.5 h-3.5 text-blue-700" />
-              <span>মাল্টি-ডিভাইস টু-ওয়ে সিঙ্ক টেস্ট রুম</span>
-            </h3>
-            <p className="text-[11px] text-slate-500">
-              ডিভাইস পরিবর্তন করে অফলাইনে হিসাব যুক্ত করুন। একই গুগল একাউন্টের ক্লাউড ড্রাইভের মাধ্যমে অন্য
-              ডিভাইস স্বয়ংক্রিয়ভাবে তা গ্রহণ করবে:
-            </p>
-
-            <div className="grid grid-cols-3 gap-1.5">
-              {SIMULATED_DEVICES.map((d) => (
-                <button
-                  key={d.id}
-                  type="button"
-                  onClick={() => switchDevice(d)}
-                  className={`p-2 rounded-lg border text-left transition-all ${
-                    currentDevice.id === d.id
-                      ? 'bg-blue-700 text-white border-blue-700 font-bold shadow-xs'
-                      : 'bg-white text-slate-700 border-slate-200 hover:bg-slate-100'
-                  }`}
-                >
-                  <div className="truncate font-semibold">{d.name.split(' ')[0]}</div>
-                  <div
-                    className={`text-[10px] ${
-                      currentDevice.id === d.id ? 'text-blue-100' : 'text-slate-400'
-                    }`}
-                  >
-                    {d.platform}
-                  </div>
-                </button>
-              ))}
-            </div>
-
-            {/* Offline toggle */}
-            <div className="flex items-center justify-between pt-1">
-              <span className="text-[11px] text-slate-600">ডিভাইস ইন্টারনেট সংযোগ:</span>
-              <button
-                type="button"
-                onClick={() => setIsOnline(!isOnline)}
-                className={`px-2.5 py-1 rounded-lg text-xs font-bold transition-colors ${
-                  isOnline
-                    ? 'bg-emerald-600 text-white'
-                    : 'bg-rose-600 text-white'
-                }`}
-              >
-                {isOnline ? 'অনলাইন (Connected)' : 'অফলাইন (Airplane Mode)'}
-              </button>
-            </div>
-          </div>
-
-          {/* Fault Injection Simulator for QA Testing */}
-          <div className="p-3 bg-slate-50 rounded-xl border border-slate-200 space-y-2">
-            <h3 className="font-bold text-slate-800 flex items-center gap-1.5 text-xs">
-              <Flame className="w-3.5 h-3.5 text-rose-600" />
-              <span>ক্লাউড ফল্ট ইনজেকশন পরীক্ষা (QA Suite)</span>
-            </h3>
-            <div className="grid grid-cols-2 gap-1.5 text-[11px]">
-              <button
-                type="button"
-                onClick={() => handleFaultChange('none')}
-                className={`p-1.5 rounded-lg border text-center ${
-                  selectedFault === 'none'
-                    ? 'bg-emerald-600 text-white border-emerald-600 font-bold'
-                    : 'bg-white text-slate-700 border-slate-200'
-                }`}
-              >
-                স্বাভাবিক (Normal)
-              </button>
-              <button
-                type="button"
-                onClick={() => handleFaultChange('403_quota')}
-                className={`p-1.5 rounded-lg border text-center ${
-                  selectedFault === '403_quota'
-                    ? 'bg-rose-600 text-white border-rose-600 font-bold'
-                    : 'bg-white text-slate-700 border-slate-200'
-                }`}
-              >
-                403 কোটা পূর্ণ (Quota Full)
-              </button>
-              <button
-                type="button"
-                onClick={() => handleFaultChange('401_expired')}
-                className={`p-1.5 rounded-lg border text-center ${
-                  selectedFault === '401_expired'
-                    ? 'bg-amber-600 text-white border-amber-600 font-bold'
-                    : 'bg-white text-slate-700 border-slate-200'
-                }`}
-              >
-                401 টোকেন মেয়াদোত্তীর্ণ
-              </button>
-              <button
-                type="button"
-                onClick={() => handleFaultChange('429_rate_limit')}
-                className={`p-1.5 rounded-lg border text-center ${
-                  selectedFault === '429_rate_limit'
-                    ? 'bg-purple-600 text-white border-purple-600 font-bold'
-                    : 'bg-white text-slate-700 border-slate-200'
-                }`}
-              >
-                429 রেইট লিমিট
-              </button>
-            </div>
-          </div>
-
-          {/* Google Cloud OAuth Setup Helper */}
-          <div className="p-3.5 bg-blue-50/70 rounded-xl border border-blue-200 space-y-2 text-xs">
-            <h3 className="font-bold text-blue-900 flex items-center gap-1.5">
-              <HardDrive className="w-3.5 h-3.5 text-blue-700" />
-              <span>{language === 'en' ? 'Google Cloud OAuth Setup Helper' : 'গুগল ক্লাউড ও-অথ সেটআপ সহায়ক'}</span>
-            </h3>
-            <p className="text-[11px] text-slate-600 leading-relaxed">
-              {language === 'en'
-                ? 'Add this origin to "Authorized JavaScript origins" in your Google Cloud Console Web OAuth Client:'
-                : 'গুগল ক্লাউড কনসোলের Web OAuth ক্লায়েন্টে নিচের Origin যুক্ত করুন:'}
-            </p>
-            <div className="flex items-center gap-1.5 bg-white p-2 rounded-lg border border-blue-200">
-              <code className="text-[11px] font-mono text-blue-900 break-all select-all flex-1">
-                {typeof window !== 'undefined' ? window.location.origin : 'http://localhost:3000'}
-              </code>
-              <button
-                type="button"
-                onClick={() => {
-                  if (typeof navigator !== 'undefined' && navigator.clipboard) {
-                    navigator.clipboard.writeText(window.location.origin);
-                  }
-                }}
-                className="px-2 py-1 bg-blue-700 hover:bg-blue-800 text-white rounded text-[11px] font-semibold shrink-0"
-              >
-                {language === 'en' ? 'Copy Origin' : 'কপি করুন'}
-              </button>
-            </div>
-            <div className="p-2 bg-white/80 rounded-lg border border-blue-100 text-[10px] text-slate-600 space-y-1">
-              <div>
-                <strong className="text-blue-900">Android APK Note:</strong> Package:{' '}
-                <code className="bg-slate-100 px-1 py-0.5 rounded font-mono text-blue-700">com.hisabdekhtechai.app</code>
-              </div>
-              <div className="text-slate-500">
-                {language === 'en'
-                  ? 'For native Android phone usage, create an Android OAuth Client with your signing SHA-1 in Google Cloud Console.'
-                  : 'মোবাইলে APK দিয়ে চালাতে Google Cloud Console-এ একটি Android Client তৈরি করে SHA-1 যুক্ত করুন।'}
-              </div>
-            </div>
-          </div>
-
-          {/* Bottom Close Button */}
-          <div className="pt-2">
-            <button
-              type="button"
-              onClick={onClose}
-              className="w-full py-2.5 bg-slate-100 hover:bg-slate-200 text-slate-700 font-semibold rounded-xl text-xs transition-colors"
-            >
-              {language === 'en' ? 'Close' : 'বন্ধ করুন'}
-            </button>
-          </div>
-        </div>
+        <h3 className="text-sm font-bold text-slate-900">{title}</h3><p className="mt-1 text-xs leading-relaxed text-slate-500">{description}</p>
       </div>
+      <div className="grid grid-cols-2 divide-x divide-slate-100 rounded-2xl border border-slate-100 bg-white py-3.5">
+        <div className="px-4"><div className="mb-2 flex items-center gap-1.5 text-[11px] text-slate-400"><RefreshCw className="h-3 w-3" />{en ? 'Pending changes' : 'অপেক্ষমাণ পরিবর্তন'}</div><div className="text-xl font-bold tabular-nums tracking-tight">{syncStatus.pendingOutboxCount}<span className="ml-1.5 text-[10px] font-normal text-slate-400">{en ? 'to sync' : 'সিঙ্ক বাকি'}</span></div></div>
+        <div className="px-4"><div className="mb-2 flex items-center gap-1.5 text-[11px] text-slate-400"><Clock3 className="h-3 w-3" />{en ? 'Last successful sync' : 'সর্বশেষ সফল সিঙ্ক'}</div><p className="text-xs font-semibold leading-relaxed text-slate-700">{syncStatus.lastSuccessfulSyncAt ? new Date(syncStatus.lastSuccessfulSyncAt).toLocaleString(en ? 'en-GB' : 'bn-BD') : (en ? 'Not synced yet' : 'এখনও সিঙ্ক হয়নি')}</p></div>
+      </div>
+      {(syncStatus.lastError || error) && <div role="alert" className="flex gap-2.5 rounded-xl border border-amber-100 bg-amber-50 p-3 text-xs leading-relaxed text-amber-800"><AlertCircle className="mt-0.5 h-4 w-4 shrink-0" /><span>{en ? 'Sync could not finish. Your local records remain safe. Check your connection and reconnect the Google account that owns these records.' : 'সিঙ্ক সম্পূর্ণ হয়নি। স্থানীয় হিসাব সুরক্ষিত আছে। ইন্টারনেট পরীক্ষা করে হিসাবের মালিকের গুগল অ্যাকাউন্ট পুনরায় যুক্ত করুন।'}</span></div>}
+      {conflicts.some(c => c.status === 'needs_review') && <button className={`${secondaryButton} w-full border-amber-200 text-amber-700`} onClick={onOpenConflictModal}><AlertCircle className="h-4 w-4" />{en ? 'Review conflicting changes' : 'পরস্পরবিরোধী পরিবর্তন দেখুন'}</button>}
+      <details className="group rounded-xl border border-slate-100 px-3.5 py-3 text-xs"><summary className="flex cursor-pointer list-none items-center gap-2 text-slate-500"><HelpCircle className="h-4 w-4" /><span className="flex-1 font-medium">{en ? 'Help & troubleshooting' : 'সাহায্য ও সমস্যা সমাধান'}</span><ChevronDown className="h-3.5 w-3.5 transition group-open:rotate-180" /></summary><p className="pt-3 leading-relaxed text-slate-500">{en ? 'Use the same Google account on every device and allow private Drive app storage when prompted. Offline changes remain pending until sync verification finishes. Never clear app storage to resolve a sync error.' : 'প্রতিটি ডিভাইসে একই গুগল অ্যাকাউন্ট ব্যবহার করুন এবং ব্যক্তিগত ড্রাইভ অ্যাপ স্টোরেজ অনুমোদন করুন। যাচাই শেষ না হওয়া পর্যন্ত পরিবর্তন অপেক্ষায় থাকবে। সিঙ্ক সমস্যায় অ্যাপের ডাটা মুছবেন না।'}</p></details>
     </div>
-  );
-};
+  </ModalShell>;
+}

@@ -17,10 +17,31 @@ body {
   font-feature-settings: "tnum";
 }
 
-/* Safe area support for notched mobile phones */
+/* Safe area support for Android edge-to-edge and notched mobile displays */
+:root {
+  --sat: env(safe-area-inset-top, 0px);
+  --sab: env(safe-area-inset-bottom, 0px);
+  --sal: env(safe-area-inset-left, 0px);
+  --sar: env(safe-area-inset-right, 0px);
+}
+
 .pb-safe {
-  padding-bottom: env(safe-area-inset-bottom, 16px);
+  padding-bottom: max(env(safe-area-inset-bottom, 0px), 0px);
 }
+
 .pt-safe {
-  padding-top: env(safe-area-inset-top, 16px);
+  padding-top: max(env(safe-area-inset-top, 0px), 0px);
 }
+
+.pl-safe {
+  padding-left: max(env(safe-area-inset-left, 0px), 0px);
+}
+
+.pr-safe {
+  padding-right: max(env(safe-area-inset-right, 0px), 0px);
+}
+
+.header-safe {
+  padding-top: max(env(safe-area-inset-top, 0px), 0px);
+}
+

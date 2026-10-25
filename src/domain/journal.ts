@@ -2,6 +2,15 @@
  * Double-Entry Financial Journal Engine
  * Enforces debit == credit balance invariants, non-negative amounts,
  * proper account debit/credit conventions, and immutable correction trails.
+ *
+ * GAAP Conventions Applied:
+ *   Income:   Debit Asset Account | Credit Revenue Account (cat-side uses REVENUE_CLEARING)
+ *   Expense:  Debit Expense Account (cat-side uses EXPENSE_CLEARING) | Credit Asset Account
+ *   Transfer: Debit Destination Asset | Credit Source Asset; optional fee lines
+ *   Opening:  Debit Asset Account | Credit OPENING_EQUITY
+ *
+ * Each transaction line carries a categoryId ONLY on the nominal (non-asset) line.
+ * The asset line always has categoryId: null.
  */
 
 import {
@@ -12,6 +21,7 @@ import {
   TransactionType,
   PaisaString
 } from '../contracts/types';
+import { SYSTEM_ACCOUNTS } from '../contracts/ledger';
 import { toPaisa, paisaToDecimalString } from './money';
 
 export interface PostIncomeCommand {
@@ -80,8 +90,12 @@ export function generateUUID(): UUID {
 
 /**
  * Builds and validates an Income balanced journal entry.
- * Debit: Asset Account (Cash/Bank/bKash increases)
- * Credit: Revenue Category
+ *
+ * Double-entry posting (GAAP):
+ *   Line 1 — Debit:  Asset Account  (money arrives in Cash/Bank/bKash)   categoryId: null
+ *   Line 2 — Credit: Revenue Clearing (income flows from category source)  categoryId: revenueCategoryId
+ *
+ * Net effect: Asset ↑, Revenue ↑
  */
 export function buildIncomeJournal(cmd: PostIncomeCommand): BalancedJournal {
   const amount = toPaisa(cmd.amountMinor);
@@ -104,6 +118,7 @@ export function buildIncomeJournal(cmd: PostIncomeCommand): BalancedJournal {
   };
 
   const lines: JournalLine[] = [
+    // Asset line: debit increases asset balance
     {
       id: generateUUID(),
       transactionId: txId,
@@ -112,10 +127,13 @@ export function buildIncomeJournal(cmd: PostIncomeCommand): BalancedJournal {
       creditMinor: '0',
       categoryId: null,
     },
+    // Revenue nominal line: credit flows through revenue category
+    // accountId points to the system revenue clearing account so the
+    // contra-side is properly classified — never the same real asset account.
     {
       id: generateUUID(),
       transactionId: txId,
-      accountId: cmd.assetAccountId, // Represents the balanced equity/revenue side
+      accountId: SYSTEM_ACCOUNTS.REVENUE_CLEARING,
       debitMinor: '0',
       creditMinor: amount.toString(),
       categoryId: cmd.revenueCategoryId,
@@ -128,8 +146,12 @@ export function buildIncomeJournal(cmd: PostIncomeCommand): BalancedJournal {
 
 /**
  * Builds and validates an Expense balanced journal entry.
- * Debit: Expense Category
- * Credit: Asset Account (Cash/Bank/bKash decreases)
+ *
+ * Double-entry posting (GAAP):
+ *   Line 1 — Credit: Asset Account  (money leaves Cash/Bank/bKash)         categoryId: null
+ *   Line 2 — Debit:  Expense Clearing (expense recognised in category)       categoryId: expenseCategoryId
+ *
+ * Net effect: Asset ↓, Expense ↑
  */
 export function buildExpenseJournal(cmd: PostExpenseCommand): BalancedJournal {
   const amount = toPaisa(cmd.amountMinor);
@@ -152,6 +174,7 @@ export function buildExpenseJournal(cmd: PostExpenseCommand): BalancedJournal {
   };
 
   const lines: JournalLine[] = [
+    // Asset line: credit decreases asset balance
     {
       id: generateUUID(),
       transactionId: txId,
@@ -160,10 +183,11 @@ export function buildExpenseJournal(cmd: PostExpenseCommand): BalancedJournal {
       creditMinor: amount.toString(),
       categoryId: null,
     },
+    // Expense nominal line: debit recognises expense via category
     {
       id: generateUUID(),
       transactionId: txId,
-      accountId: cmd.assetAccountId,
+      accountId: SYSTEM_ACCOUNTS.EXPENSE_CLEARING,
       debitMinor: amount.toString(),
       creditMinor: '0',
       categoryId: cmd.expenseCategoryId,
@@ -176,9 +200,13 @@ export function buildExpenseJournal(cmd: PostExpenseCommand): BalancedJournal {
 
 /**
  * Builds and validates a Transfer balanced journal entry between two asset accounts.
- * Debit: Destination Asset Account
- * Credit: Source Asset Account
- * Optional Fee: Debit Fee Expense Category, Credit Source Asset Account
+ *
+ * Double-entry posting (GAAP):
+ *   Line 1 — Credit: Source Asset Account       (money leaves)   categoryId: null
+ *   Line 2 — Debit:  Destination Asset Account  (money arrives)  categoryId: null
+ *   [If fee > 0]:
+ *   Line 3 — Credit: Source Asset Account       (fee deducted)   categoryId: null
+ *   Line 4 — Debit:  Expense Clearing           (fee expense)    categoryId: feeExpenseCategoryId
  */
 export function buildTransferJournal(cmd: PostTransferCommand): BalancedJournal {
   const amount = toPaisa(cmd.amountMinor);
@@ -231,7 +259,7 @@ export function buildTransferJournal(cmd: PostTransferCommand): BalancedJournal 
 
   // If there is an explicit transfer fee (e.g. bKash cashout / bank charge):
   if (fee > 0n) {
-    // Extra credit on source account for fee
+    // Credit source account for fee amount (additional deduction)
     lines.push({
       id: generateUUID(),
       transactionId: txId,
@@ -240,11 +268,11 @@ export function buildTransferJournal(cmd: PostTransferCommand): BalancedJournal 
       creditMinor: fee.toString(),
       categoryId: null,
     });
-    // Debit fee expense category
+    // Debit expense clearing with fee category
     lines.push({
       id: generateUUID(),
       transactionId: txId,
-      accountId: cmd.fromAssetAccountId,
+      accountId: SYSTEM_ACCOUNTS.EXPENSE_CLEARING,
       debitMinor: fee.toString(),
       creditMinor: '0',
       categoryId: cmd.feeExpenseCategoryId || null,
@@ -257,8 +285,12 @@ export function buildTransferJournal(cmd: PostTransferCommand): BalancedJournal 
 
 /**
  * Builds an Opening Balance journal entry.
- * Debit: Asset Account
- * Credit: Equity / Initial Capital
+ *
+ * Double-entry posting (GAAP):
+ *   Line 1 — Debit:  Asset Account      (asset is established)   categoryId: null
+ *   Line 2 — Credit: Opening Equity     (owner's capital source)  categoryId: null
+ *
+ * Net effect: Asset ↑, Equity ↑  (accounting equation preserved)
  */
 export function buildOpeningBalanceJournal(cmd: PostOpeningBalanceCommand): BalancedJournal {
   const amount = toPaisa(cmd.amountMinor);
@@ -278,6 +310,7 @@ export function buildOpeningBalanceJournal(cmd: PostOpeningBalanceCommand): Bala
   };
 
   const lines: JournalLine[] = [
+    // Asset line: debit establishes the opening asset balance
     {
       id: generateUUID(),
       transactionId: txId,
@@ -286,10 +319,11 @@ export function buildOpeningBalanceJournal(cmd: PostOpeningBalanceCommand): Bala
       creditMinor: '0',
       categoryId: null,
     },
+    // Equity line: credit balances against opening capital
     {
       id: generateUUID(),
       transactionId: txId,
-      accountId: cmd.assetAccountId,
+      accountId: SYSTEM_ACCOUNTS.OPENING_EQUITY,
       debitMinor: '0',
       creditMinor: amount.toString(),
       categoryId: null,

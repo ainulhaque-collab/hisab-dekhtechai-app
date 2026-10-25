@@ -1,4 +1,5 @@
-import React, { useState, useMemo } from 'react';
+import { AppSelect } from './AppSelect';
+import React, { useState, useMemo, useEffect, useRef } from 'react';
 import { useApp } from '../context/AppContext';
 import {
   toPaisa,
@@ -14,6 +15,8 @@ import {
 } from '../domain/journal';
 import { SyncOperation, Category, PartyRole } from '../contracts/types';
 import { canonicalJson, computeSha256 } from '../sync/canonical';
+import { AccountPickerModal } from './AccountPickerModal';
+import { soundService } from '../services/soundService';
 import {
   TrendingDown,
   TrendingUp,
@@ -28,7 +31,9 @@ import {
   FolderPlus,
   UserPlus,
   Users,
-  Briefcase
+  Briefcase,
+  ChevronDown,
+  Wallet
 } from 'lucide-react';
 
 interface AddTransactionTabProps {
@@ -42,6 +47,7 @@ export const AddTransactionTab: React.FC<AddTransactionTabProps> = ({ onSuccess 
     accounts,
     categories,
     parties,
+    dashboardData,
     createCategory,
     createParty,
     language,
@@ -53,10 +59,54 @@ export const AddTransactionTab: React.FC<AddTransactionTabProps> = ({ onSuccess 
   const isEn = language === 'en';
   const isBusiness = currentWorkspace?.kind === 'business';
 
+  const activeAccounts = useMemo(() => {
+    return accounts.filter((a) => !a.archivedAt);
+  }, [accounts]);
+
   const [type, setType] = useState<'expense' | 'income' | 'transfer'>('expense');
   const [amountStr, setAmountStr] = useState('');
-  const [accountId, setAccountId] = useState(accounts[0]?.id || '');
-  const [toAccountId, setToAccountId] = useState(accounts[1]?.id || accounts[0]?.id || '');
+  const [accountId, setAccountId] = useState(activeAccounts[0]?.id || '');
+  const [toAccountId, setToAccountId] = useState(
+    activeAccounts[1]?.id || activeAccounts[0]?.id || ''
+  );
+  const [showAccountPicker, setShowAccountPicker] = useState(false);
+  const [showToAccountPicker, setShowToAccountPicker] = useState(false);
+
+  // Synchronize selected account when activeAccounts or currentWorkspace changes
+  useEffect(() => {
+    if (activeAccounts.length > 0) {
+      if (!accountId || !activeAccounts.some((a) => a.id === accountId)) {
+        setAccountId(activeAccounts[0].id);
+      }
+      if (
+        !toAccountId ||
+        !activeAccounts.some((a) => a.id === toAccountId) ||
+        toAccountId === accountId
+      ) {
+        const other = activeAccounts.find((a) => a.id !== (accountId || activeAccounts[0].id));
+        setToAccountId(other?.id || activeAccounts[0].id);
+      }
+    } else {
+      setAccountId('');
+      setToAccountId('');
+    }
+  }, [activeAccounts, currentWorkspace?.id]);
+
+  const getAccountBalance = (accId: string): string => {
+    const summary = dashboardData?.accountSummaries?.find((s) => s.accountId === accId);
+    if (summary) return summary.currentBalanceMinor;
+    const acc = accounts.find((a) => a.id === accId);
+    return acc?.openingBalanceMinor || '0';
+  };
+
+  const selectedAccount = useMemo(() => {
+    return accounts.find((a) => a.id === accountId);
+  }, [accounts, accountId]);
+
+  const selectedToAccount = useMemo(() => {
+    return accounts.find((a) => a.id === toAccountId);
+  }, [accounts, toAccountId]);
+
   const [categoryId, setCategoryId] = useState('');
   const [subCategoryId, setSubCategoryId] = useState('');
   const [partyId, setPartyId] = useState<string>('');
@@ -71,6 +121,7 @@ export const AddTransactionTab: React.FC<AddTransactionTabProps> = ({ onSuccess 
   const [receiptName, setReceiptName] = useState<string | null>(null);
   const [receiptBase64, setReceiptBase64] = useState<string | null>(null);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
+  const submissionInFlight = useRef(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [successToast, setSuccessToast] = useState(false);
 
@@ -199,16 +250,24 @@ export const AddTransactionTab: React.FC<AddTransactionTabProps> = ({ onSuccess 
       return;
     }
 
-    if (!accountId) {
-      setErrorMsg(isEn ? 'Please select an account' : 'অনুগ্রহ করে একটি অ্যাকাউন্ট নির্বাচন করুন');
+    if (!accountId || !activeAccounts.some((a) => a.id === accountId)) {
+      setErrorMsg(isEn ? 'Please select a valid account' : 'অনুগ্রহ করে একটি সঠিক অ্যাকাউন্ট নির্বাচন করুন');
       return;
     }
 
-    if (type === 'transfer' && accountId === toAccountId) {
-      setErrorMsg(isEn ? 'Source and destination accounts must be different' : 'উৎস এবং গন্তব্য অ্যাকাউন্ট ভিন্ন হতে হবে');
-      return;
+    if (type === 'transfer') {
+      if (!toAccountId || !activeAccounts.some((a) => a.id === toAccountId)) {
+        setErrorMsg(isEn ? 'Please select a valid destination account' : 'অনুগ্রহ করে একটি সঠিক গন্তব্য অ্যাকাউন্ট নির্বাচন করুন');
+        return;
+      }
+      if (accountId === toAccountId) {
+        setErrorMsg(isEn ? 'Source and destination accounts must be different' : 'উৎস এবং গন্তব্য অ্যাকাউন্ট ভিন্ন হতে হবে');
+        return;
+      }
     }
 
+    if (submissionInFlight.current) return;
+    submissionInFlight.current = true;
     setIsSubmitting(true);
 
     try {
@@ -236,6 +295,7 @@ export const AddTransactionTab: React.FC<AddTransactionTabProps> = ({ onSuccess 
         });
         opType = 'journal.post';
         opPayload = {
+          balancedJournal,
           workspaceId: currentWorkspace.id,
           assetAccountId: accountId,
           expenseCategoryId: effectiveCategoryId,
@@ -259,6 +319,7 @@ export const AddTransactionTab: React.FC<AddTransactionTabProps> = ({ onSuccess 
         });
         opType = 'journal.post';
         opPayload = {
+          balancedJournal,
           workspaceId: currentWorkspace.id,
           assetAccountId: accountId,
           revenueCategoryId: effectiveCategoryId,
@@ -292,6 +353,7 @@ export const AddTransactionTab: React.FC<AddTransactionTabProps> = ({ onSuccess 
         });
         opType = 'journal.post';
         opPayload = {
+          balancedJournal,
           workspaceId: currentWorkspace.id,
           fromAssetAccountId: accountId,
           toAssetAccountId: toAccountId,
@@ -321,6 +383,8 @@ export const AddTransactionTab: React.FC<AddTransactionTabProps> = ({ onSuccess 
       };
 
       await db.commitJournalWithOutbox(balancedJournal, op);
+      await db.waitForPendingWrites();
+      soundService.playTransactionSuccess(type);
       refreshState();
       setSuccessToast(true);
 
@@ -343,6 +407,7 @@ export const AddTransactionTab: React.FC<AddTransactionTabProps> = ({ onSuccess 
     } catch (err: any) {
       setErrorMsg(err.message || (isEn ? 'Failed to save transaction' : 'লেনদেন সংরক্ষণ ব্যর্থ হয়েছে'));
     } finally {
+      submissionInFlight.current = false;
       setIsSubmitting(false);
     }
   };
@@ -477,17 +542,32 @@ export const AddTransactionTab: React.FC<AddTransactionTabProps> = ({ onSuccess 
                   ? 'Account / Wallet'
                   : 'অ্যাকাউন্ট / ওয়ালেট'}
               </label>
-              <select
-                value={accountId}
-                onChange={(e) => setAccountId(e.target.value)}
-                className="w-full px-3 py-2 bg-slate-50 border border-slate-300 rounded-xl text-xs font-medium focus:bg-white focus:outline-none focus:ring-2 focus:ring-blue-600"
+              <button
+                type="button"
+                id="source-account-picker-btn"
+                onClick={() => setShowAccountPicker(true)}
+                className="w-full px-3 py-2 bg-slate-50 border border-slate-300 rounded-xl text-left flex items-center justify-between hover:bg-slate-100/80 transition-colors focus:outline-none focus:ring-2 focus:ring-blue-600 min-h-[44px]"
               >
-                {accounts.map((a) => (
-                  <option key={a.id} value={a.id}>
-                    {a.name} ({formatBDT(a.openingBalanceMinor, { locale: language, showDecimals: false })})
-                  </option>
-                ))}
-              </select>
+                <div className="flex items-center gap-2 min-w-0">
+                  <div className="w-6 h-6 rounded-md bg-blue-100 text-blue-700 flex items-center justify-center shrink-0">
+                    <Wallet className="w-3.5 h-3.5" />
+                  </div>
+                  <span className="text-xs font-bold text-slate-800 truncate">
+                    {selectedAccount?.name || (isEn ? 'Select Account' : 'অ্যাকাউন্ট নির্বাচন করুন')}
+                  </span>
+                </div>
+                <div className="flex items-center gap-1.5 shrink-0 ml-2">
+                  {selectedAccount && (
+                    <span className="text-xs font-semibold text-slate-600 tabular-nums">
+                      {formatBDT(getAccountBalance(selectedAccount.id), {
+                        locale: language,
+                        showDecimals: false,
+                      })}
+                    </span>
+                  )}
+                  <ChevronDown className="w-4 h-4 text-slate-400" />
+                </div>
+              </button>
             </div>
 
             {type === 'transfer' ? (
@@ -495,17 +575,32 @@ export const AddTransactionTab: React.FC<AddTransactionTabProps> = ({ onSuccess 
                 <label className="block text-slate-700 font-semibold mb-1">
                   {isEn ? 'Destination Account (To)' : 'গন্তব্য অ্যাকাউন্ট (To)'}
                 </label>
-                <select
-                  value={toAccountId}
-                  onChange={(e) => setToAccountId(e.target.value)}
-                  className="w-full px-3 py-2 bg-slate-50 border border-slate-300 rounded-xl text-xs font-medium focus:bg-white focus:outline-none focus:ring-2 focus:ring-blue-600"
+                <button
+                  type="button"
+                  id="destination-account-picker-btn"
+                  onClick={() => setShowToAccountPicker(true)}
+                  className="w-full px-3 py-2 bg-slate-50 border border-slate-300 rounded-xl text-left flex items-center justify-between hover:bg-slate-100/80 transition-colors focus:outline-none focus:ring-2 focus:ring-blue-600 min-h-[44px]"
                 >
-                  {accounts.map((a) => (
-                    <option key={a.id} value={a.id}>
-                      {a.name}
-                    </option>
-                  ))}
-                </select>
+                  <div className="flex items-center gap-2 min-w-0">
+                    <div className="w-6 h-6 rounded-md bg-emerald-100 text-emerald-700 flex items-center justify-center shrink-0">
+                      <Wallet className="w-3.5 h-3.5" />
+                    </div>
+                    <span className="text-xs font-bold text-slate-800 truncate">
+                      {selectedToAccount?.name || (isEn ? 'Select Destination' : 'গন্তব্য নির্বাচন করুন')}
+                    </span>
+                  </div>
+                  <div className="flex items-center gap-1.5 shrink-0 ml-2">
+                    {selectedToAccount && (
+                      <span className="text-xs font-semibold text-slate-600 tabular-nums">
+                        {formatBDT(getAccountBalance(selectedToAccount.id), {
+                          locale: language,
+                          showDecimals: false,
+                        })}
+                      </span>
+                    )}
+                    <ChevronDown className="w-4 h-4 text-slate-400" />
+                  </div>
+                </button>
               </div>
             ) : (
               <div>
@@ -525,7 +620,7 @@ export const AddTransactionTab: React.FC<AddTransactionTabProps> = ({ onSuccess 
                     <span>{isEn ? 'New' : 'নতুন'}</span>
                   </button>
                 </div>
-                <select
+                <AppSelect aria-label={isEn ? 'Main Category' : 'প্রধান খাত'}
                   value={categoryId}
                   onChange={(e) => handleParentCategoryChange(e.target.value)}
                   className="w-full px-3 py-2 bg-slate-50 border border-slate-300 rounded-xl text-xs font-medium focus:bg-white focus:outline-none focus:ring-2 focus:ring-blue-600"
@@ -535,7 +630,7 @@ export const AddTransactionTab: React.FC<AddTransactionTabProps> = ({ onSuccess 
                       {isEn && c.nameEn ? c.nameEn : c.name}
                     </option>
                   ))}
-                </select>
+                </AppSelect>
               </div>
             )}
           </div>
@@ -559,7 +654,7 @@ export const AddTransactionTab: React.FC<AddTransactionTabProps> = ({ onSuccess 
                   <span>{isEn ? 'Sub-category' : 'সাব-ক্যাটাগরি'}</span>
                 </button>
               </div>
-              <select
+              <AppSelect aria-label={isEn ? 'Sub-category' : 'উপখাত'}
                 value={subCategoryId}
                 onChange={(e) => setSubCategoryId(e.target.value)}
                 className="w-full px-3 py-2 bg-slate-50 border border-slate-300 rounded-xl text-xs font-medium focus:bg-white focus:outline-none focus:ring-2 focus:ring-blue-600"
@@ -572,7 +667,7 @@ export const AddTransactionTab: React.FC<AddTransactionTabProps> = ({ onSuccess 
                     {isEn && sc.nameEn ? sc.nameEn : sc.name}
                   </option>
                 ))}
-              </select>
+              </AppSelect>
             </div>
           )}
 
@@ -601,7 +696,7 @@ export const AddTransactionTab: React.FC<AddTransactionTabProps> = ({ onSuccess 
                 </button>
               </div>
 
-              <select
+              <AppSelect aria-label={isEn ? 'Associated Person' : 'সংশ্লিষ্ট ব্যক্তি'}
                 value={partyId}
                 onChange={(e) => setPartyId(e.target.value)}
                 className="w-full px-3 py-2 bg-white border border-slate-300 rounded-xl text-xs font-medium focus:bg-white focus:outline-none focus:ring-2 focus:ring-blue-600"
@@ -614,7 +709,7 @@ export const AddTransactionTab: React.FC<AddTransactionTabProps> = ({ onSuccess 
                     {p.name} — {getRoleLabel(p.role)} {p.phone ? `(${p.phone})` : ''}
                   </option>
                 ))}
-              </select>
+              </AppSelect>
             </div>
           )}
 
@@ -839,7 +934,7 @@ export const AddTransactionTab: React.FC<AddTransactionTabProps> = ({ onSuccess 
                 <label className="block text-slate-700 font-bold mb-1">
                   {isEn ? 'Role in Business' : 'ব্যবসার সাথে সম্পর্ক / পদবি'}
                 </label>
-                <select
+                <AppSelect aria-label={isEn ? 'Role in Business' : 'ব্যবসার সাথে সম্পর্ক'}
                   value={newPartyRole}
                   onChange={(e) => setNewPartyRole(e.target.value as PartyRole)}
                   className="w-full px-3 py-2 bg-slate-50 border border-slate-300 rounded-xl focus:bg-white focus:outline-none focus:ring-2 focus:ring-blue-600 font-medium"
@@ -849,7 +944,7 @@ export const AddTransactionTab: React.FC<AddTransactionTabProps> = ({ onSuccess 
                   <option value="customer">{isEn ? 'Customer / Client' : 'গ্রাহক / কাস্টমার'}</option>
                   <option value="supplier">{isEn ? 'Supplier / Vendor' : 'সরবরাহকারী / মহাজন'}</option>
                   <option value="other">{isEn ? 'Other' : 'অন্যান্য'}</option>
-                </select>
+                </AppSelect>
               </div>
 
               <div>
@@ -884,6 +979,45 @@ export const AddTransactionTab: React.FC<AddTransactionTabProps> = ({ onSuccess 
           </div>
         </div>
       )}
+
+      {/* Account Picker Modals */}
+      <AccountPickerModal
+        isOpen={showAccountPicker}
+        onClose={() => setShowAccountPicker(false)}
+        accounts={activeAccounts}
+        selectedAccountId={accountId}
+        onSelectAccount={(id) => {
+          setAccountId(id);
+          if (type === 'transfer' && id === toAccountId) {
+            const nextTo = activeAccounts.find((a) => a.id !== id);
+            if (nextTo) setToAccountId(nextTo.id);
+          }
+        }}
+        title={
+          type === 'transfer'
+            ? isEn
+              ? 'Select Source Account (From)'
+              : 'উৎস অ্যাকাউন্ট নির্বাচন করুন'
+            : isEn
+            ? 'Select Account / Wallet'
+            : 'অ্যাকাউন্ট / ওয়ালেট নির্বাচন করুন'
+        }
+        excludeAccountId={type === 'transfer' ? toAccountId : undefined}
+        language={language}
+        getBalance={getAccountBalance}
+      />
+
+      <AccountPickerModal
+        isOpen={showToAccountPicker}
+        onClose={() => setShowToAccountPicker(false)}
+        accounts={activeAccounts}
+        selectedAccountId={toAccountId}
+        onSelectAccount={(id) => setToAccountId(id)}
+        title={isEn ? 'Select Destination Account (To)' : 'গন্তব্য অ্যাকাউন্ট নির্বাচন করুন'}
+        excludeAccountId={accountId}
+        language={language}
+        getBalance={getAccountBalance}
+      />
     </div>
   );
 };

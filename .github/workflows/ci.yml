@@ -1,0 +1,44 @@
+name: CI Verification & Safety Gates
+
+on:
+  push:
+    branches:
+      - main
+      - master
+      - 'stabilization/**'
+      - 'development/**'
+      - 'fix/**'
+  pull_request:
+    branches:
+      - '**'
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  verify:
+    name: Lint, Test & Build
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: 'npm'
+
+      - name: Install Dependencies
+        run: npm ci
+
+      - name: Run Type Check & Lint (Gate 1)
+        run: npm run lint
+
+      - name: Run Test Suite (Gate 2)
+        run: npm test
+
+      - name: Build Web Application Bundle (Gate 3)
+        run: npm run build

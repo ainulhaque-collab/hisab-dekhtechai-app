@@ -30,9 +30,26 @@ export class RealGoogleDriveTransport implements DriveTransport {
   private accessToken: string;
   private baseUrl = 'https://www.googleapis.com/drive/v3';
   private uploadUrl = 'https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart';
+  private fetchFn: typeof fetch = (...args) => fetch(...args);
+  private initialRetryDelayMs = 500;
+  private tokenProvider?: (forceRenew?: boolean) => Promise<string>;
 
-  constructor(accessToken: string) {
+  constructor(
+    accessToken: string,
+    options?: {
+      baseUrl?: string;
+      uploadUrl?: string;
+      customFetch?: typeof fetch;
+      initialRetryDelayMs?: number;
+      tokenProvider?: (forceRenew?: boolean) => Promise<string>;
+    }
+  ) {
     this.accessToken = accessToken;
+    if (options?.baseUrl) this.baseUrl = options.baseUrl;
+    if (options?.uploadUrl) this.uploadUrl = options.uploadUrl;
+    if (options?.customFetch) this.fetchFn = options.customFetch;
+    if (options?.initialRetryDelayMs !== undefined) this.initialRetryDelayMs = options.initialRetryDelayMs;
+    if (options?.tokenProvider) this.tokenProvider = options.tokenProvider;
   }
 
   public setAccessToken(token: string): void {
@@ -130,11 +147,42 @@ export class RealGoogleDriveTransport implements DriveTransport {
     maxRetries = 3
   ): Promise<Response> {
     let attempt = 0;
-    let delay = 500;
+    let authRetryCount = 0;
+    let delay = this.initialRetryDelayMs;
 
     while (true) {
       try {
-        const res = await fetch(input, init);
+        const res = await this.fetchFn(input, init);
+        if (res.status === 401 && this.tokenProvider && authRetryCount === 0) {
+          authRetryCount++;
+          attempt++;
+          try {
+            const freshToken = await this.tokenProvider(true);
+            if (!freshToken || freshToken === this.accessToken) {
+              console.warn('Token provider returned same or empty token on 401.');
+              return res;
+            }
+            this.accessToken = freshToken;
+            if (init && init.headers) {
+              if (init.headers instanceof Headers) {
+                init.headers.set('Authorization', `Bearer ${freshToken}`);
+              } else if (Array.isArray(init.headers)) {
+                const item = init.headers.find(([k]) => k.toLowerCase() === 'authorization');
+                if (item) item[1] = `Bearer ${freshToken}`;
+                else init.headers.push(['Authorization', `Bearer ${freshToken}`]);
+              } else {
+                (init.headers as any)['Authorization'] = `Bearer ${freshToken}`;
+              }
+            }
+            continue;
+          } catch (e) {
+            console.warn('Token provider failed to refresh token on 401:', e);
+            return res;
+          }
+        }
+        if (res.status === 401) {
+          return res;
+        }
         if (res.status === 429 || (res.status >= 500 && res.status <= 599)) {
           attempt++;
           if (attempt >= maxRetries) return res;
@@ -167,20 +215,20 @@ export class RealGoogleDriveTransport implements DriveTransport {
 
   public async getQuotaStatus(): Promise<{ usedBytes: number; totalBytes: number; isFull: boolean }> {
     const url = `${this.baseUrl}/about?fields=storageQuota`;
-    const res = await fetch(url, {
+    const res = await this.fetchWithRetry(url, {
       headers: {
         Authorization: `Bearer ${this.accessToken}`,
       },
     });
 
     if (!res.ok) {
-      return { usedBytes: 0, totalBytes: 15 * 1024 * 1024 * 1024, isFull: false };
+      this.handleHttpError(res.status, await res.text());
     }
 
     const data = await res.json();
     const quota = data.storageQuota;
     const used = Number(quota?.usage || 0);
-    const limit = Number(quota?.limit || 15 * 1024 * 1024 * 1024);
+    const limit = Number(quota?.limit || 0);
     return {
       usedBytes: used,
       totalBytes: limit,
@@ -218,14 +266,36 @@ export class SimulatedGoogleDriveTransport implements DriveTransport {
   private static sharedAppDataFolder: Map<string, { meta: DriveFileMetadata; content: string }> =
     new Map();
 
-  public simulateFault: 'none' | '401_expired' | '403_quota' | '429_rate_limit' | '500_server_error' =
-    'none';
+  public simulateFault:
+    | 'none'
+    | '401_expired'
+    | '403_quota'
+    | '429_rate_limit'
+    | '500_server_error'
+    | 'upload_interrupted'
+    | 'network_disconnected' = 'none';
+
+  constructor() {
+    this.assertNotProduction();
+  }
+
+  private assertNotProduction(): void {
+    const isProd =
+      (typeof process !== 'undefined' && process.env && process.env.NODE_ENV === 'production') ||
+      (typeof import.meta !== 'undefined' && (import.meta as any).env?.PROD === true);
+    if (isProd) {
+      throw new Error(
+        'Security Error: Simulated Google Drive cloud storage is strictly forbidden in production mode.'
+      );
+    }
+  }
 
   public static clearSharedCloud(): void {
     SimulatedGoogleDriveTransport.sharedAppDataFolder.clear();
   }
 
   public async listAppDataFiles(): Promise<DriveFileMetadata[]> {
+    this.assertNotProduction();
     this.checkSimulatedFault();
     return Array.from(SimulatedGoogleDriveTransport.sharedAppDataFolder.values()).map((v) => v.meta);
   }
@@ -235,6 +305,9 @@ export class SimulatedGoogleDriveTransport implements DriveTransport {
     contentJson: string
   ): Promise<{ fileId: string; name: string }> {
     this.checkSimulatedFault();
+    if (this.simulateFault === 'upload_interrupted') {
+      throw new Error('Network error: upload stream interrupted unexpectedly.');
+    }
     const fileId = 'gdrive-file-' + Math.random().toString(36).substring(2, 10);
     const meta: DriveFileMetadata = {
       id: fileId,
@@ -288,6 +361,9 @@ export class SimulatedGoogleDriveTransport implements DriveTransport {
     }
     if (this.simulateFault === '500_server_error') {
       throw new Error('Google Drive 500 Server Error: remote service temporarily unavailable.');
+    }
+    if (this.simulateFault === 'network_disconnected') {
+      throw new Error('Failed to fetch: network unavailable.');
     }
   }
 }

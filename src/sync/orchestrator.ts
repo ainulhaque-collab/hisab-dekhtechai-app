@@ -19,6 +19,8 @@ import {
 } from '../contracts/types';
 import { canonicalJson, computeSha256 } from './canonical';
 import { generateUUID } from '../domain/journal';
+import { GoogleUserProfile, computeOwnerSubjectHash } from '../auth/googleAuth';
+import { workspaceMedia } from '../storage/workspaceMedia';
 
 export type SyncStatusState =
   | 'idle'
@@ -51,9 +53,10 @@ export class SyncOrchestrator {
   private isPaused = false;
   private lastSuccessfulSyncAt: string | null = null;
   private lastError: string | null = null;
-  private currentState: SyncStatusState = 'synced_verified';
+  private currentState: SyncStatusState = 'idle';
   private listeners: Set<SyncEventListener> = new Set();
   private isSyncInProgress = false;
+  private bootstrapInProgress = false;
 
   constructor(db: LocalDatabase, transport: DriveTransport) {
     this.db = db;
@@ -170,7 +173,7 @@ export class SyncOrchestrator {
    * 4. Update status honestly
    */
   public async triggerSync(forceRetryAuth = true): Promise<void> {
-    if (this.isSyncInProgress) return;
+    if (this.isSyncInProgress || this.bootstrapInProgress) return;
     if (this.isPaused) return;
 
     if (forceRetryAuth) {
@@ -188,6 +191,19 @@ export class SyncOrchestrator {
       this.currentState = 'auth_required';
       this.notifyListeners();
       return;
+    }
+
+    const localOwner = this.db.getIdentity()?.ownerSubjectHash;
+    const isProd =
+      (typeof process !== 'undefined' && process.env && process.env.NODE_ENV === 'production') ||
+      (typeof import.meta !== 'undefined' && (import.meta as any).env?.PROD === true);
+
+    if (this.isAuthorized && isProd && !localOwner) {
+      this.currentState = 'auth_required';
+      this.lastError =
+        'Security Error: Strict dataset ownership requires authenticated user owner identity in production.';
+      this.notifyListeners();
+      throw new Error(this.lastError);
     }
 
     this.isSyncInProgress = true;
@@ -219,6 +235,9 @@ export class SyncOrchestrator {
       if (msg.includes('401') || msg.includes('Unauthorized')) {
         this.currentState = 'auth_required';
         this.isAuthorized = false;
+      } else if (msg.includes('403') && msg.includes('Forbidden')) {
+        this.currentState = 'auth_required';
+        this.isAuthorized = false;
       } else if (msg.includes('403') || msg.includes('Quota')) {
         this.currentState = 'quota_full';
       } else if (msg.includes('network') || msg.includes('Failed to fetch')) {
@@ -244,9 +263,20 @@ export class SyncOrchestrator {
     const toSeq = pendingOps[pendingOps.length - 1].seq;
     const batchId = generateUUID();
 
+    const localOwner = this.db.getIdentity()?.ownerSubjectHash;
+    const isProd =
+      (typeof process !== 'undefined' && process.env && process.env.NODE_ENV === 'production') ||
+      (typeof import.meta !== 'undefined' && (import.meta as any).env?.PROD === true);
+
+    if (this.isAuthorized && isProd && !localOwner) {
+      throw new Error(
+        'Security Error: Cannot sync authenticated dataset in production without verified owner identity.'
+      );
+    }
+
     const batchData = {
       protocolVersion: 1 as const,
-      ownerHash: this.db.getIdentity()?.ownerSubjectHash || 'owner',
+      ownerHash: localOwner || 'owner',
       deviceId,
       batchId,
       fromSeq,
@@ -268,6 +298,96 @@ export class SyncOrchestrator {
       toSeq
     ).padStart(12, '0')}-${batchId}.json`;
 
+    // Robust Duplicate Prevention: Verify candidate remote file content, hash, and operation IDs
+    try {
+      const remoteFiles = await this.transport.listAppDataFiles();
+      const candidates = remoteFiles.filter(
+        (f) =>
+          f.name === fileName ||
+          f.name.startsWith(
+            `hsc-v1-ops-${deviceId}-${String(fromSeq).padStart(12, '0')}-${String(toSeq).padStart(12, '0')}`
+          )
+      );
+
+      for (const candidate of candidates) {
+        try {
+          const remoteRaw = await this.transport.downloadBatchFile(candidate.id);
+          const candidateBatch: SyncBatch = JSON.parse(remoteRaw);
+
+          // 1. Verify candidate has immutable batch identity and valid protocol
+          if (
+            !candidateBatch ||
+            candidateBatch.protocolVersion !== 1 ||
+            !candidateBatch.batchId ||
+            typeof candidateBatch.batchId !== 'string' ||
+            !candidateBatch.batchSha256
+          ) {
+            continue;
+          }
+
+          // 2. Verify candidate remote file's own cryptographic hash integrity
+          const candidateDataToHash = {
+            protocolVersion: candidateBatch.protocolVersion,
+            ownerHash: candidateBatch.ownerHash,
+            deviceId: candidateBatch.deviceId,
+            batchId: candidateBatch.batchId,
+            fromSeq: candidateBatch.fromSeq,
+            toSeq: candidateBatch.toSeq,
+            operations: candidateBatch.operations,
+            createdAtUtc: candidateBatch.createdAtUtc,
+          };
+          const computedHash = await SyncOrchestrator.computeBatchHash(candidateDataToHash);
+          if (computedHash !== candidateBatch.batchSha256) {
+            console.warn(`Candidate batch ${candidate.name} has invalid hash integrity.`);
+            continue;
+          }
+
+          // 3. Verify deviceId and sequence range match
+          if (
+            candidateBatch.deviceId !== deviceId ||
+            candidateBatch.fromSeq !== fromSeq ||
+            candidateBatch.toSeq !== toSeq
+          ) {
+            continue;
+          }
+
+          // 4. Verify dataset owner matches if authenticated
+          if (localOwner && candidateBatch.ownerHash !== localOwner) {
+            continue;
+          }
+
+          // 5. Verify operations count, IDs, sequence numbers, and content SHA-256
+          if (
+            !Array.isArray(candidateBatch.operations) ||
+            candidateBatch.operations.length !== pendingOps.length
+          ) {
+            continue;
+          }
+
+          const allOpsMatch = pendingOps.every((pendingOp, idx) => {
+            const remoteOp = candidateBatch.operations[idx];
+            return (
+              remoteOp &&
+              remoteOp.operationId === pendingOp.operationId &&
+              remoteOp.seq === pendingOp.seq &&
+              remoteOp.contentSha256 === pendingOp.contentSha256
+            );
+          });
+
+          if (allOpsMatch) {
+            // Verified identical immutable batch is already safely present on Drive!
+            const opIds = pendingOps.map((op) => op.operationId);
+            await this.db.markOutboxUploaded(opIds, candidate.id);
+            return;
+          }
+        } catch (candidateErr) {
+          console.warn(`Could not verify candidate duplicate file ${candidate.name}:`, candidateErr);
+        }
+      }
+    } catch (e) {
+      // Fall through to upload if remote listing is not available
+    }
+
     // Upload to Drive appDataFolder
     const uploadReceipt = await this.transport.uploadBatchFile(
       fileName,
@@ -276,13 +396,24 @@ export class SyncOrchestrator {
 
     // Atomically mark outbox operations as uploaded
     const opIds = pendingOps.map((op) => op.operationId);
-    this.db.markOutboxUploaded(opIds, uploadReceipt.fileId);
+    await this.db.markOutboxUploaded(opIds, uploadReceipt.fileId);
   }
 
   /**
    * Downloads all batch files from Drive appDataFolder, validates integrity, and reconciles operations.
    */
   private async downloadAndReconcileRemoteBatches(): Promise<void> {
+    const isProd =
+      (typeof process !== 'undefined' && process.env && process.env.NODE_ENV === 'production') ||
+      (typeof import.meta !== 'undefined' && (import.meta as any).env?.PROD === true);
+    const localOwner = this.db.getIdentity()?.ownerSubjectHash;
+
+    if (this.isAuthorized && isProd && !localOwner) {
+      throw new Error(
+        'Security Error: Cannot apply remote sync batches in production without a verified local Google owner identity.'
+      );
+    }
+
     const remoteFiles = await this.transport.listAppDataFiles();
 
     // Filter valid batch files: hsc-v1-ops-*
@@ -291,6 +422,7 @@ export class SyncOrchestrator {
     // Sort files deterministically
     batchFiles.sort((a, b) => a.name.localeCompare(b.name));
 
+    let failedFiles = 0;
     for (const file of batchFiles) {
       try {
         const fileContent = await this.transport.downloadBatchFile(file.id);
@@ -298,7 +430,26 @@ export class SyncOrchestrator {
 
         // Verification checks
         if (batch.protocolVersion !== 1) {
-          console.warn(`Unsupported protocol version ${batch.protocolVersion} in file ${file.name}`);
+          throw new Error('Unsupported synchronization protocol. Update this app before syncing.');
+        }
+
+        // Validate dataset owner identity against local owner
+        if (!batch.ownerHash) {
+          console.warn(
+            `Security Warning: Remote batch ${file.name} is missing ownerHash. Skipping unowned batch.`
+          );
+          continue;
+        }
+        if (localOwner && batch.ownerHash !== localOwner) {
+          console.warn(
+            `Security Warning: Remote batch ${file.name} belongs to owner ${batch.ownerHash}, expected ${localOwner}. Skipping foreign batch.`
+          );
+          continue;
+        }
+        if (isProd && !localOwner) {
+          console.warn(
+            `Security Warning: Remote batch ${file.name} cannot be applied without verified local owner. Skipping.`
+          );
           continue;
         }
 
@@ -306,17 +457,121 @@ export class SyncOrchestrator {
         if (batch.batchSha256) {
           const recomputedHash = await SyncOrchestrator.computeBatchHash(batch);
           if (batch.batchSha256 !== recomputedHash) {
-            console.warn(`Batch SHA-256 mismatch in ${file.name}. Skipping corrupted file.`);
-            continue;
+            throw new Error('Remote batch integrity verification failed.');
           }
         }
 
         // Apply operations
         await this.applyBatchOperations(batch);
       } catch (fileErr) {
+        failedFiles++;
         console.error(`Failed to download/parse remote file ${file.name}:`, fileErr);
       }
     }
+    if (failedFiles) throw new Error('Remote synchronization verification is incomplete. Retry without clearing local records.');
+  }
+
+  /**
+   * Safe First-Device / New-Device Bootstrap and Restore:
+   * 1. Requires verified authenticated Google user profile (with subjectHash).
+   * 2. Prevents silent reassignment of an existing non-empty dataset to a different Google account.
+   * 3. Preserves any offline transactions recorded prior to authentication by adopting them under the verified owner.
+   * 4. Downloads and applies all remote batches from Google Drive belonging to this verified owner.
+   */
+  public async bootstrapAndRestore(profile: GoogleUserProfile, consentToBindOffline = false): Promise<{
+    restoredOpsCount: number;
+    verifiedOwner: string;
+    preservedOfflineOpsCount: number;
+  }> {
+    if (this.bootstrapInProgress || this.isSyncInProgress) throw new Error('Synchronization is busy. Try connecting again when it finishes.');
+    this.bootstrapInProgress = true;
+    try { return await this.bootstrapIdentity(profile, consentToBindOffline); }
+    finally { this.bootstrapInProgress = false; }
+  }
+
+  private async bootstrapIdentity(profile: GoogleUserProfile, consentToBindOffline = false): Promise<{
+    restoredOpsCount: number;
+    verifiedOwner: string;
+    preservedOfflineOpsCount: number;
+  }> {
+    if (!profile || !profile.subjectHash) {
+      throw new Error('Bootstrap and restore requires a verified Google user profile with subjectHash.');
+    }
+    await this.db.waitForPendingWrites();
+    if (!profile.accessToken || !profile.isDriveAuthorized || profile.subjectHash !== await computeOwnerSubjectHash(profile.subjectId)) {
+      throw new Error('Verified Google authorization is required before binding this dataset.');
+    }
+
+    const currentOwner = this.db.getIdentity()?.ownerSubjectHash;
+    const rawState = this.db.getRawState();
+    const hasTransactions = rawState.journalTransactions.size > 0;
+    const hasSyncOps = rawState.syncOperations.size > 0;
+    const isNonEmpty = hasTransactions || hasSyncOps;
+
+    // 1. Prevent silent reassignment of an existing non-empty dataset to another Google account
+    if (currentOwner && currentOwner !== profile.subjectHash) {
+      throw new Error(
+        `Security Error: Cannot reassign existing non-empty dataset belonging to owner (${currentOwner}) to a different Google account (${profile.subjectHash}).`
+      );
+    }
+
+    const temporary = (owner?: string) => !owner || owner === 'local-owner' || owner === 'unassigned';
+    if (Array.from(rawState.workspaces.values()).some(ws => !temporary(ws.ownerSubjectHash) && ws.ownerSubjectHash !== profile.subjectHash) ||
+      Array.from(rawState.syncOperations.values()).some(op => !temporary(op.ownerHash) && op.ownerHash !== profile.subjectHash)) {
+      throw new Error('Security Error: Foreign workspace or operation ownership prevents first-owner binding.');
+    }
+    if (!currentOwner && isNonEmpty && !consentToBindOffline) {
+      throw new Error('Explicit consent is required to bind existing offline records to this Google account.');
+    }
+
+    // 2. Preserve offline transactions: if dataset was created offline before login (or by this owner)
+    let preservedOfflineOpsCount = 0;
+    await this.db.beginTransaction();
+    try {
+    if ((!currentOwner || currentOwner === profile.subjectHash) && isNonEmpty) {
+      for (const op of rawState.syncOperations.values()) {
+        if (!op.ownerHash || op.ownerHash === 'local-owner' || op.ownerHash === 'unassigned') {
+          op.ownerHash = profile.subjectHash;
+          preservedOfflineOpsCount++;
+        }
+      }
+    }
+
+    for (const ws of rawState.workspaces.values()) {
+      if (temporary(ws.ownerSubjectHash)) ws.ownerSubjectHash = profile.subjectHash;
+    }
+    // Bootstrap existing offline workspace definitions before their account/journal operations.
+    for (const ws of rawState.workspaces.values()) {
+      if (!Array.from(rawState.syncOperations.values()).some(op => op.type === 'workspace.create' && op.entityId === ws.id))
+        this.db.queueSyncOp('workspace.create', ws.id, { workspace: { ...ws } });
+    }
+    for (const op of rawState.syncOperations.values()) {
+      if (op.type === 'workspace.create' && temporary(op.payload.workspace?.ownerSubjectHash)) {
+        op.payload.workspace.ownerSubjectHash = profile.subjectHash;
+        op.contentSha256 = await computeSha256(canonicalJson(op.payload));
+      }
+      if (temporary(op.ownerHash)) op.ownerHash = profile.subjectHash;
+    }
+
+    // 3. Establish verified identity on database
+    this.db.setIdentity(profile.subjectHash, profile.displayName);
+    await this.db.commitTransaction();
+    } catch (error) { await this.db.rollbackTransaction(); throw error; }
+    // Independent asset-store failure keeps originals intact; reconnect retries the claim.
+    await workspaceMedia.claimOfflineAssets(Array.from(this.db.getRawState().workspaces.keys()), profile.subjectHash)
+      .catch(() => console.warn('Workspace image ownership migration will retry on reconnect.'));
+    this.isAuthorized = true;
+
+    // 4. Trigger sync to download and apply all remote batches belonging to this verified owner,
+    // and upload any preserved offline outbox operations to Google Drive
+    this.bootstrapInProgress = false;
+    await this.triggerSync();
+
+    return {
+      restoredOpsCount: this.db.getRawState().appliedOperations.size,
+      verifiedOwner: profile.subjectHash,
+      preservedOfflineOpsCount,
+    };
   }
 
   /**
@@ -325,9 +580,33 @@ export class SyncOrchestrator {
   public async applyBatchOperations(batch: SyncBatch): Promise<void> {
     const myDeviceId = this.db.getDeviceId();
     const isFromSelf = batch.deviceId === myDeviceId;
+    const isProd =
+      (typeof process !== 'undefined' && process.env && process.env.NODE_ENV === 'production') ||
+      (typeof import.meta !== 'undefined' && (import.meta as any).env?.PROD === true);
+    const localOwner = this.db.getIdentity()?.ownerSubjectHash;
 
+    if (this.isAuthorized && isProd && !localOwner) {
+      throw new Error(
+        'Security Error: Cannot apply operations in production without a verified local Google owner identity.'
+      );
+    }
+
+    await this.db.beginTransaction();
+    try {
     for (const op of batch.operations) {
-      // 1. Idempotency: if already applied, skip
+      // 1. Validate dataset owner identity on operation
+      if (!op.ownerHash) {
+        console.warn(`Security Warning: Operation ${op.operationId} missing ownerHash. Skipping.`);
+        continue;
+      }
+      if (localOwner && op.ownerHash !== localOwner) {
+        console.warn(
+          `Security Warning: Operation ${op.operationId} owner mismatch (${op.ownerHash} != ${localOwner}). Skipping.`
+        );
+        continue;
+      }
+
+      // 2. Idempotency: if already applied, skip
       if (this.db.getRawState().appliedOperations.has(op.operationId)) {
         continue;
       }
@@ -348,7 +627,8 @@ export class SyncOrchestrator {
       this.db.getRawState().appliedOperations.add(op.operationId);
     }
 
-    await this.db.persist();
+    await this.db.commitTransaction();
+    } catch (error) { await this.db.rollbackTransaction(); throw error; }
   }
 
   private async applySingleOperation(op: SyncOperation, isFromSelf: boolean): Promise<void> {
@@ -358,6 +638,20 @@ export class SyncOrchestrator {
       case 'journal.post': {
         const balanced: BalancedJournal = payload.balancedJournal;
         if (balanced && balanced.transaction && balanced.lines) {
+          const assetLine = balanced.lines.find((l) => !l.categoryId);
+          const assetAccId = assetLine?.accountId || balanced.lines[0]?.accountId;
+          // Check employee permissions only for non-owner employee operations
+          const isEmployeeOp = !!op.authorSubjectHash && op.authorSubjectHash !== op.ownerHash;
+          if (
+            isEmployeeOp &&
+            assetAccId &&
+            !this.db.canUserWriteAccount(op.authorSubjectHash, assetAccId, op.type)
+          ) {
+            console.warn(
+              `Permission Denied: Employee ${op.authorSubjectHash} cannot write account ${assetAccId}`
+            );
+            break;
+          }
           const fullTx: JournalTransaction = {
             ...balanced.transaction,
             createdOpId: op.operationId,
@@ -414,7 +708,7 @@ export class SyncOrchestrator {
               ],
             },
           };
-          this.db.addConflict(conflict);
+          await this.db.addConflict(conflict);
           break;
         }
 
@@ -445,8 +739,24 @@ export class SyncOrchestrator {
       }
 
       case 'workspace.create':
-        if (payload.workspace) {
+        if (payload.workspace && payload.workspace.ownerSubjectHash === op.ownerHash &&
+          !this.db.getWorkspace(payload.workspace.id)?.deletedAt) {
           this.db.getRawState().workspaces.set(payload.workspace.id, payload.workspace);
+        }
+        break;
+
+      case 'workspace.update':
+        if (payload.id && this.db.getRawState().workspaces.has(payload.id)) {
+          const ws = this.db.getRawState().workspaces.get(payload.id)!;
+          if (payload.name) ws.name = payload.name;
+          if (payload.kind) ws.kind = payload.kind;
+        }
+        break;
+
+      case 'workspace.archive':
+        if (payload.id && this.db.getRawState().workspaces.has(payload.id)) {
+          this.db.getRawState().workspaces.get(payload.id)!.archivedAt =
+            payload.archivedAt || new Date().toISOString();
         }
         break;
 
@@ -456,9 +766,118 @@ export class SyncOrchestrator {
         }
         break;
 
+      case 'account.update':
+        if (payload.id && this.db.getRawState().accounts.has(payload.id)) {
+          const acc = this.db.getRawState().accounts.get(payload.id)!;
+          if (payload.name) acc.name = payload.name;
+          if (payload.accountNumberMasked !== undefined) acc.accountNumberMasked = payload.accountNumberMasked;
+          if (payload.kind) acc.kind = payload.kind;
+          if (payload.groupId !== undefined) acc.groupId = payload.groupId;
+        }
+        break;
+
+      case 'account.archive':
+        if (payload.id && this.db.getRawState().accounts.has(payload.id)) {
+          this.db.getRawState().accounts.get(payload.id)!.archivedAt =
+            payload.archivedAt || new Date().toISOString();
+        }
+        break;
+
+      case 'account.restore':
+        if (payload.id && this.db.getRawState().accounts.has(payload.id)) {
+          this.db.getRawState().accounts.get(payload.id)!.archivedAt = null;
+        }
+        break;
+
+      case 'account.delete':
+        if (payload.id) {
+          this.db.getRawState().accounts.delete(payload.id);
+        }
+        break;
+
+      case 'group.create':
+        if (payload.group) {
+          this.db.getRawState().accountGroups.set(payload.group.id, payload.group);
+        }
+        break;
+
+      case 'group.update':
+        if (payload.id && this.db.getRawState().accountGroups.has(payload.id)) {
+          const g = this.db.getRawState().accountGroups.get(payload.id)!;
+          if (payload.name) g.name = payload.name;
+          if (payload.icon !== undefined) g.icon = payload.icon;
+          if (payload.description !== undefined) g.description = payload.description;
+        }
+        break;
+
+      case 'group.archive':
+        if (payload.id && this.db.getRawState().accountGroups.has(payload.id)) {
+          this.db.getRawState().accountGroups.get(payload.id)!.archivedAt =
+            payload.archivedAt || new Date().toISOString();
+        }
+        break;
+
+      case 'group.restore':
+        if (payload.id && this.db.getRawState().accountGroups.has(payload.id)) {
+          this.db.getRawState().accountGroups.get(payload.id)!.archivedAt = null;
+        }
+        break;
+
+      case 'permission.grant':
+        if (payload.grant) {
+          this.db.getRawState().accountPermissions.set(payload.grant.id, payload.grant);
+        }
+        break;
+
+      case 'permission.revoke':
+        if (payload.id && this.db.getRawState().accountPermissions.has(payload.id)) {
+          this.db.getRawState().accountPermissions.get(payload.id)!.revokedAt =
+            payload.revokedAt || new Date().toISOString();
+        }
+        break;
+
       case 'category.create':
         if (payload.category) {
           this.db.getRawState().categories.set(payload.category.id, payload.category);
+        }
+        break;
+
+      case 'category.update':
+        if (payload.id && this.db.getRawState().categories.has(payload.id)) {
+          const c = this.db.getRawState().categories.get(payload.id)!;
+          if (payload.name) c.name = payload.name;
+          if (payload.nameEn !== undefined) c.nameEn = payload.nameEn;
+          if (payload.color !== undefined) c.color = payload.color;
+        }
+        break;
+
+      case 'category.archive':
+        if (payload.id && this.db.getRawState().categories.has(payload.id)) {
+          this.db.getRawState().categories.get(payload.id)!.archivedAt =
+            payload.archivedAt || new Date().toISOString();
+        }
+        break;
+
+      case 'party.create':
+        if (payload.party) {
+          this.db.getRawState().parties.set(payload.party.id, payload.party);
+        }
+        break;
+
+      case 'party.update':
+        if (payload.id && this.db.getRawState().parties.has(payload.id)) {
+          const p = this.db.getRawState().parties.get(payload.id)!;
+          if (payload.name) p.name = payload.name;
+          if (payload.phone !== undefined) p.phone = payload.phone;
+          if (payload.role !== undefined) p.role = payload.role;
+          if (payload.notes !== undefined) p.notes = payload.notes;
+        }
+        break;
+
+      case 'party.archive':
+        if (payload.id && this.db.getRawState().parties.has(payload.id)) {
+          this.db.getRawState().parties.get(payload.id)!.archivedAt =
+            payload.archivedAt || new Date().toISOString();
         }
         break;
 
@@ -482,7 +901,7 @@ export class SyncOrchestrator {
         break;
 
       default:
-        console.warn(`Unhandled operation type: ${op.type}`);
+        throw new Error('Unsupported synchronization operation. Update this app before syncing.');
     }
   }
 }

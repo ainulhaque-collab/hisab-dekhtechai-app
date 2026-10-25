@@ -1,3 +1,4 @@
+import { AppSelect } from './AppSelect';
 import React, { useState, useMemo } from 'react';
 import { useApp } from '../context/AppContext';
 import { formatBDT, parsePaisaString, normalizeNumericAmountInput } from '../domain/money';
@@ -301,7 +302,7 @@ export const HistoryTab: React.FC<HistoryTabProps> = ({
         <div className="flex items-center gap-1.5 flex-wrap">
           {/* Party Filter (for business workspaces) */}
           {isBusiness && parties.length > 0 && (
-            <select
+            <AppSelect aria-label={isEn ? 'Filter by Person' : 'ব্যক্তি দিয়ে বাছাই'}
               value={partyFilter}
               onChange={(e) => setPartyFilter(e.target.value)}
               className="px-2.5 py-1 bg-white border border-slate-200 rounded-lg text-[11px] font-medium text-slate-700 shadow-2xs focus:outline-none"
@@ -313,11 +314,11 @@ export const HistoryTab: React.FC<HistoryTabProps> = ({
                 </option>
               ))}
               <option value="none">{isEn ? 'General' : 'সাধারণ'}</option>
-            </select>
+            </AppSelect>
           )}
 
           {/* Account Filter */}
-          <select
+          <AppSelect aria-label={isEn ? 'Filter by Account' : 'অ্যাকাউন্ট দিয়ে বাছাই'}
             value={accountFilter}
             onChange={(e) => setAccountFilter(e.target.value)}
             className="px-2.5 py-1 bg-white border border-slate-200 rounded-lg text-[11px] font-medium text-slate-700 shadow-2xs focus:outline-none"
@@ -328,10 +329,10 @@ export const HistoryTab: React.FC<HistoryTabProps> = ({
                 {a.name}
               </option>
             ))}
-          </select>
+          </AppSelect>
 
           {/* Category Filter */}
-          <select
+          <AppSelect aria-label={isEn ? 'Filter by Category' : 'খাত দিয়ে বাছাই'}
             value={categoryFilter}
             onChange={(e) => setCategoryFilter(e.target.value)}
             className="px-2.5 py-1 bg-white border border-slate-200 rounded-lg text-[11px] font-medium text-slate-700 shadow-2xs focus:outline-none"
@@ -342,7 +343,7 @@ export const HistoryTab: React.FC<HistoryTabProps> = ({
                 {c.name}
               </option>
             ))}
-          </select>
+          </AppSelect>
         </div>
       </div>
 
@@ -725,7 +726,7 @@ export const HistoryTab: React.FC<HistoryTabProps> = ({
                   <label className="block text-slate-700 font-semibold mb-1">
                     {isEn ? 'Account' : 'অ্যাকাউন্ট'}
                   </label>
-                  <select
+                  <AppSelect aria-label={isEn ? 'Account' : 'অ্যাকাউন্ট'}
                     value={editAccountId}
                     onChange={(e) => setEditAccountId(e.target.value)}
                     className="w-full px-3 py-2 bg-slate-50 border border-slate-300 rounded-xl focus:bg-white focus:outline-none focus:ring-2 focus:ring-blue-600"
@@ -735,14 +736,14 @@ export const HistoryTab: React.FC<HistoryTabProps> = ({
                         {a.name}
                       </option>
                     ))}
-                  </select>
+                  </AppSelect>
                 </div>
 
                 <div>
                   <label className="block text-slate-700 font-semibold mb-1">
                     {isEn ? 'Category' : 'ক্যাটাগরি'}
                   </label>
-                  <select
+                  <AppSelect aria-label={isEn ? 'Category' : 'খাত'}
                     value={editCategoryId}
                     onChange={(e) => setEditCategoryId(e.target.value)}
                     className="w-full px-3 py-2 bg-slate-50 border border-slate-300 rounded-xl focus:bg-white focus:outline-none focus:ring-2 focus:ring-blue-600"
@@ -752,7 +753,7 @@ export const HistoryTab: React.FC<HistoryTabProps> = ({
                         {isEn && c.nameEn ? c.nameEn : c.name}
                       </option>
                     ))}
-                  </select>
+                  </AppSelect>
                 </div>
 
                 {/* Edit Associated Person / Party for Business Ledgers */}
@@ -761,7 +762,7 @@ export const HistoryTab: React.FC<HistoryTabProps> = ({
                     <label className="block text-slate-700 font-semibold mb-1">
                       {isEn ? 'Associated Person / Party' : 'সংশ্লিষ্ট ব্যক্তি / সদস্য'}
                     </label>
-                    <select
+                    <AppSelect aria-label={isEn ? 'Associated Person' : 'সংশ্লিষ্ট ব্যক্তি'}
                       value={editPartyId}
                       onChange={(e) => setEditPartyId(e.target.value)}
                       className="w-full px-3 py-2 bg-slate-50 border border-slate-300 rounded-xl focus:bg-white focus:outline-none focus:ring-2 focus:ring-blue-600"
@@ -772,7 +773,7 @@ export const HistoryTab: React.FC<HistoryTabProps> = ({
                           {p.name} ({getRoleLabel(p.role)})
                         </option>
                       ))}
-                    </select>
+                    </AppSelect>
                   </div>
                 )}
 

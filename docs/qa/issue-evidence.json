@@ -1,0 +1,234 @@
+{
+  "classification": "BLOCKED",
+  "baselineCommit": "35e0b7c499bdb0f0e271fe2ec7de5e7dc6b3b415",
+  "branch": "fix/android-pickers-sync-security-and-ux",
+  "appSourceCommits": [
+    "fe32422cb9874190ac7e5e122c2451faa1af8a0a",
+    "b89e79940d40324e78eecb61109dd6da85a70b0d"
+  ],
+  "remotePublication": "BLOCKED by automatic approval review; no owner approval received",
+  "pullRequest": null,
+  "newActionsRuns": [],
+  "apkArtifact": null,
+  "automatedTests": {
+    "pass": 73,
+    "fail": 0
+  },
+  "issueEvidence": [
+    {
+      "id": "BUG-008",
+      "files": [
+        "src/components/AppSelect.tsx",
+        "src/components/useDialog.ts",
+        "src/components/AccountPickerModal.tsx",
+        "src/components/AccountsTab.tsx",
+        "src/components/AddTransactionTab.tsx",
+        "src/components/HistoryTab.tsx",
+        "src/components/ReportsTab.tsx",
+        "src/components/PartiesModal.tsx",
+        "android/app/src/main/java/com/hisabdekhtechai/app/MainActivity.java"
+      ],
+      "appSourceCommits": [
+        "fe32422cb9874190ac7e5e122c2451faa1af8a0a",
+        "b89e79940d40324e78eecb61109dd6da85a70b0d"
+      ],
+      "automatedTests": "PASS — repository suite 73/73",
+      "tests": [
+        "src/test/approved_batch.test.ts",
+        "src/test/coin_audio.test.ts",
+        "src/test/google_authorization.test.ts",
+        "src/test/safety_corrections.test.ts",
+        "src/test/account_manage.test.ts"
+      ],
+      "physicalAndroid": "NOT VERIFIED",
+      "status": "Implemented; external acceptance blocked",
+      "dataSafety": "Synthetic restart/upgrade evidence preserves records, balances, enabled PIN, preferences and original pending IDs; no real device/customer data accessed"
+    },
+    {
+      "id": "BUG-009",
+      "files": [
+        "src/components/WorkspaceManager.tsx",
+        "src/components/ModalShell.tsx",
+        "src/components/Navbar.tsx",
+        "src/context/AppContext.tsx",
+        "src/storage/db.ts",
+        "src/contracts/types.ts",
+        "src/sync/orchestrator.ts"
+      ],
+      "appSourceCommits": [
+        "fe32422cb9874190ac7e5e122c2451faa1af8a0a",
+        "b89e79940d40324e78eecb61109dd6da85a70b0d"
+      ],
+      "automatedTests": "PASS — repository suite 73/73",
+      "tests": [
+        "src/test/approved_batch.test.ts",
+        "src/test/coin_audio.test.ts",
+        "src/test/google_authorization.test.ts",
+        "src/test/safety_corrections.test.ts",
+        "src/test/account_manage.test.ts"
+      ],
+      "physicalAndroid": "NOT VERIFIED",
+      "status": "Implemented; external acceptance blocked",
+      "dataSafety": "Synthetic restart/upgrade evidence preserves records, balances, enabled PIN, preferences and original pending IDs; no real device/customer data accessed"
+    },
+    {
+      "id": "BUG-010",
+      "files": [
+        "src/components/SyncModal.tsx",
+        "src/components/AuthModal.tsx",
+        "src/components/ModalShell.tsx",
+        "src/components/SettingsModal.tsx",
+        "src/context/AppContext.tsx"
+      ],
+      "appSourceCommits": [
+        "fe32422cb9874190ac7e5e122c2451faa1af8a0a",
+        "b89e79940d40324e78eecb61109dd6da85a70b0d"
+      ],
+      "automatedTests": "PASS — repository suite 73/73",
+      "tests": [
+        "src/test/approved_batch.test.ts",
+        "src/test/coin_audio.test.ts",
+        "src/test/google_authorization.test.ts",
+        "src/test/safety_corrections.test.ts",
+        "src/test/account_manage.test.ts"
+      ],
+      "physicalAndroid": "NOT VERIFIED",
+      "status": "Implemented; external acceptance blocked",
+      "dataSafety": "Synthetic restart/upgrade evidence preserves records, balances, enabled PIN, preferences and original pending IDs; no real device/customer data accessed"
+    },
+    {
+      "id": "BUG-011",
+      "files": [
+        "src/auth/googleAuth.ts",
+        "src/auth/nativeGoogle.ts",
+        "src/context/AppContext.tsx",
+        "src/sync/orchestrator.ts",
+        "src/drive/transport.ts",
+        "src/storage/db.ts",
+        "android/app/src/main/java/com/hisabdekhtechai/app/NativeGoogleDrivePlugin.java",
+        "android/app/src/main/java/com/hisabdekhtechai/app/MainActivity.java",
+        "android/app/build.gradle"
+      ],
+      "appSourceCommits": [
+        "fe32422cb9874190ac7e5e122c2451faa1af8a0a",
+        "b89e79940d40324e78eecb61109dd6da85a70b0d"
+      ],
+      "automatedTests": "PASS — repository suite 73/73",
+      "tests": [
+        "src/test/approved_batch.test.ts",
+        "src/test/coin_audio.test.ts",
+        "src/test/google_authorization.test.ts",
+        "src/test/safety_corrections.test.ts",
+        "src/test/account_manage.test.ts"
+      ],
+      "physicalAndroid": "NOT VERIFIED",
+      "status": "Implemented; external acceptance blocked",
+      "dataSafety": "Synthetic restart/upgrade evidence preserves records, balances, enabled PIN, preferences and original pending IDs; no real device/customer data accessed"
+    },
+    {
+      "id": "BUG-012",
+      "files": [
+        "src/services/soundService.ts",
+        "src/components/AddTransactionTab.tsx",
+        "public/audio/income.wav",
+        "public/audio/expense.wav",
+        "public/audio/transfer.wav",
+        "public/audio/LICENSE.md",
+        "scripts/generate_coin_audio.py"
+      ],
+      "appSourceCommits": [
+        "fe32422cb9874190ac7e5e122c2451faa1af8a0a",
+        "b89e79940d40324e78eecb61109dd6da85a70b0d"
+      ],
+      "automatedTests": "PASS — repository suite 73/73",
+      "tests": [
+        "src/test/approved_batch.test.ts",
+        "src/test/coin_audio.test.ts",
+        "src/test/google_authorization.test.ts",
+        "src/test/safety_corrections.test.ts",
+        "src/test/account_manage.test.ts"
+      ],
+      "physicalAndroid": "NOT VERIFIED",
+      "status": "Implemented; external acceptance blocked",
+      "dataSafety": "Synthetic restart/upgrade evidence preserves records, balances, enabled PIN, preferences and original pending IDs; no real device/customer data accessed"
+    },
+    {
+      "id": "FEAT-008",
+      "files": [
+        "src/security/biometric.ts",
+        "src/security/pinLock.ts",
+        "src/components/SecuritySettings.tsx",
+        "src/components/PinLockScreen.tsx",
+        "src/components/SettingsModal.tsx",
+        "src/App.tsx",
+        "android/app/src/main/java/com/hisabdekhtechai/app/BiometricUnlockPlugin.java",
+        "android/app/src/main/java/com/hisabdekhtechai/app/MainActivity.java",
+        "android/app/build.gradle"
+      ],
+      "appSourceCommits": [
+        "fe32422cb9874190ac7e5e122c2451faa1af8a0a",
+        "b89e79940d40324e78eecb61109dd6da85a70b0d"
+      ],
+      "automatedTests": "PASS — repository suite 73/73",
+      "tests": [
+        "src/test/approved_batch.test.ts",
+        "src/test/coin_audio.test.ts",
+        "src/test/google_authorization.test.ts",
+        "src/test/safety_corrections.test.ts",
+        "src/test/account_manage.test.ts"
+      ],
+      "physicalAndroid": "NOT VERIFIED",
+      "status": "Implemented; external acceptance blocked",
+      "dataSafety": "Synthetic restart/upgrade evidence preserves records, balances, enabled PIN, preferences and original pending IDs; no real device/customer data accessed"
+    },
+    {
+      "id": "FEAT-009",
+      "files": [
+        "src/storage/workspaceMedia.ts",
+        "src/components/WorkspaceAvatar.tsx",
+        "src/components/WorkspaceManager.tsx",
+        "src/components/Navbar.tsx",
+        "src/sync/orchestrator.ts"
+      ],
+      "appSourceCommits": [
+        "fe32422cb9874190ac7e5e122c2451faa1af8a0a",
+        "b89e79940d40324e78eecb61109dd6da85a70b0d"
+      ],
+      "automatedTests": "PASS — repository suite 73/73",
+      "tests": [
+        "src/test/approved_batch.test.ts",
+        "src/test/coin_audio.test.ts",
+        "src/test/google_authorization.test.ts",
+        "src/test/safety_corrections.test.ts",
+        "src/test/account_manage.test.ts"
+      ],
+      "physicalAndroid": "NOT VERIFIED",
+      "status": "Implemented; external acceptance blocked",
+      "dataSafety": "Synthetic restart/upgrade evidence preserves records, balances, enabled PIN, preferences and original pending IDs; no real device/customer data accessed"
+    },
+    {
+      "id": "FEAT-002",
+      "files": [
+        "src/domain/confirmation.ts",
+        "src/components/AccountsTab.tsx",
+        "src/storage/db.ts",
+        "src/test/account_manage.test.ts"
+      ],
+      "appSourceCommits": [
+        "fe32422cb9874190ac7e5e122c2451faa1af8a0a",
+        "b89e79940d40324e78eecb61109dd6da85a70b0d"
+      ],
+      "automatedTests": "PASS — repository suite 73/73",
+      "tests": [
+        "src/test/approved_batch.test.ts",
+        "src/test/coin_audio.test.ts",
+        "src/test/google_authorization.test.ts",
+        "src/test/safety_corrections.test.ts",
+        "src/test/account_manage.test.ts"
+      ],
+      "physicalAndroid": "NOT VERIFIED",
+      "status": "Implemented; external acceptance blocked",
+      "dataSafety": "Synthetic restart/upgrade evidence preserves records, balances, enabled PIN, preferences and original pending IDs; no real device/customer data accessed"
+    }
+  ]
+}

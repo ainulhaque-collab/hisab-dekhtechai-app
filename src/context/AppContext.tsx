@@ -5,13 +5,19 @@
  */
 
 import React, { createContext, useContext, useEffect, useState, useMemo } from 'react';
+import { Capacitor } from '@capacitor/core';
 import { LocalDatabase } from '../storage/db';
 import { SyncOrchestrator, SyncStatusInfo } from '../sync/orchestrator';
 import { SimulatedGoogleDriveTransport, RealGoogleDriveTransport } from '../drive/transport';
 import { GoogleAuthManager, GoogleUserProfile } from '../auth/googleAuth';
+import { generateUUID } from '../domain/journal';
 import {
   Workspace,
   Account,
+  AccountGroup,
+  AccountGroupSummary,
+  AccountPermissionGrant,
+  EmployeeRole,
   Category,
   JournalTransaction,
   ConflictRecord,
@@ -22,6 +28,7 @@ import {
   BusinessParty,
   PartyRole
 } from '../contracts/types';
+import { soundService, SoundPreferences } from '../services/soundService';
 
 export interface DeviceProfile {
   id: string;
@@ -45,6 +52,8 @@ interface AppContextType {
   setCurrentWorkspaceId: (id: UUID) => void;
   workspaces: Workspace[];
   accounts: Account[];
+  accountGroups: AccountGroup[];
+  accountPermissions: AccountPermissionGrant[];
   categories: Category[];
   parties: BusinessParty[];
   transactions: JournalTransaction[];
@@ -54,28 +63,92 @@ interface AppContextType {
   recurringRules: RecurringRule[];
   syncStatus: SyncStatusInfo;
   userProfile: GoogleUserProfile | null;
+  isLiveGoogleAuth: boolean;
   isOnline: boolean;
   setIsOnline: (online: boolean) => void;
   language: 'bn' | 'en';
   setLanguage: (lang: 'bn' | 'en') => void;
   refreshState: () => void;
   triggerManualSync: () => Promise<void>;
-  createWorkspace: (name: string, kind: 'personal' | 'business') => Workspace;
+  createWorkspace: (name: string, kind: 'personal' | 'business') => Promise<Workspace>;
   archiveWorkspace: (id: UUID) => boolean;
   restoreWorkspace: (id: UUID) => boolean;
   durabilityInfo: { type: string; isPersistent: boolean; warning?: string };
   createCategory: (name: string, kind: Category['kind'], parentId?: UUID | null, nameEn?: string) => Category;
   deleteCategory: (id: UUID) => void;
+  createAccount: (name: string, kind: Account['kind'], openingBalanceMinor?: string, accountNumberMasked?: string, classification?: Account['classification'], groupId?: UUID | null) => Account;
+  updateAccount: (id: UUID, updates: Partial<Pick<Account, 'name' | 'accountNumberMasked' | 'kind' | 'groupId'>>) => Account | null;
+  archiveAccount: (id: UUID) => boolean;
+  restoreAccount: (id: UUID) => boolean;
+  safeDeleteAccount: (id: UUID, confirmationText: string) => { success: boolean; mode: 'archived' | 'deleted'; error?: string };
+  createAccountGroup: (name: string, icon?: string, description?: string) => AccountGroup;
+  updateAccountGroup: (id: UUID, updates: Partial<Pick<AccountGroup, 'name' | 'icon' | 'description'>>) => AccountGroup | null;
+  archiveAccountGroup: (id: UUID) => boolean;
+  restoreAccountGroup: (id: UUID) => boolean;
+  addAccountToGroup: (accountId: UUID, groupId: UUID) => boolean;
+  removeAccountFromGroup: (accountId: UUID) => boolean;
+  getAccountGroupSummary: (groupId: UUID) => AccountGroupSummary | null;
+  grantAccountPermission: (employeeEmail: string, employeeSubjectHash: string, accountIds: UUID[], role: EmployeeRole) => AccountPermissionGrant;
+  revokeAccountPermission: (grantId: UUID) => boolean;
+  soundPrefs: SoundPreferences;
+  setSoundPrefs: (prefs: Partial<SoundPreferences>) => void;
   createParty: (name: string, role: PartyRole, phone?: string, notes?: string) => BusinessParty;
   deleteParty: (id: UUID) => void;
   editParty: (id: UUID, updates: Partial<Pick<BusinessParty, 'name' | 'phone' | 'role' | 'notes'>>) => void;
   deleteTransaction: (id: UUID, reason?: string) => Promise<void>;
   editTransaction: (id: UUID, cmd: any) => Promise<void>;
+  signInWithGoogle: () => Promise<GoogleUserProfile>;
+  bootstrapWithTestProfile: (profile: GoogleUserProfile) => Promise<void>;
+  updateUserProfile: (updates: {
+    displayName?: string;
+    photoUrl?: string;
+    phone?: string;
+    address?: string;
+  }) => GoogleUserProfile;
+  signOut: () => void;
 }
 
 const AppContext = createContext<AppContextType | null>(null);
 
 // Device database pool to simulate separate local SQLite databases on different phones
+const isProduction = (): boolean => {
+  return (
+    (typeof process !== 'undefined' && process.env && process.env.NODE_ENV === 'production') ||
+    (typeof import.meta !== 'undefined' && (import.meta as any).env?.PROD === true)
+  );
+};
+
+function getProductionDeviceProfile(): DeviceProfile {
+  let deviceId: string | null = null;
+  let deviceName = 'Hisab Device';
+  if (typeof localStorage !== 'undefined') {
+    try {
+      deviceId = localStorage.getItem('hisab_production_device_id_v1');
+      const savedName = localStorage.getItem('hisab_production_device_name_v1');
+      if (savedName) deviceName = savedName;
+    } catch {}
+  }
+  const finalDeviceId = deviceId || generateUUID();
+  if (!deviceId && typeof localStorage !== 'undefined') {
+    try {
+      localStorage.setItem('hisab_production_device_id_v1', finalDeviceId);
+    } catch {}
+  }
+  if (typeof navigator !== 'undefined') {
+    if (Capacitor.isNativePlatform()) {
+      deviceName = `Android Device (${Capacitor.getPlatform()})`;
+    } else {
+      const isMobile = /Android|iPhone|iPad|Mobile/i.test(navigator.userAgent);
+      deviceName = isMobile ? 'Mobile Browser' : 'Desktop Browser';
+    }
+  }
+  return {
+    id: finalDeviceId,
+    name: deviceName,
+    platform: Capacitor.isNativePlatform() ? 'android' : 'web',
+  };
+}
+
 const deviceDatabases: Map<string, LocalDatabase> = new Map();
 
 function getOrCreateDeviceDb(deviceId: string, deviceName: string): LocalDatabase {
@@ -89,18 +162,61 @@ function getOrCreateDeviceDb(deviceId: string, deviceName: string): LocalDatabas
 }
 
 export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
-  const [currentDevice, setCurrentDevice] = useState<DeviceProfile>(SIMULATED_DEVICES[0]);
+  const prod = isProduction();
+  const initialDevice: DeviceProfile = prod ? getProductionDeviceProfile() : SIMULATED_DEVICES[0];
+  const [currentDevice, setCurrentDevice] = useState<DeviceProfile>(initialDevice);
   const [db, setDb] = useState<LocalDatabase>(() =>
-    getOrCreateDeviceDb(SIMULATED_DEVICES[0].id, SIMULATED_DEVICES[0].name)
+    prod
+      ? (() => {
+          const mainDb = new LocalDatabase('hisab_dekhtechai_db');
+          mainDb.setDeviceIdentity(initialDevice.id, initialDevice.name);
+          return mainDb;
+        })()
+      : getOrCreateDeviceDb(SIMULATED_DEVICES[0].id, SIMULATED_DEVICES[0].name)
   );
 
-  const sharedTransport = useMemo(() => new SimulatedGoogleDriveTransport(), []);
-  const [sync, setSync] = useState<SyncOrchestrator>(() => new SyncOrchestrator(db, sharedTransport));
   const auth = useMemo(() => new GoogleAuthManager(), []);
+
+  const createSecureTokenProvider = (targetDb: LocalDatabase = db) => {
+    return async (forceRenew?: boolean): Promise<string> => {
+      const token = await auth.getValidAccessToken(forceRenew);
+      const activeOwnerHash = targetDb.getIdentity()?.ownerSubjectHash;
+      const currentAuthOwnerHash = auth.getProfile()?.subjectHash;
+      if (activeOwnerHash && currentAuthOwnerHash && activeOwnerHash !== currentAuthOwnerHash) {
+        throw new Error(
+          `Security Error: Renewed Google account owner (${currentAuthOwnerHash}) does not match dataset owner (${activeOwnerHash}).`
+        );
+      }
+      return token;
+    };
+  };
+
+  const sharedTransport = useMemo(() => {
+    if (prod) {
+      // In production mode, never instantiate simulated cloud storage
+      return new RealGoogleDriveTransport('', {
+        tokenProvider: createSecureTokenProvider(db),
+      });
+    }
+    return new SimulatedGoogleDriveTransport();
+  }, [prod, auth, db]);
+
+  const [sync, setSync] = useState<SyncOrchestrator>(() => new SyncOrchestrator(db, sharedTransport));
 
   const [currentWorkspaceId, setCurrentWorkspaceId] = useState<UUID>('ws-personal-default');
   const [workspaces, setWorkspaces] = useState<Workspace[]>([]);
   const [accounts, setAccounts] = useState<Account[]>([]);
+  const [accountGroups, setAccountGroups] = useState<AccountGroup[]>([]);
+  const [accountPermissions, setAccountPermissions] = useState<AccountPermissionGrant[]>([]);
+  const [soundPrefs, setSoundPrefsState] = useState<SoundPreferences>(() =>
+    soundService.getPreferences()
+  );
+
+  const setSoundPrefs = (prefs: Partial<SoundPreferences>) => {
+    soundService.setPreferences(prefs);
+    setSoundPrefsState(soundService.getPreferences());
+  };
+
   const [categories, setCategories] = useState<Category[]>([]);
   const [parties, setParties] = useState<BusinessParty[]>([]);
   const [transactions, setTransactions] = useState<JournalTransaction[]>([]);
@@ -110,7 +226,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   const [recurringRules, setRecurringRules] = useState<RecurringRule[]>([]);
   const [syncStatus, setSyncStatus] = useState<SyncStatusInfo>(() => sync.getStatus());
   const [userProfile, setUserProfile] = useState<GoogleUserProfile | null>(() => auth.getProfile());
-  const [isOnline, setIsOnlineState] = useState<boolean>(true);
+  const [isOnline, setIsOnlineState] = useState<boolean>(() => typeof navigator === 'undefined' || navigator.onLine);
   const [language, setLanguageState] = useState<'bn' | 'en'>(() => {
     if (typeof localStorage !== 'undefined') {
       const saved = localStorage.getItem('hisab_language');
@@ -132,17 +248,21 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     warning?: string;
   }>({ type: 'indexeddb', isPersistent: true });
 
+  const [storageReady, setStorageReady] = useState(false);
+  const [storageError, setStorageError] = useState(false);
   // Initialize durable storage engine on mount / db switch
   useEffect(() => {
     let isMounted = true;
+    setStorageReady(false);
     db.init().then(() => {
       if (isMounted) {
         db.getDurabilityInfo().then((info) => {
           if (isMounted) setDurabilityInfo(info);
         });
         refreshState();
+        setStorageReady(true);
       }
-    });
+    }).catch(() => { if (isMounted) setStorageError(true); });
     return () => {
       isMounted = false;
     };
@@ -159,12 +279,17 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         setCurrentWorkspaceId(activeWs.id);
       }
       setAccounts(db.getAccounts(activeWs.id));
+      setAccountGroups(db.getAccountGroups(activeWs.id));
+      setAccountPermissions(db.getAccountPermissions(activeWs.id));
       setCategories(db.getCategories(activeWs.id));
       setParties(db.getParties(activeWs.id));
       setTransactions(db.getTransactions(activeWs.id));
       setDashboardData(db.getDashboardData(activeWs.id));
       setBudgets(db.getBudgets(activeWs.id));
       setRecurringRules(db.getRecurringRules(activeWs.id));
+    } else {
+      setAccounts([]); setAccountGroups([]); setAccountPermissions([]); setCategories([]);
+      setParties([]); setTransactions([]); setDashboardData(null); setBudgets([]); setRecurringRules([]);
     }
     setConflicts(db.getConflicts());
     setSyncStatus(sync.getStatus());
@@ -174,9 +299,13 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   useEffect(() => {
     refreshState();
     const currentProf = auth.getProfile();
-    const isRealGoogle = !!(currentProf?.accessToken && currentProf.accessToken.startsWith('ya29.'));
-    if (isRealGoogle && currentProf?.accessToken && !auth.isTokenExpired()) {
-      sync.setTransport(new RealGoogleDriveTransport(currentProf.accessToken));
+    const isRealGoogle = auth.isRealGoogleAuthenticated();
+    if (isRealGoogle && currentProf?.accessToken) {
+      sync.setTransport(
+        new RealGoogleDriveTransport(currentProf.accessToken, {
+          tokenProvider: createSecureTokenProvider(db),
+        })
+      );
       sync.setAuthorized(true);
     } else {
       sync.setAuthorized(false);
@@ -188,12 +317,49 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     return unsub;
   }, [db, sync, currentWorkspaceId, userProfile?.accessToken]);
 
+  // Automatic sync on network connectivity restoration
+  useEffect(() => {
+    const handleOnline = () => {
+      console.info('[Network] Connectivity restored. Automatically triggering sync.');
+      setIsOnlineState(true);
+      sync.setOnline(true);
+      if (auth.isRealGoogleAuthenticated()) {
+        sync.triggerSync().catch((err) => {
+          console.warn('[Auto-sync error on online restoration]:', err);
+        });
+      }
+    };
+
+    const handleOffline = () => {
+      console.info('[Network] Connection lost. Switching to offline mode.');
+      setIsOnlineState(false);
+      sync.setOnline(false);
+    };
+    sync.setOnline(typeof navigator === 'undefined' || navigator.onLine);
+
+    if (typeof window !== 'undefined') {
+      window.addEventListener('online', handleOnline);
+      window.addEventListener('offline', handleOffline);
+      return () => {
+        window.removeEventListener('online', handleOnline);
+        window.removeEventListener('offline', handleOffline);
+      };
+    }
+  }, [sync, auth]);
+
   const switchDevice = async (dev: DeviceProfile) => {
+    if (isProduction()) {
+      console.warn('Security: Simulated device switching is forbidden in production mode.');
+      return;
+    }
     const targetDb = getOrCreateDeviceDb(dev.id, dev.name);
-    const isRealGoogle = !!(userProfile?.accessToken && userProfile.accessToken.startsWith('ya29.'));
-    const targetTransport = isRealGoogle && userProfile?.accessToken && !auth.isTokenExpired()
-      ? new RealGoogleDriveTransport(userProfile.accessToken)
-      : sharedTransport;
+    const isRealGoogle = auth.isRealGoogleAuthenticated();
+    const targetTransport =
+      isRealGoogle && userProfile?.accessToken && !auth.isTokenExpired()
+        ? new RealGoogleDriveTransport(userProfile.accessToken, {
+            tokenProvider: createSecureTokenProvider(targetDb),
+          })
+        : sharedTransport;
     const targetSync = new SyncOrchestrator(targetDb, targetTransport);
     targetSync.setOnline(isOnline);
     if (!isRealGoogle) {
@@ -211,17 +377,26 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   const setIsOnline = (online: boolean) => {
     setIsOnlineState(online);
     sync.setOnline(online);
+    if (online) {
+      sync.triggerSync().catch((err) => {
+        console.warn('[Auto-sync error on manual online toggle]:', err);
+      });
+    }
   };
 
   const triggerManualSync = async () => {
+    if (!auth.isRealGoogleAuthenticated() || !db.getIdentity()?.ownerSubjectHash) {
+      sync.setAuthorized(false);
+      return;
+    }
     await sync.triggerSync();
     refreshState();
   };
 
-  const createWorkspace = (name: string, kind: 'personal' | 'business') => {
-    const ws = db.createWorkspace(name, kind);
-    refreshState();
-    return ws;
+  const createWorkspace = async (name: string, kind: 'personal' | 'business') => {
+    await db.beginTransaction();
+    try { const ws = db.createWorkspace(name, kind); await db.commitTransaction(); refreshState(); return ws; }
+    catch (error) { await db.rollbackTransaction(); throw error; }
   };
 
   const archiveWorkspace = (id: UUID) => {
@@ -268,6 +443,120 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     refreshState();
   };
 
+  const createAccount = (
+    name: string,
+    kind: Account['kind'],
+    openingBalanceMinor = '0',
+    accountNumberMasked = '',
+    classification: Account['classification'] = 'asset',
+    groupId?: UUID | null
+  ) => {
+    const acc = db.createAccount(
+      currentWorkspaceId,
+      name,
+      kind,
+      openingBalanceMinor,
+      accountNumberMasked,
+      classification,
+      groupId || null
+    );
+    refreshState();
+    return acc;
+  };
+
+  const updateAccount = (
+    id: UUID,
+    updates: Partial<Pick<Account, 'name' | 'accountNumberMasked' | 'kind' | 'groupId'>>
+  ) => {
+    const res = db.updateAccount(id, updates);
+    refreshState();
+    return res;
+  };
+
+  const archiveAccount = (id: UUID) => {
+    const res = db.archiveAccount(id);
+    refreshState();
+    return res;
+  };
+
+  const restoreAccount = (id: UUID) => {
+    const res = db.restoreAccount(id);
+    refreshState();
+    return res;
+  };
+
+  const safeDeleteAccount = (id: UUID, confirmationText: string) => {
+    const res = db.safeDeleteAccount(id, confirmationText);
+    refreshState();
+    return res;
+  };
+
+  const createAccountGroup = (name: string, icon?: string, description?: string) => {
+    const group = db.createAccountGroup(currentWorkspaceId, name, icon, description);
+    refreshState();
+    return group;
+  };
+
+  const updateAccountGroup = (
+    id: UUID,
+    updates: Partial<Pick<AccountGroup, 'name' | 'icon' | 'description'>>
+  ) => {
+    const res = db.updateAccountGroup(id, updates);
+    refreshState();
+    return res;
+  };
+
+  const archiveAccountGroup = (id: UUID) => {
+    const res = db.archiveAccountGroup(id);
+    refreshState();
+    return res;
+  };
+
+  const restoreAccountGroup = (id: UUID) => {
+    const res = db.restoreAccountGroup(id);
+    refreshState();
+    return res;
+  };
+
+  const addAccountToGroup = (accountId: UUID, groupId: UUID) => {
+    const res = db.addAccountToGroup(accountId, groupId);
+    refreshState();
+    return res;
+  };
+
+  const removeAccountFromGroup = (accountId: UUID) => {
+    const res = db.removeAccountFromGroup(accountId);
+    refreshState();
+    return res;
+  };
+
+  const getAccountGroupSummary = (groupId: UUID) => {
+    return db.getAccountGroupSummary(groupId);
+  };
+
+  const grantAccountPermission = (
+    employeeEmail: string,
+    employeeSubjectHash: string,
+    accountIds: UUID[],
+    role: EmployeeRole
+  ) => {
+    const grant = db.grantAccountPermission(
+      currentWorkspaceId,
+      employeeEmail,
+      employeeSubjectHash,
+      accountIds,
+      role
+    );
+    refreshState();
+    return grant;
+  };
+
+  const revokeAccountPermission = (grantId: UUID) => {
+    const res = db.revokeAccountPermission(grantId);
+    refreshState();
+    return res;
+  };
+
   const deleteTransaction = async (id: UUID, reason?: string) => {
     await db.deleteTransaction(id, reason);
     refreshState();
@@ -282,6 +571,63 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     if (isOnline) {
       triggerManualSync().catch(console.error);
     }
+  };
+
+  const signInWithGoogle = async (): Promise<GoogleUserProfile> => {
+    await db.init();
+    const needsBinding = !db.getIdentity() && db.getRawState().syncOperations.size > 0;
+    if (needsBinding && !window.confirm(language === 'en'
+      ? 'Link all existing offline records on this device to the Google account you select? Use only your own account.'
+      : 'এই ডিভাইসের সব অফলাইন হিসাব নির্বাচিত গুগল অ্যাকাউন্টের সাথে যুক্ত করবেন? শুধুমাত্র নিজের অ্যাকাউন্ট ব্যবহার করুন।')) {
+      throw new Error('Offline ownership binding cancelled.');
+    }
+    const profile = await auth.promptGoogleSignIn();
+    try {
+      if (profile.accessToken) {
+        sync.setTransport(
+          new RealGoogleDriveTransport(profile.accessToken, {
+            tokenProvider: createSecureTokenProvider(db),
+          })
+        );
+      }
+      await sync.bootstrapAndRestore(profile, needsBinding);
+      refreshState();
+      return profile;
+    } catch (err) {
+      auth.signOut();
+      sync.setAuthorized(false);
+      refreshState();
+      throw err;
+    }
+  };
+
+  const bootstrapWithTestProfile = async (profile: GoogleUserProfile): Promise<void> => {
+    if (prod) throw new Error('Test authentication is forbidden in production.');
+    try {
+      await sync.bootstrapAndRestore(profile, true);
+      refreshState();
+    } catch (err) {
+      auth.signOut();
+      refreshState();
+      throw err;
+    }
+  };
+
+  const updateUserProfile = (updates: {
+    displayName?: string;
+    photoUrl?: string;
+    phone?: string;
+    address?: string;
+  }) => {
+    const updated = auth.updateEditableProfile(updates);
+    refreshState();
+    return updated;
+  };
+
+  const signOut = () => {
+    auth.signOut();
+    sync.setAuthorized(false);
+    refreshState();
   };
 
   const currentWorkspace = useMemo(() => {
@@ -300,6 +646,8 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         setCurrentWorkspaceId,
         workspaces,
         accounts,
+        accountGroups,
+        accountPermissions,
         categories,
         parties,
         transactions,
@@ -309,6 +657,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         recurringRules,
         syncStatus,
         userProfile,
+        isLiveGoogleAuth: auth.isRealGoogleAuthenticated(),
         isOnline,
         setIsOnline,
         language,
@@ -321,14 +670,34 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         durabilityInfo,
         createCategory,
         deleteCategory,
+        createAccount,
+        updateAccount,
+        archiveAccount,
+        restoreAccount,
+        safeDeleteAccount,
+        createAccountGroup,
+        updateAccountGroup,
+        archiveAccountGroup,
+        restoreAccountGroup,
+        addAccountToGroup,
+        removeAccountFromGroup,
+        getAccountGroupSummary,
+        grantAccountPermission,
+        revokeAccountPermission,
+        soundPrefs,
+        setSoundPrefs,
         createParty,
         deleteParty,
         editParty,
         deleteTransaction,
         editTransaction,
+        signInWithGoogle,
+        bootstrapWithTestProfile,
+        updateUserProfile,
+        signOut,
       }}
     >
-      {children}
+      {storageReady ? children : <div role="status" className="p-8 text-center">{storageError ? 'Storage could not be opened. Your records are preserved. Restart the app; do not clear storage.' : 'Opening your local records…'}</div>}
     </AppContext.Provider>
   );
 };
