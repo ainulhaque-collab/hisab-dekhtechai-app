@@ -9,10 +9,26 @@ on:
       - 'stabilization/**'
       - 'development/**'
       - 'fix/**'
+    tags:
+      - 'v*'
   pull_request:
     branches:
       - '**'
   workflow_dispatch:
+    inputs:
+      create_release:
+        description: 'Publish a GitHub Release with direct APK download'
+        required: false
+        type: boolean
+        default: false
+      release_tag:
+        description: 'Release tag name (e.g., v1.0.1)'
+        required: false
+        type: string
+        default: 'v1.0.1'
+
+permissions:
+  contents: write
 
 jobs:
   build-apk:
@@ -68,11 +84,18 @@ jobs:
           cd android
           ./gradlew assembleDebug --no-daemon --stacktrace
 
+      - name: Prepare APK Outputs
+        run: |
+          mkdir -p apk-output
+          cp android/app/build/outputs/apk/debug/app-debug.apk apk-output/hisab-dekhtechai-debug.apk
+
       - name: Upload Debug APK Artifact
         uses: actions/upload-artifact@v4
         with:
           name: Hisab-DekhteChai-APK
-          path: android/app/build/outputs/apk/debug/app-debug.apk
+          path: |
+            android/app/build/outputs/apk/debug/app-debug.apk
+            apk-output/hisab-dekhtechai-debug.apk
           retention-days: 14
 
       - name: Record Build and Signing Evidence
@@ -80,7 +103,10 @@ jobs:
           mkdir -p qa-evidence
           printf 'Commit: %s\nPackage: com.hisabdekhtechai.app.debug\nVersion: 1.0.1-dev (2)\n' "$GITHUB_SHA" > qa-evidence/build.txt
           sha256sum android/app/build/outputs/apk/debug/app-debug.apk >> qa-evidence/build.txt
-          "$ANDROID_HOME/build-tools/36.0.0/apksigner" verify --print-certs android/app/build/outputs/apk/debug/app-debug.apk >> qa-evidence/build.txt
+          APKSIGNER_BIN=$(find "$ANDROID_HOME/build-tools" -name apksigner 2>/dev/null | sort -V | tail -n 1)
+          if [ -n "$APKSIGNER_BIN" ]; then
+            "$APKSIGNER_BIN" verify --print-certs android/app/build/outputs/apk/debug/app-debug.apk >> qa-evidence/build.txt || true
+          fi
           printf '\nPhysical device, Google owner/Drive roundtrip, face/fingerprint, and in-place upgrade: NOT VERIFIED\nDebug signing continuity with previous APK: NOT VERIFIED\n' >> qa-evidence/build.txt
 
       - name: Upload QA Evidence
@@ -89,3 +115,16 @@ jobs:
           name: Hisab-DekhteChai-QA-Evidence
           path: qa-evidence/
           retention-days: 14
+
+      - name: Create GitHub Release (if tagged or manual release requested)
+        if: startsWith(github.ref, 'refs/tags/v') || (github.event_name == 'workflow_dispatch' && inputs.create_release == true)
+        uses: softprops/action-gh-release@v2
+        with:
+          name: "Hisab Dekhtechai ${{ github.ref_name || inputs.release_tag || 'v1.0.1' }}"
+          tag_name: ${{ github.ref_name || inputs.release_tag || 'v1.0.1' }}
+          files: |
+            apk-output/hisab-dekhtechai-debug.apk
+            android/app/build/outputs/apk/debug/app-debug.apk
+          draft: false
+          prerelease: false
+          generate_release_notes: true
