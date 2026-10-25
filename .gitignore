@@ -10,3 +10,7 @@ coverage/
 *.png
 !public/**
 
+
+# Generated native Web bundle is rebuilt by cap sync in CI.
+android/app/src/main/assets/public/
+.qa-test-output.txt

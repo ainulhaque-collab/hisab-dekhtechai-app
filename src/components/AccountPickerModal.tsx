@@ -1,3 +1,5 @@
+import { createPortal } from 'react-dom';
+import { useDialog } from './useDialog';
 import React, { useState, useEffect, useRef } from 'react';
 import { Account, AccountKind } from '../contracts/types';
 import { formatBDT } from '../domain/money';
@@ -43,21 +45,7 @@ export const AccountPickerModal: React.FC<AccountPickerModalProps> = ({
   const modalRef = useRef<HTMLDivElement>(null);
   const searchInputRef = useRef<HTMLInputElement>(null);
 
-  // Close on Android hardware Back or Escape key
-  useEffect(() => {
-    if (!isOpen) return;
-
-    const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') {
-        onClose();
-      }
-    };
-
-    window.addEventListener('keydown', handleKeyDown);
-    return () => {
-      window.removeEventListener('keydown', handleKeyDown);
-    };
-  }, [isOpen, onClose]);
+  useDialog(isOpen, modalRef, onClose);
 
   // Focus search when opened
   useEffect(() => {
@@ -117,9 +105,9 @@ export const AccountPickerModal: React.FC<AccountPickerModalProps> = ({
     }
   };
 
-  return (
+  return createPortal(
     <div
-      className="fixed inset-0 z-50 flex items-end sm:items-center justify-center bg-slate-900/60 backdrop-blur-xs p-0 sm:p-4 animate-in fade-in duration-150"
+      className="fixed inset-0 z-[200] flex items-end sm:items-center justify-center bg-slate-900/60 backdrop-blur-xs p-0 sm:p-4 animate-in fade-in duration-150"
       onClick={(e) => {
         if (modalRef.current && !modalRef.current.contains(e.target as Node)) {
           onClose();
@@ -309,5 +297,5 @@ export const AccountPickerModal: React.FC<AccountPickerModalProps> = ({
         )}
       </div>
     </div>
-  );
+  , document.body);
 };

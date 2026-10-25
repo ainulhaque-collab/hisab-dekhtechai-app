@@ -22,7 +22,7 @@ async function postJournalHelper(db: LocalDatabase, journal: BalancedJournal, ow
   await db.commitJournalWithOutbox(journal, op);
 }
 
-test('FEAT-002: Account Editing and Safe Deletion with exact DELET confirmation', async () => {
+test('FEAT-002: Account Editing and Safe Deletion with exact DELETE confirmation', async () => {
   const driver = new LocalStorageFallbackDriver();
   const db = new LocalDatabase('test_db_account_manage', driver);
   await db.init();
@@ -53,11 +53,11 @@ test('FEAT-002: Account Editing and Safe Deletion with exact DELET confirmation'
   accState = db.getAccounts(wsId).find((a) => a.id === testAcc.id);
   assert.equal(accState?.archivedAt, null, 'Account must be unarchived');
 
-  // 4. Exact DELET confirmation enforcement
-  // Test wrong confirmation texts: 'DELETE', 'delet', 'DEL', 'YES', etc.
-  const wrong1 = db.safeDeleteAccount(testAcc.id, 'DELETE');
-  assert.equal(wrong1.success, false, 'DELETE must be rejected');
-  assert.ok(wrong1.error?.includes('DELET'));
+  // 4. Exact DELETE confirmation enforcement
+  // Test wrong confirmation texts: 'DELETEE', 'delet', 'DEL', 'YES', etc.
+  const wrong1 = db.safeDeleteAccount(testAcc.id, 'DELETEE');
+  assert.equal(wrong1.success, false, 'DELETEE must be rejected');
+  assert.ok(wrong1.error?.includes('DELETE'));
 
   const wrong2 = db.safeDeleteAccount(testAcc.id, 'delet');
   assert.equal(wrong2.success, false, 'lowercase delet must be rejected');
@@ -67,7 +67,8 @@ test('FEAT-002: Account Editing and Safe Deletion with exact DELET confirmation'
 
   // 5. Zero transactions: Safe hard deletion
   const emptyAcc = db.createAccount(wsId, 'Unused Wallet', 'cash', '0', '', 'asset', null);
-  const deleteEmptyRes = db.safeDeleteAccount(emptyAcc.id, 'DELET');
+  for (const entry of db.getRawState().syncOutbox.values()) entry.uploadedStatus = 'uploaded';
+  const deleteEmptyRes = db.safeDeleteAccount(emptyAcc.id, 'DELETE');
   assert.equal(deleteEmptyRes.success, true);
   assert.equal(deleteEmptyRes.mode, 'deleted');
   assert.equal(
@@ -90,8 +91,8 @@ test('FEAT-002: Account Editing and Safe Deletion with exact DELET confirmation'
   });
   await postJournalHelper(db, incomeJournal);
 
-  // Perform safe deletion with exact DELET
-  const deleteActiveRes = db.safeDeleteAccount(activeAcc.id, 'DELET');
+  // Perform safe deletion with exact DELETE
+  const deleteActiveRes = db.safeDeleteAccount(activeAcc.id, 'DELETE');
   assert.equal(deleteActiveRes.success, true);
   assert.equal(deleteActiveRes.mode, 'archived', 'Account with transactions must be archived instead of purged');
 

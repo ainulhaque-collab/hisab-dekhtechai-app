@@ -412,6 +412,7 @@ test('Safe bootstrap and restore: single owner enforcement, offline transaction 
     subjectId: aliceSub,
     subjectHash: aliceHash,
     email: 'alice@gmail.com',
+    accessToken: 'test-alice-token',
     displayName: 'Alice',
     isDriveAuthorized: true,
   };
@@ -422,6 +423,7 @@ test('Safe bootstrap and restore: single owner enforcement, offline transaction 
     subjectId: bobSub,
     subjectHash: bobHash,
     email: 'bob@gmail.com',
+    accessToken: 'test-bob-token',
     displayName: 'Bob',
     isDriveAuthorized: true,
   };
@@ -460,7 +462,7 @@ test('Safe bootstrap and restore: single owner enforcement, offline transaction 
 
   // Step 2: User signs in with Alice -> bootstrapAndRestore must PRESERVE offline transaction
   const syncDevice1 = new SyncOrchestrator(dbDevice1, transport);
-  const restoreRes1 = await syncDevice1.bootstrapAndRestore(aliceProfile);
+  const restoreRes1 = await syncDevice1.bootstrapAndRestore(aliceProfile, true);
   assert.equal(restoreRes1.preservedOfflineOpsCount, 1, 'Offline transaction must be preserved and adopted');
   assert.equal(dbDevice1.getIdentity()?.ownerSubjectHash, aliceHash, 'Alice is now verified owner');
 
@@ -485,7 +487,7 @@ test('Safe bootstrap and restore: single owner enforcement, offline transaction 
   const syncDevice2 = new SyncOrchestrator(dbDevice2Fresh, transport);
 
   // Perform safe bootstrap and restore on fresh device
-  await syncDevice2.bootstrapAndRestore(aliceProfile);
+  await syncDevice2.bootstrapAndRestore(aliceProfile, true);
 
   // Invariant: Fresh device restored Device 1's transaction cleanly
   const restoredTxs = dbDevice2Fresh.getTransactions(wsId);

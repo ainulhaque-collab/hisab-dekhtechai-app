@@ -15,6 +15,7 @@ export interface Workspace {
   currency: 'BDT';
   archivedAt?: string | null;
   createdAt: string;
+  deletedAt?: string | null; // Retained tombstone prevents older clients resurrecting deleted empty workspaces.
 }
 
 import { AccountClassification } from './ledger';

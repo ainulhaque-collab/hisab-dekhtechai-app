@@ -3,7 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { AppProvider, useApp } from './context/AppContext';
 import { Navbar } from './components/Navbar';
 import { BottomNav, TabType } from './components/BottomNav';
@@ -80,6 +80,14 @@ function MainApp() {
   const [activeTab, setActiveTab] = useState<TabType>('home');
   const [selectedTx, setSelectedTx] = useState<JournalTransaction | null>(null);
   const [isUnlocked, setIsUnlocked] = useState(() => !pinLock.isEnabled());
+
+  useEffect(() => {
+    const lock = () => { if (pinLock.isEnabled()) setIsUnlocked(false); };
+    const visibility = () => { if (document.visibilityState === 'hidden') lock(); };
+    document.addEventListener('visibilitychange', visibility);
+    window.addEventListener('hisab-background', lock);
+    return () => { document.removeEventListener('visibilitychange', visibility); window.removeEventListener('hisab-background', lock); };
+  }, []);
 
   // Modals state
   const [isSyncModalOpen, setIsSyncModalOpen] = useState(false);

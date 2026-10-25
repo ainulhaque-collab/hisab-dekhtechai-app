@@ -1,3 +1,5 @@
+import { WorkspaceManager } from './WorkspaceManager';
+import { WorkspaceAvatar } from './WorkspaceAvatar';
 import React, { useState, useRef, useEffect } from 'react';
 import { useApp } from '../context/AppContext';
 import { formatAccountTitle } from '../domain/money';
@@ -58,6 +60,7 @@ export const Navbar: React.FC<NavbarProps> = ({
 
   const isEn = language === 'en';
 
+  const [showWorkspaceManager, setShowWorkspaceManager] = useState(false);
   const [showWorkspaceMenu, setShowWorkspaceMenu] = useState(false);
   const [showHamburgerMenu, setShowHamburgerMenu] = useState(false);
   const [isCreatingWorkspace, setIsCreatingWorkspace] = useState(false);
@@ -105,10 +108,12 @@ export const Navbar: React.FC<NavbarProps> = ({
     }
   };
 
-  const handleCreateWorkspaceSubmit = (e: React.FormEvent) => {
+  const handleCreateWorkspaceSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!newWsName.trim()) return;
-    const ws = createWorkspace(newWsName.trim(), newWsKind);
+    let ws;
+    try { ws = await createWorkspace(newWsName.trim(), newWsKind); }
+    catch { alert(isEn ? 'Workspace could not be saved. Please retry.' : 'খাতা সংরক্ষণ হয়নি। আবার চেষ্টা করুন।'); return; }
     setCurrentWorkspaceId(ws.id);
     setNewWsName('');
     setIsCreatingWorkspace(false);
@@ -215,6 +220,7 @@ export const Navbar: React.FC<NavbarProps> = ({
               <Wallet className="w-4 h-4" strokeWidth={2} />
             </div>
 
+            <WorkspaceAvatar workspace={currentWorkspace} />
             {/* Workspace Selector Button */}
             <div className="relative min-w-0">
               <button
@@ -240,6 +246,7 @@ export const Navbar: React.FC<NavbarProps> = ({
                 </div>
               </button>
 
+              {showWorkspaceManager && <WorkspaceManager onClose={() => setShowWorkspaceManager(false)} />}
               {/* Workspace Dropdown */}
               {showWorkspaceMenu && (
                 <div className="absolute left-0 mt-2 w-64 bg-white rounded-xl shadow-lg border border-slate-200/80 py-1.5 z-50 animate-in fade-in slide-from-top-1">
@@ -260,7 +267,7 @@ export const Navbar: React.FC<NavbarProps> = ({
                           : 'text-slate-700 hover:bg-slate-50'
                       }`}
                     >
-                      <span className="truncate">{formatAccountTitle(ws.name, language)}</span>
+                      <WorkspaceAvatar workspace={ws} /><span className="truncate flex-1 ml-2">{formatAccountTitle(ws.name, language)}</span>
                       <span className="text-[10px] text-slate-400 uppercase font-medium ml-2 shrink-0">
                         {ws.kind === 'personal'
                           ? (isEn ? 'Personal' : 'ব্যক্তিগত')
@@ -270,6 +277,7 @@ export const Navbar: React.FC<NavbarProps> = ({
                   ))}
 
                   <div className="border-t border-slate-100 pt-1.5 mt-1">
+                    <button type="button" className="w-full text-left p-3 text-xs font-semibold text-blue-700" onClick={() => { setShowWorkspaceMenu(false); setShowWorkspaceManager(true); }}>{isEn ? 'Manage workspaces' : 'খাতা পরিচালনা'}</button>
                     {!isCreatingWorkspace ? (
                       <button
                         type="button"

@@ -1,4 +1,5 @@
-import React, { useState } from 'react';
+import { biometric } from '../security/biometric';
+import React, { useState, useEffect } from 'react';
 import { Lock, Delete, ShieldAlert } from 'lucide-react';
 import { pinLock } from '../security/pinLock';
 import { useApp } from '../context/AppContext';
@@ -15,8 +16,15 @@ export const PinLockScreen: React.FC<PinLockScreenProps> = ({ onUnlocked }) => {
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [isVerifying, setIsVerifying] = useState(false);
 
+  const [biometricAvailable, setBiometricAvailable] = useState(false);
+  useEffect(() => {
+    let mounted = true;
+    biometric.status().then(s => { if (mounted) setBiometricAvailable(s.available && s.enabled); }).catch(() => {});
+    return () => { mounted = false; };
+  }, []);
+
   const handleDigitPress = async (digit: string) => {
-    if (enteredPin.length >= 4) return;
+    if (isVerifying || enteredPin.length >= 4) return;
     const nextPin = enteredPin + digit;
     setEnteredPin(nextPin);
     setErrorMessage(null);
@@ -26,7 +34,7 @@ export const PinLockScreen: React.FC<PinLockScreenProps> = ({ onUnlocked }) => {
       const res = await pinLock.verifyPin(nextPin);
       setIsVerifying(false);
       if (res.success) {
-        onUnlocked();
+        if (document.visibilityState !== 'hidden') onUnlocked();
       } else {
         setErrorMessage(
           res.error || (isEn ? 'Incorrect PIN entered.' : 'ভুল পিন দেওয়া হয়েছে।')
@@ -81,6 +89,14 @@ export const PinLockScreen: React.FC<PinLockScreenProps> = ({ onUnlocked }) => {
           </div>
         )}
 
+        {biometricAvailable && <button type="button" disabled={isVerifying} className="w-full p-3 border border-slate-600 rounded-xl"
+          onClick={async () => { setIsVerifying(true); try {
+            if (await biometric.unlock() && document.visibilityState !== 'hidden') onUnlocked();
+            else setErrorMessage(isEn ? 'Use your App PIN to continue.' : 'অ্যাপের পিন ব্যবহার করুন।');
+          } catch { setErrorMessage(isEn ? 'Biometrics unavailable or cancelled. Use App PIN.' : 'বায়োমেট্রিক বাতিল বা অনুপলব্ধ। অ্যাপের পিন ব্যবহার করুন।'); }
+          finally { setIsVerifying(false); } }}>
+          {isEn ? 'Unlock with fingerprint / secure face' : 'আঙুলের ছাপ / সুরক্ষিত মুখ দিয়ে খুলুন'}
+        </button>}
         {/* Numeric keypad */}
         <div className="grid grid-cols-3 gap-3 pt-4">
           {['1', '2', '3', '4', '5', '6', '7', '8', '9'].map((digit) => (

@@ -1,3 +1,5 @@
+import { DELETE_CONFIRMATION } from '../domain/confirmation';
+import { AppSelect } from './AppSelect';
 import React, { useState } from 'react';
 import { useApp } from '../context/AppContext';
 import {
@@ -64,7 +66,7 @@ export const AccountsTab: React.FC = () => {
   const [editAccountNumber, setEditAccountNumber] = useState('');
   const [editGroupId, setEditGroupId] = useState<string>('');
 
-  // Delete Account state (strict confirmation word DELET)
+  // Delete Account state (strict confirmation word DELETE)
   const [deletingAccount, setDeletingAccount] = useState<Account | null>(null);
   const [deleteConfirmationInput, setDeleteConfirmationInput] = useState('');
   const [deleteFeedback, setDeleteFeedback] = useState<string | null>(null);
@@ -129,7 +131,7 @@ export const AccountsTab: React.FC = () => {
 
   const handleExecuteDeleteAccount = (e: React.FormEvent) => {
     e.preventDefault();
-    if (!deletingAccount || deleteConfirmationInput !== 'DELET') return;
+    if (!deletingAccount || deleteConfirmationInput !== DELETE_CONFIRMATION) return;
 
     const res = safeDeleteAccount(deletingAccount.id, deleteConfirmationInput);
     if (res.success) {
@@ -627,7 +629,7 @@ export const AccountsTab: React.FC = () => {
                 <label className="block text-slate-700 font-semibold mb-1">
                   {isEn ? 'Account Type' : 'অ্যাকাউন্টের ধরণ'}
                 </label>
-                <select
+                <AppSelect aria-label={isEn ? 'Account Type' : 'অ্যাকাউন্টের ধরন'}
                   value={newAccKind}
                   onChange={(e) => setNewAccKind(e.target.value as AccountKind)}
                   className="w-full px-3 py-2 bg-slate-50 border border-slate-300 rounded-xl font-medium focus:bg-white focus:outline-none focus:ring-2 focus:ring-blue-600"
@@ -638,14 +640,14 @@ export const AccountsTab: React.FC = () => {
                   <option value="nagad">{isEn ? 'Nagad' : 'নগদ'}</option>
                   <option value="rocket">{isEn ? 'Rocket' : 'রকেট'}</option>
                   <option value="other">{isEn ? 'Other' : 'অন্যান্য'}</option>
-                </select>
+                </AppSelect>
               </div>
 
               <div>
                 <label className="block text-slate-700 font-semibold mb-1">
                   {isEn ? 'Assign to Account Group (Optional)' : 'অ্যাকাউন্ট গ্রুপ নির্ধারণ (ঐচ্ছিক)'}
                 </label>
-                <select
+                <AppSelect aria-label={isEn ? 'Account Group' : 'অ্যাকাউন্ট গ্রুপ'}
                   value={newAccGroupId}
                   onChange={(e) => setNewAccGroupId(e.target.value)}
                   className="w-full px-3 py-2 bg-slate-50 border border-slate-300 rounded-xl font-medium focus:bg-white focus:outline-none focus:ring-2 focus:ring-blue-600"
@@ -658,7 +660,7 @@ export const AccountsTab: React.FC = () => {
                         {g.name}
                       </option>
                     ))}
-                </select>
+                </AppSelect>
               </div>
 
               <div>
@@ -742,7 +744,7 @@ export const AccountsTab: React.FC = () => {
                 <label className="block text-slate-700 font-semibold mb-1">
                   {isEn ? 'Account Type' : 'অ্যাকাউন্টের ধরণ'}
                 </label>
-                <select
+                <AppSelect aria-label={isEn ? 'Account Type' : 'অ্যাকাউন্টের ধরন'}
                   value={editKind}
                   onChange={(e) => setEditKind(e.target.value as AccountKind)}
                   className="w-full px-3 py-2 bg-slate-50 border border-slate-300 rounded-xl font-medium focus:bg-white focus:outline-none focus:ring-2 focus:ring-blue-600"
@@ -753,14 +755,14 @@ export const AccountsTab: React.FC = () => {
                   <option value="nagad">{isEn ? 'Nagad' : 'নগদ'}</option>
                   <option value="rocket">{isEn ? 'Rocket' : 'রকেট'}</option>
                   <option value="other">{isEn ? 'Other' : 'অন্যান্য'}</option>
-                </select>
+                </AppSelect>
               </div>
 
               <div>
                 <label className="block text-slate-700 font-semibold mb-1">
                   {isEn ? 'Account Group' : 'অ্যাকাউন্ট গ্রুপ'}
                 </label>
-                <select
+                <AppSelect aria-label={isEn ? 'Account Group' : 'অ্যাকাউন্ট গ্রুপ'}
                   value={editGroupId}
                   onChange={(e) => setEditGroupId(e.target.value)}
                   className="w-full px-3 py-2 bg-slate-50 border border-slate-300 rounded-xl font-medium focus:bg-white focus:outline-none focus:ring-2 focus:ring-blue-600"
@@ -773,7 +775,7 @@ export const AccountsTab: React.FC = () => {
                         {g.name}
                       </option>
                     ))}
-                </select>
+                </AppSelect>
               </div>
 
               <div>
@@ -808,7 +810,7 @@ export const AccountsTab: React.FC = () => {
         </div>
       )}
 
-      {/* Controlled Safe Deletion Modal with exact DELET confirmation (FEAT-002) */}
+      {/* Controlled Safe Deletion Modal with exact DELETE confirmation (FEAT-002) */}
       {deletingAccount && (
         <div className="fixed inset-0 z-50 bg-black/50 backdrop-blur-xs flex items-center justify-center p-4">
           <div className="bg-white rounded-2xl max-w-sm w-full p-5 shadow-2xl border border-rose-200 animate-in zoom-in-95 space-y-4">
@@ -842,11 +844,11 @@ export const AccountsTab: React.FC = () => {
                 <label className="block text-slate-800 font-bold mb-1.5">
                   {isEn ? (
                     <>
-                      To confirm, type <span className="text-rose-600 font-mono">DELET</span> below:
+                      To confirm, type <span className="text-rose-600 font-mono">DELETE</span> below:
                     </>
                   ) : (
                     <>
-                      নিশ্চিত করতে নিচে হুবহু <span className="text-rose-600 font-mono">DELET</span> লিখুন:
+                      নিশ্চিত করতে নিচে হুবহু <span className="text-rose-600 font-mono">DELETE</span> লিখুন:
                     </>
                   )}
                 </label>
@@ -855,7 +857,7 @@ export const AccountsTab: React.FC = () => {
                   required
                   value={deleteConfirmationInput}
                   onChange={(e) => setDeleteConfirmationInput(e.target.value)}
-                  placeholder="DELET"
+                  placeholder="DELETE"
                   className="w-full px-3 py-2 bg-slate-50 border border-slate-300 rounded-xl font-mono text-center tracking-widest text-sm focus:outline-none focus:ring-2 focus:ring-rose-600"
                   autoFocus
                 />
@@ -864,7 +866,7 @@ export const AccountsTab: React.FC = () => {
               <div className="flex gap-2 pt-1">
                 <button
                   type="submit"
-                  disabled={deleteConfirmationInput !== 'DELET'}
+                  disabled={deleteConfirmationInput !== DELETE_CONFIRMATION}
                   className="flex-1 py-2.5 bg-rose-600 hover:bg-rose-700 disabled:opacity-30 disabled:cursor-not-allowed text-white rounded-xl font-bold transition-colors min-h-[44px]"
                 >
                   {isEn ? 'Confirm Deletion' : 'মুছে ফেলা নিশ্চিত করুন'}

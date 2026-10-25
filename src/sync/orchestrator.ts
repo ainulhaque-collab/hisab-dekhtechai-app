@@ -19,7 +19,7 @@ import {
 } from '../contracts/types';
 import { canonicalJson, computeSha256 } from './canonical';
 import { generateUUID } from '../domain/journal';
-import { GoogleUserProfile } from '../auth/googleAuth';
+import { GoogleUserProfile, computeOwnerSubjectHash } from '../auth/googleAuth';
 
 export type SyncStatusState =
   | 'idle'
@@ -52,9 +52,10 @@ export class SyncOrchestrator {
   private isPaused = false;
   private lastSuccessfulSyncAt: string | null = null;
   private lastError: string | null = null;
-  private currentState: SyncStatusState = 'synced_verified';
+  private currentState: SyncStatusState = 'idle';
   private listeners: Set<SyncEventListener> = new Set();
   private isSyncInProgress = false;
+  private bootstrapInProgress = false;
 
   constructor(db: LocalDatabase, transport: DriveTransport) {
     this.db = db;
@@ -171,7 +172,7 @@ export class SyncOrchestrator {
    * 4. Update status honestly
    */
   public async triggerSync(forceRetryAuth = true): Promise<void> {
-    if (this.isSyncInProgress) return;
+    if (this.isSyncInProgress || this.bootstrapInProgress) return;
     if (this.isPaused) return;
 
     if (forceRetryAuth) {
@@ -417,6 +418,7 @@ export class SyncOrchestrator {
     // Sort files deterministically
     batchFiles.sort((a, b) => a.name.localeCompare(b.name));
 
+    let failedFiles = 0;
     for (const file of batchFiles) {
       try {
         const fileContent = await this.transport.downloadBatchFile(file.id);
@@ -424,8 +426,7 @@ export class SyncOrchestrator {
 
         // Verification checks
         if (batch.protocolVersion !== 1) {
-          console.warn(`Unsupported protocol version ${batch.protocolVersion} in file ${file.name}`);
-          continue;
+          throw new Error('Unsupported synchronization protocol. Update this app before syncing.');
         }
 
         // Validate dataset owner identity against local owner
@@ -452,17 +453,18 @@ export class SyncOrchestrator {
         if (batch.batchSha256) {
           const recomputedHash = await SyncOrchestrator.computeBatchHash(batch);
           if (batch.batchSha256 !== recomputedHash) {
-            console.warn(`Batch SHA-256 mismatch in ${file.name}. Skipping corrupted file.`);
-            continue;
+            throw new Error('Remote batch integrity verification failed.');
           }
         }
 
         // Apply operations
         await this.applyBatchOperations(batch);
       } catch (fileErr) {
+        failedFiles++;
         console.error(`Failed to download/parse remote file ${file.name}:`, fileErr);
       }
     }
+    if (failedFiles) throw new Error('Remote synchronization verification is incomplete. Retry without clearing local records.');
   }
 
   /**
@@ -472,13 +474,28 @@ export class SyncOrchestrator {
    * 3. Preserves any offline transactions recorded prior to authentication by adopting them under the verified owner.
    * 4. Downloads and applies all remote batches from Google Drive belonging to this verified owner.
    */
-  public async bootstrapAndRestore(profile: GoogleUserProfile): Promise<{
+  public async bootstrapAndRestore(profile: GoogleUserProfile, consentToBindOffline = false): Promise<{
+    restoredOpsCount: number;
+    verifiedOwner: string;
+    preservedOfflineOpsCount: number;
+  }> {
+    if (this.bootstrapInProgress || this.isSyncInProgress) throw new Error('Synchronization is busy. Try connecting again when it finishes.');
+    this.bootstrapInProgress = true;
+    try { return await this.bootstrapIdentity(profile, consentToBindOffline); }
+    finally { this.bootstrapInProgress = false; }
+  }
+
+  private async bootstrapIdentity(profile: GoogleUserProfile, consentToBindOffline = false): Promise<{
     restoredOpsCount: number;
     verifiedOwner: string;
     preservedOfflineOpsCount: number;
   }> {
     if (!profile || !profile.subjectHash) {
       throw new Error('Bootstrap and restore requires a verified Google user profile with subjectHash.');
+    }
+    await this.db.waitForPendingWrites();
+    if (!profile.accessToken || profile.subjectHash !== await computeOwnerSubjectHash(profile.subjectId)) {
+      throw new Error('Verified Google authorization is required before binding this dataset.');
     }
 
     const currentOwner = this.db.getIdentity()?.ownerSubjectHash;
@@ -488,14 +505,25 @@ export class SyncOrchestrator {
     const isNonEmpty = hasTransactions || hasSyncOps;
 
     // 1. Prevent silent reassignment of an existing non-empty dataset to another Google account
-    if (currentOwner && currentOwner !== profile.subjectHash && isNonEmpty) {
+    if (currentOwner && currentOwner !== profile.subjectHash) {
       throw new Error(
         `Security Error: Cannot reassign existing non-empty dataset belonging to owner (${currentOwner}) to a different Google account (${profile.subjectHash}).`
       );
     }
 
+    const temporary = (owner?: string) => !owner || owner === 'local-owner' || owner === 'unassigned';
+    if (Array.from(rawState.workspaces.values()).some(ws => !temporary(ws.ownerSubjectHash) && ws.ownerSubjectHash !== profile.subjectHash) ||
+      Array.from(rawState.syncOperations.values()).some(op => !temporary(op.ownerHash) && op.ownerHash !== profile.subjectHash)) {
+      throw new Error('Security Error: Foreign workspace or operation ownership prevents first-owner binding.');
+    }
+    if (!currentOwner && isNonEmpty && !consentToBindOffline) {
+      throw new Error('Explicit consent is required to bind existing offline records to this Google account.');
+    }
+
     // 2. Preserve offline transactions: if dataset was created offline before login (or by this owner)
     let preservedOfflineOpsCount = 0;
+    await this.db.beginTransaction();
+    try {
     if ((!currentOwner || currentOwner === profile.subjectHash) && isNonEmpty) {
       for (const op of rawState.syncOperations.values()) {
         if (!op.ownerHash || op.ownerHash === 'local-owner' || op.ownerHash === 'unassigned') {
@@ -503,17 +531,33 @@ export class SyncOrchestrator {
           preservedOfflineOpsCount++;
         }
       }
-      if (preservedOfflineOpsCount > 0) {
-        await this.db.persist();
+    }
+
+    for (const ws of rawState.workspaces.values()) {
+      if (temporary(ws.ownerSubjectHash)) ws.ownerSubjectHash = profile.subjectHash;
+    }
+    // Bootstrap existing offline workspace definitions before their account/journal operations.
+    for (const ws of rawState.workspaces.values()) {
+      if (!Array.from(rawState.syncOperations.values()).some(op => op.type === 'workspace.create' && op.entityId === ws.id))
+        this.db.queueSyncOp('workspace.create', ws.id, { workspace: { ...ws } });
+    }
+    for (const op of rawState.syncOperations.values()) {
+      if (op.type === 'workspace.create' && temporary(op.payload.workspace?.ownerSubjectHash)) {
+        op.payload.workspace.ownerSubjectHash = profile.subjectHash;
+        op.contentSha256 = await computeSha256(canonicalJson(op.payload));
       }
+      if (temporary(op.ownerHash)) op.ownerHash = profile.subjectHash;
     }
 
     // 3. Establish verified identity on database
     this.db.setIdentity(profile.subjectHash, profile.displayName);
+    await this.db.commitTransaction();
+    } catch (error) { await this.db.rollbackTransaction(); throw error; }
     this.isAuthorized = true;
 
     // 4. Trigger sync to download and apply all remote batches belonging to this verified owner,
     // and upload any preserved offline outbox operations to Google Drive
+    this.bootstrapInProgress = false;
     await this.triggerSync();
 
     return {
@@ -540,6 +584,8 @@ export class SyncOrchestrator {
       );
     }
 
+    await this.db.beginTransaction();
+    try {
     for (const op of batch.operations) {
       // 1. Validate dataset owner identity on operation
       if (!op.ownerHash) {
@@ -574,7 +620,8 @@ export class SyncOrchestrator {
       this.db.getRawState().appliedOperations.add(op.operationId);
     }
 
-    await this.db.persist();
+    await this.db.commitTransaction();
+    } catch (error) { await this.db.rollbackTransaction(); throw error; }
   }
 
   private async applySingleOperation(op: SyncOperation, isFromSelf: boolean): Promise<void> {
@@ -685,7 +732,8 @@ export class SyncOrchestrator {
       }
 
       case 'workspace.create':
-        if (payload.workspace) {
+        if (payload.workspace && payload.workspace.ownerSubjectHash === op.ownerHash &&
+          !this.db.getWorkspace(payload.workspace.id)?.deletedAt) {
           this.db.getRawState().workspaces.set(payload.workspace.id, payload.workspace);
         }
         break;
@@ -846,7 +894,7 @@ export class SyncOrchestrator {
         break;
 
       default:
-        console.warn(`Unhandled operation type: ${op.type}`);
+        throw new Error('Unsupported synchronization operation. Update this app before syncing.');
     }
   }
 }

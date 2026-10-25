@@ -1,0 +1,144 @@
+{
+  "fixture": "Synthetic Node fallback driver; not physical SQLite or APK upgrade",
+  "baselineCommit": "35e0b7c499bdb0f0e271fe2ec7de5e7dc6b3b415",
+  "before": {
+    "schema": 5,
+    "workspaces": 3,
+    "accounts": 7,
+    "transactions": 3,
+    "journalLines": 6,
+    "balances": [
+      {
+        "accountId": "19a9b84c-e487-4e5c-b55b-7ce379464e23",
+        "name": "QA cash",
+        "kind": "cash",
+        "openingBalanceMinor": "100000",
+        "currentBalanceMinor": "139000",
+        "totalDebitsMinor": "50000",
+        "totalCreditsMinor": "11000"
+      },
+      {
+        "accountId": "16d58b23-ca25-46c3-8fc2-52ebae62bb91",
+        "name": "QA bank",
+        "kind": "bank",
+        "openingBalanceMinor": "200000",
+        "currentBalanceMinor": "204000",
+        "totalDebitsMinor": "11000",
+        "totalCreditsMinor": "7000"
+      }
+    ],
+    "groupTotal": "343000",
+    "consolidated": "343000",
+    "pendingOperationIds": [
+      "c8981ad1-cb6b-40c6-a355-57d041e3f787",
+      "beb390da-a455-437a-a294-c83a1e2da58d",
+      "6141ec11-00f4-4592-b98f-2d55ea00273a",
+      "d93b9ecd-39ad-4c5b-8ebe-200b9d2169c8",
+      "e5f68cc3-004b-4b6c-8a59-859f859b48e5",
+      "a8d7ca34-00c5-4de3-8a75-f921978659ec",
+      "ee0c87d9-3204-42bb-bde1-fbc07da3fc1a",
+      "04643ea4-b55d-4749-b165-647dfd1bc39b"
+    ],
+    "ownerIdentity": null,
+    "financialIntegrity": true,
+    "preferences": [
+      [
+        "language",
+        "en"
+      ],
+      [
+        "theme",
+        "light"
+      ],
+      [
+        "pin_lock_enabled",
+        false
+      ],
+      [
+        "pin_hash",
+        ""
+      ],
+      [
+        "soundVolume",
+        0.4
+      ],
+      [
+        "syntheticProfile",
+        "QA preferences"
+      ]
+    ]
+  },
+  "after": {
+    "schema": 5,
+    "workspaces": 3,
+    "accounts": 7,
+    "transactions": 3,
+    "journalLines": 6,
+    "balances": [
+      {
+        "accountId": "19a9b84c-e487-4e5c-b55b-7ce379464e23",
+        "name": "QA cash",
+        "kind": "cash",
+        "openingBalanceMinor": "100000",
+        "currentBalanceMinor": "139000",
+        "totalDebitsMinor": "50000",
+        "totalCreditsMinor": "11000"
+      },
+      {
+        "accountId": "16d58b23-ca25-46c3-8fc2-52ebae62bb91",
+        "name": "QA bank",
+        "kind": "bank",
+        "openingBalanceMinor": "200000",
+        "currentBalanceMinor": "204000",
+        "totalDebitsMinor": "11000",
+        "totalCreditsMinor": "7000"
+      }
+    ],
+    "groupTotal": "343000",
+    "consolidated": "343000",
+    "pendingOperationIds": [
+      "c8981ad1-cb6b-40c6-a355-57d041e3f787",
+      "beb390da-a455-437a-a294-c83a1e2da58d",
+      "6141ec11-00f4-4592-b98f-2d55ea00273a",
+      "d93b9ecd-39ad-4c5b-8ebe-200b9d2169c8",
+      "e5f68cc3-004b-4b6c-8a59-859f859b48e5",
+      "a8d7ca34-00c5-4de3-8a75-f921978659ec",
+      "ee0c87d9-3204-42bb-bde1-fbc07da3fc1a",
+      "04643ea4-b55d-4749-b165-647dfd1bc39b",
+      "190080fe-71f5-4265-9464-05964a160247",
+      "d6b7e544-86ac-494d-8469-885cffe0e3bf",
+      "435cb225-79fd-4a4b-946d-1d6cdc1a7719"
+    ],
+    "ownerIdentity": null,
+    "financialIntegrity": true,
+    "preferences": [
+      [
+        "language",
+        "en"
+      ],
+      [
+        "theme",
+        "light"
+      ],
+      [
+        "pin_lock_enabled",
+        false
+      ],
+      [
+        "pin_hash",
+        ""
+      ],
+      [
+        "soundVolume",
+        0.4
+      ],
+      [
+        "syntheticProfile",
+        "QA preferences"
+      ]
+    ]
+  },
+  "recordAndBalanceParity": true,
+  "originalPendingOperationsRetained": true,
+  "apkUpgrade": "BLOCKED — REAL DEVICE / GOOGLE AUTH VERIFICATION REQUIRED"
+}

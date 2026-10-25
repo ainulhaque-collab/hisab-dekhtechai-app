@@ -39,6 +39,7 @@ import {
   buildIncomeJournal,
 } from '../domain/journal';
 import { canonicalJson, computeSha256 } from '../sync/canonical';
+import { isDeleteConfirmed } from '../domain/confirmation';
 import {
   createDurableStorageDriver,
   DurableStorageDriver,
@@ -213,7 +214,11 @@ export class LocalDatabase {
    * performing non-destructive migration from legacy localStorage if necessary.
    * Never silently falls back or wipes: storage initialization errors are strictly propagated.
    */
-  public async init(): Promise<void> {
+  private initialization: Promise<void> | null = null;
+  public init(): Promise<void> {
+    return this.initialization ??= this.initialize().catch(error => { this.initialization = null; throw error; });
+  }
+  private async initialize(): Promise<void> {
     try {
       if (!this.driver) {
         this.driver = await createDurableStorageDriver(this.storageKey);
@@ -755,11 +760,11 @@ export class LocalDatabase {
   // --- Query Engine ---
 
   public getWorkspaces(): Workspace[] {
-    return Array.from(this.state.workspaces.values()).filter((w) => !w.archivedAt);
+    return Array.from(this.state.workspaces.values()).filter((w) => !w.archivedAt && !w.deletedAt);
   }
 
   public getAllWorkspaces(): Workspace[] {
-    return Array.from(this.state.workspaces.values());
+    return Array.from(this.state.workspaces.values()).filter(w => !w.deletedAt);
   }
 
   public getWorkspace(id: UUID): Workspace | undefined {
@@ -767,15 +772,17 @@ export class LocalDatabase {
   }
 
   public createWorkspace(name: string, kind: 'personal' | 'business'): Workspace {
+    if (!name.trim()) throw new Error('Workspace name is required.');
     const ws: Workspace = {
       id: generateUUID(),
       ownerSubjectHash: this.state.localIdentity?.ownerSubjectHash || 'local-owner',
-      name,
+      name: name.trim(),
       kind,
       currency: 'BDT',
       createdAt: new Date().toISOString(),
     };
     this.state.workspaces.set(ws.id, ws);
+    this.queueSyncOp('workspace.create', ws.id, { workspace: { ...ws } });
     this.autoPersist();
     return ws;
   }
@@ -783,7 +790,11 @@ export class LocalDatabase {
   public archiveWorkspace(id: UUID): boolean {
     const ws = this.state.workspaces.get(id);
     if (!ws) return false;
+    this.assertWorkspaceOwner(ws);
+    if (ws.archivedAt) return true;
+    if (this.getWorkspaces().length <= 1) throw new Error('Keep at least one active workspace.');
     ws.archivedAt = new Date().toISOString();
+    this.queueSyncOp('workspace.archive', id, { id, archivedAt: ws.archivedAt });
     this.autoPersist();
     return true;
   }
@@ -791,7 +802,10 @@ export class LocalDatabase {
   public restoreWorkspace(id: UUID): boolean {
     const ws = this.state.workspaces.get(id);
     if (!ws) return false;
+    this.assertWorkspaceOwner(ws);
     ws.archivedAt = null;
+    // Existing v1 clients understand workspace.create as an idempotent full upsert.
+    this.queueSyncOp('workspace.create', id, { workspace: { ...ws } });
     this.autoPersist();
     return true;
   }
@@ -799,10 +813,47 @@ export class LocalDatabase {
   public editWorkspace(id: UUID, updates: Partial<Pick<Workspace, 'name' | 'kind'>>): boolean {
     const ws = this.state.workspaces.get(id);
     if (!ws) return false;
-    if (updates.name) ws.name = updates.name.trim();
+    this.assertWorkspaceOwner(ws);
+    if (updates.name !== undefined && !updates.name.trim()) throw new Error('Workspace name is required.');
+    if (updates.name !== undefined) ws.name = updates.name.trim();
     if (updates.kind) ws.kind = updates.kind;
+    this.queueSyncOp('workspace.update', id, { id, name: ws.name, kind: ws.kind });
     this.autoPersist();
     return true;
+  }
+
+  private assertWorkspaceOwner(ws: Workspace): void {
+    const owner = this.getIdentity()?.ownerSubjectHash || 'local-owner';
+    if (ws.deletedAt || ws.ownerSubjectHash !== owner) throw new Error('Workspace is unavailable or belongs to another owner.');
+  }
+
+  public workspaceDeleteBlocker(id: UUID): string | null {
+    const ws = this.state.workspaces.get(id);
+    if (!ws || ws.deletedAt) return 'Workspace not found.';
+    this.assertWorkspaceOwner(ws);
+    if (!ws.archivedAt && this.getWorkspaces().length <= 1) return 'Keep at least one active workspace.';
+    const collections = [this.state.accounts, this.state.accountGroups, this.state.accountPermissions,
+      this.state.categories, this.state.parties, this.state.journalTransactions, this.state.budgets,
+      this.state.recurringRules, this.state.recurringOccurrences, this.state.receiptBlobs, this.state.conflicts];
+    if (collections.some(collection => Array.from((collection as Map<string, any>).values()).some(record => record.workspaceId === id)))
+      return 'This workspace contains records. Archive it to preserve its history.';
+    // Retained operations/snapshots can reference a workspace even after visible records are removed.
+    if (Array.from(this.state.syncOperations.values()).some(op => !op.type.startsWith('workspace.') &&
+      (op.entityId === id || JSON.stringify(op.payload).includes(id))) ||
+      Array.from(this.state.localSnapshots.values()).some(snapshot => JSON.stringify(snapshot).includes(id)))
+      return 'Retained history or synchronization references this workspace. Archive it instead.';
+    return null;
+  }
+
+  public safeDeleteWorkspace(id: UUID, confirmation: string): void {
+    if (!isDeleteConfirmed(confirmation)) throw new Error('Exactly DELETE is required.');
+    const blocker = this.workspaceDeleteBlocker(id);
+    if (blocker) throw new Error(blocker);
+    const ws = this.state.workspaces.get(id)!;
+    ws.archivedAt = ws.deletedAt = new Date().toISOString();
+    this.queueSyncOp('workspace.archive', id, { id, archivedAt: ws.archivedAt });
+    this.queueSyncOp('workspace.create', id, { workspace: { ...ws } });
+    this.autoPersist();
   }
 
   public getAccounts(workspaceId: UUID, includeArchived = false): Account[] {
@@ -859,7 +910,7 @@ export class LocalDatabase {
       acc.accountNumberMasked = updates.accountNumberMasked.trim();
     if (updates.kind !== undefined) acc.kind = updates.kind;
     if (updates.groupId !== undefined) acc.groupId = updates.groupId;
-    this.queueSyncOp('account.update', id, updates);
+    this.queueSyncOp('account.update', id, { id, ...updates });
     this.autoPersist();
     return acc;
   }
@@ -886,11 +937,11 @@ export class LocalDatabase {
     id: UUID,
     confirmationText: string
   ): { success: boolean; mode: 'archived' | 'deleted'; error?: string } {
-    if (confirmationText !== 'DELET') {
+    if (!isDeleteConfirmed(confirmationText)) {
       return {
         success: false,
         mode: 'deleted',
-        error: 'Invalid confirmation text. Exactly "DELET" is required.',
+        error: 'Invalid confirmation text. Exactly "DELETE" is required.',
       };
     }
 
@@ -907,7 +958,11 @@ export class LocalDatabase {
       }
     }
 
-    if (hasTransactions) {
+    const hasReferences = BigInt(acc.openingBalanceMinor) !== 0n ||
+      Array.from(this.state.accountPermissions.values()).some(g => g.accountIds.includes(id)) ||
+      Array.from(this.state.recurringRules.values()).some(r => JSON.stringify(r).includes(id)) ||
+      this.getPendingOutbox().some(op => op.entityId === id || JSON.stringify(op.payload).includes(id));
+    if (hasTransactions || hasReferences) {
       acc.archivedAt = new Date().toISOString();
       this.queueSyncOp('account.archive', id, { id, archivedAt: acc.archivedAt });
       this.autoPersist();
@@ -1007,7 +1062,7 @@ export class LocalDatabase {
     if (!group) return null;
 
     const groupAccounts = Array.from(this.state.accounts.values()).filter(
-      (a) => a.workspaceId === group.workspaceId && a.groupId === groupId && !a.archivedAt
+      (a) => a.workspaceId === group.workspaceId && a.groupId === groupId
     );
     const groupAccountIds = new Set(groupAccounts.map((a) => a.id));
 
@@ -1494,7 +1549,7 @@ export class LocalDatabase {
    * Account balance = Opening Balance + Sum(Debits) - Sum(Credits)
    */
   public calculateAccountSummaries(workspaceId: UUID): AccountBalanceSummary[] {
-    const accounts = this.getAccounts(workspaceId);
+    const accounts = this.getAccounts(workspaceId, true);
     const txs = this.getTransactions(workspaceId);
 
     const summaries: AccountBalanceSummary[] = [];

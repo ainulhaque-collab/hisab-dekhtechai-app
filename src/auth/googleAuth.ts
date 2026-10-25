@@ -11,6 +11,7 @@
 
 import { Capacitor } from '@capacitor/core';
 import { computeSha256 } from '../sync/canonical';
+import { NativeGoogleDrive } from './nativeGoogle';
 
 export interface GoogleUserProfile {
   subjectId: string;
@@ -93,6 +94,7 @@ export class GoogleAuthManager {
           // Never trust or load raw tokens from unencrypted localStorage
           delete parsed.accessToken;
           delete parsed.tokenExpiresAt;
+          parsed.isDriveAuthorized = false;
           this.currentProfile = parsed;
         }
       } catch (err) {
@@ -193,6 +195,10 @@ export class GoogleAuthManager {
    * Prompts the real Google Sign-In & Drive scope consent popup via Google Identity Services.
    */
   public async promptGoogleSignIn(): Promise<GoogleUserProfile> {
+    if (Capacitor.getPlatform() === 'android') {
+      const { accessToken } = await NativeGoogleDrive.authorize({ interactive: true });
+      return this.acceptNativeToken(accessToken, false);
+    }
     const clientId = this.getClientId();
 
     return new Promise((resolve, reject) => {
@@ -222,7 +228,7 @@ export class GoogleAuthManager {
 
             try {
               // Fetch authenticated user profile using the access token
-              const userInfoRes = await fetch('https://www.googleapis.com/oauth2/v3/userinfo', {
+              const userInfoRes = await this.fetchFn('https://www.googleapis.com/oauth2/v3/userinfo', {
                 headers: {
                   Authorization: `Bearer ${resp.access_token}`,
                 },
@@ -255,6 +261,7 @@ export class GoogleAuthManager {
                 accessToken: resp.access_token,
                 tokenExpiresAt: Date.now() + expiresIn * 1000,
               };
+              this.isSimulatedAuth = false;
 
               this.saveProfile();
               resolve(this.currentProfile);
@@ -297,6 +304,10 @@ export class GoogleAuthManager {
    * Silently renews expired OAuth access token without prompting for consent again.
    */
   public async renewAccessTokenSilent(prompt: '' | 'consent' = ''): Promise<string> {
+    if (Capacitor.getPlatform() === 'android' && !this.isSimulatedAuth) {
+      const { accessToken } = await NativeGoogleDrive.authorize({ interactive: prompt === 'consent' });
+      return (await this.acceptNativeToken(accessToken, true)).accessToken!;
+    }
     if (this.isSimulatedAuth) {
       if (this.currentProfile) {
         if (this.simulatedRenewSubjectHash) {
@@ -387,6 +398,12 @@ export class GoogleAuthManager {
    * If forceRenew is true (e.g. after HTTP 401 error), invalidates local token and triggers renewal.
    */
   public async getValidAccessToken(forceRenew = false): Promise<string> {
+    if (forceRenew && Capacitor.getPlatform() === 'android' && !this.isSimulatedAuth) {
+      const invalidToken = this.currentProfile?.accessToken;
+      if (this.currentProfile) this.currentProfile.accessToken = undefined;
+      const { accessToken } = await NativeGoogleDrive.authorize({ interactive: false, invalidToken });
+      return (await this.acceptNativeToken(accessToken, true)).accessToken!;
+    }
     if (!this.currentProfile?.accessToken && !forceRenew) {
       throw new Error('User is not signed in to Google.');
     }
@@ -449,6 +466,25 @@ export class GoogleAuthManager {
 
   public signOut(): void {
     this.currentProfile = null;
+    this.isSimulatedAuth = false;
     this.saveProfile();
+  }
+
+  private async acceptNativeToken(accessToken: string, renewal: boolean): Promise<GoogleUserProfile> {
+    const response = await this.fetchFn('https://www.googleapis.com/oauth2/v3/userinfo', {
+      headers: { Authorization: `Bearer ${accessToken}` },
+    });
+    if (!response.ok) throw new Error('Google identity verification failed. Reconnect Google Drive.');
+    const info = await response.json();
+    const subjectHash = await computeOwnerSubjectHash(info.sub);
+    if (renewal && (!this.currentProfile || this.currentProfile.subjectHash !== subjectHash)) {
+      throw new Error('Security Error: Renewed Google account owner does not match dataset owner.');
+    }
+    this.currentProfile = { subjectId: info.sub, subjectHash, email: info.email || '',
+      displayName: info.name || info.email || 'Google user', photoUrl: info.picture,
+      isDriveAuthorized: true, accessToken, tokenExpiresAt: Date.now() + 3500_000 };
+    this.isSimulatedAuth = false;
+    this.saveProfile();
+    return this.currentProfile;
   }
 }

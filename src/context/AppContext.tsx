@@ -70,7 +70,7 @@ interface AppContextType {
   setLanguage: (lang: 'bn' | 'en') => void;
   refreshState: () => void;
   triggerManualSync: () => Promise<void>;
-  createWorkspace: (name: string, kind: 'personal' | 'business') => Workspace;
+  createWorkspace: (name: string, kind: 'personal' | 'business') => Promise<Workspace>;
   archiveWorkspace: (id: UUID) => boolean;
   restoreWorkspace: (id: UUID) => boolean;
   durabilityInfo: { type: string; isPersistent: boolean; warning?: string };
@@ -226,7 +226,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   const [recurringRules, setRecurringRules] = useState<RecurringRule[]>([]);
   const [syncStatus, setSyncStatus] = useState<SyncStatusInfo>(() => sync.getStatus());
   const [userProfile, setUserProfile] = useState<GoogleUserProfile | null>(() => auth.getProfile());
-  const [isOnline, setIsOnlineState] = useState<boolean>(true);
+  const [isOnline, setIsOnlineState] = useState<boolean>(() => typeof navigator === 'undefined' || navigator.onLine);
   const [language, setLanguageState] = useState<'bn' | 'en'>(() => {
     if (typeof localStorage !== 'undefined') {
       const saved = localStorage.getItem('hisab_language');
@@ -248,17 +248,21 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     warning?: string;
   }>({ type: 'indexeddb', isPersistent: true });
 
+  const [storageReady, setStorageReady] = useState(false);
+  const [storageError, setStorageError] = useState(false);
   // Initialize durable storage engine on mount / db switch
   useEffect(() => {
     let isMounted = true;
+    setStorageReady(false);
     db.init().then(() => {
       if (isMounted) {
         db.getDurabilityInfo().then((info) => {
           if (isMounted) setDurabilityInfo(info);
         });
         refreshState();
+        setStorageReady(true);
       }
-    });
+    }).catch(() => { if (isMounted) setStorageError(true); });
     return () => {
       isMounted = false;
     };
@@ -283,6 +287,9 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       setDashboardData(db.getDashboardData(activeWs.id));
       setBudgets(db.getBudgets(activeWs.id));
       setRecurringRules(db.getRecurringRules(activeWs.id));
+    } else {
+      setAccounts([]); setAccountGroups([]); setAccountPermissions([]); setCategories([]);
+      setParties([]); setTransactions([]); setDashboardData(null); setBudgets([]); setRecurringRules([]);
     }
     setConflicts(db.getConflicts());
     setSyncStatus(sync.getStatus());
@@ -328,6 +335,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       setIsOnlineState(false);
       sync.setOnline(false);
     };
+    sync.setOnline(typeof navigator === 'undefined' || navigator.onLine);
 
     if (typeof window !== 'undefined') {
       window.addEventListener('online', handleOnline);
@@ -377,14 +385,18 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   };
 
   const triggerManualSync = async () => {
+    if (!auth.isRealGoogleAuthenticated() || !db.getIdentity()?.ownerSubjectHash) {
+      sync.setAuthorized(false);
+      return;
+    }
     await sync.triggerSync();
     refreshState();
   };
 
-  const createWorkspace = (name: string, kind: 'personal' | 'business') => {
-    const ws = db.createWorkspace(name, kind);
-    refreshState();
-    return ws;
+  const createWorkspace = async (name: string, kind: 'personal' | 'business') => {
+    await db.beginTransaction();
+    try { const ws = db.createWorkspace(name, kind); await db.commitTransaction(); refreshState(); return ws; }
+    catch (error) { await db.rollbackTransaction(); throw error; }
   };
 
   const archiveWorkspace = (id: UUID) => {
@@ -562,6 +574,13 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   };
 
   const signInWithGoogle = async (): Promise<GoogleUserProfile> => {
+    await db.init();
+    const needsBinding = !db.getIdentity() && db.getRawState().syncOperations.size > 0;
+    if (needsBinding && !window.confirm(language === 'en'
+      ? 'Link all existing offline records on this device to the Google account you select? Use only your own account.'
+      : 'এই ডিভাইসের সব অফলাইন হিসাব নির্বাচিত গুগল অ্যাকাউন্টের সাথে যুক্ত করবেন? শুধুমাত্র নিজের অ্যাকাউন্ট ব্যবহার করুন।')) {
+      throw new Error('Offline ownership binding cancelled.');
+    }
     const profile = await auth.promptGoogleSignIn();
     try {
       if (profile.accessToken) {
@@ -571,19 +590,21 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
           })
         );
       }
-      await sync.bootstrapAndRestore(profile);
+      await sync.bootstrapAndRestore(profile, needsBinding);
       refreshState();
       return profile;
     } catch (err) {
       auth.signOut();
+      sync.setAuthorized(false);
       refreshState();
       throw err;
     }
   };
 
   const bootstrapWithTestProfile = async (profile: GoogleUserProfile): Promise<void> => {
+    if (prod) throw new Error('Test authentication is forbidden in production.');
     try {
-      await sync.bootstrapAndRestore(profile);
+      await sync.bootstrapAndRestore(profile, true);
       refreshState();
     } catch (err) {
       auth.signOut();
@@ -676,7 +697,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         signOut,
       }}
     >
-      {children}
+      {storageReady ? children : <div role="status" className="p-8 text-center">{storageError ? 'Storage could not be opened. Your records are preserved. Restart the app; do not clear storage.' : 'Opening your local records…'}</div>}
     </AppContext.Provider>
   );
 };

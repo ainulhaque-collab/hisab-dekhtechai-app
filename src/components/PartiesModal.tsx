@@ -1,3 +1,4 @@
+import { AppSelect } from './AppSelect';
 import React, { useState, useMemo } from 'react';
 import { useApp } from '../context/AppContext';
 import { BusinessParty, PartyRole } from '../contracts/types';
@@ -215,7 +216,7 @@ export const PartiesModal: React.FC<PartiesModalProps> = ({ isOpen, onClose }) =
                   <label className="block text-slate-700 font-semibold mb-1">
                     {isEn ? 'Role / Relationship' : 'ভূমিকা / পদবি'}
                   </label>
-                  <select
+                  <AppSelect aria-label={isEn ? 'Role / Relationship' : 'ভূমিকা / সম্পর্ক'}
                     value={role}
                     onChange={(e) => setRole(e.target.value as PartyRole)}
                     className="w-full px-3 py-2 bg-white border border-slate-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-600 font-medium"
@@ -225,7 +226,7 @@ export const PartiesModal: React.FC<PartiesModalProps> = ({ isOpen, onClose }) =
                     <option value="customer">{isEn ? 'Customer / Client' : 'গ্রাহক / কাস্টমার'}</option>
                     <option value="supplier">{isEn ? 'Supplier / Vendor' : 'সরবরাহকারী / মহাজন'}</option>
                     <option value="other">{isEn ? 'Other Member' : 'অন্যান্য ব্যক্তি'}</option>
-                  </select>
+                  </AppSelect>
                 </div>
 
                 <div>

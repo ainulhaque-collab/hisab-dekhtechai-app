@@ -1,3 +1,4 @@
+import { SecuritySettings } from './SecuritySettings';
 import React, { useState } from 'react';
 import { useApp } from '../context/AppContext';
 import {
@@ -14,7 +15,6 @@ import {
   Play
 } from 'lucide-react';
 import { soundService } from '../services/soundService';
-import { pinLock } from '../security/pinLock';
 
 interface SettingsModalProps {
   isOpen: boolean;
@@ -32,6 +32,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
     setLanguage,
     userProfile,
     auth,
+    signOut,
     db,
     refreshState,
     soundPrefs,
@@ -40,30 +41,9 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
 
   const isEn = language === 'en';
 
-  const [pinEnabled, setPinEnabled] = useState(() => pinLock.isEnabled());
-  const [pin, setPin] = useState('');
-  const [confirmPin, setConfirmPin] = useState('');
-  const [showPinSetup, setShowPinSetup] = useState(false);
   const [activeSubTab, setActiveSubTab] = useState<'general' | 'sound' | 'security' | 'privacy'>('general');
 
   if (!isOpen) return null;
-
-  const handleSavePin = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (pin.length !== 4) {
-      alert(isEn ? 'PIN must be 4 digits' : 'পিন ৪ সংখ্যার হতে হবে');
-      return;
-    }
-    if (pin !== confirmPin) {
-      alert(isEn ? 'PINs do not match' : 'উভয় পিন এক হতে হবে');
-      return;
-    }
-    await pinLock.setPin(pin);
-    setPinEnabled(true);
-    setShowPinSetup(false);
-    setPin('');
-    setConfirmPin('');
-  };
 
   const handleSignOut = () => {
     const pending = db.getPendingOutbox().length;
@@ -75,7 +55,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
         return;
       }
     }
-    auth.signOut();
+    signOut();
     refreshState();
     onClose();
   };
@@ -160,12 +140,12 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                 </span>
                 <span
                   className={`text-[10px] font-medium px-2 py-0.5 rounded-full ${
-                    userProfile?.isDriveAuthorized
+                    auth.isDriveAuthorized()
                       ? 'bg-emerald-50 text-emerald-700'
                       : 'bg-amber-50 text-amber-700'
                   }`}
                 >
-                  {userProfile?.isDriveAuthorized
+                  {auth.isDriveAuthorized()
                     ? (isEn ? 'Connected' : 'সংযুক্ত')
                     : (isEn ? 'Not Connected' : 'সংযোগ নেই')}
                 </span>
@@ -362,86 +342,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
         )}
 
         {/* Security / PIN Lock Tab */}
-        {activeSubTab === 'security' && (
-          <div className="space-y-3 pt-1">
-            <div className="p-3.5 bg-slate-50 rounded-xl border border-slate-200/80 space-y-2.5">
-              <div className="flex items-center justify-between">
-                <div className="flex items-center gap-2">
-                  <Lock className="w-4 h-4 text-slate-600" />
-                  <span className="font-medium text-slate-800">
-                    {isEn ? '4-Digit App Lock PIN' : '৪-সংখ্যার অ্যাপ লক পিন'}
-                  </span>
-                </div>
-                <input
-                  type="checkbox"
-                  checked={pinEnabled}
-                  onChange={(e) => {
-                    if (e.target.checked) {
-                      setShowPinSetup(true);
-                    } else {
-                      pinLock.removePin();
-                      setPinEnabled(false);
-                    }
-                  }}
-                  className="w-4 h-4 rounded text-slate-900 focus:ring-slate-900"
-                />
-              </div>
-
-              <p className="text-[11px] text-slate-500">
-                {isEn
-                  ? 'Require PIN authentication each time the application is opened.'
-                  : 'অ্যাপ ওপেন করার সময় পিন ভেরিফিকেশন প্রয়োজন হবে।'}
-              </p>
-
-              {showPinSetup && (
-                <form onSubmit={handleSavePin} className="space-y-2.5 pt-2 border-t border-slate-200">
-                  <div>
-                    <label className="block text-slate-700 font-medium mb-1">
-                      {isEn ? 'Enter 4-Digit PIN' : '৪-সংখ্যার পিন দিন'}
-                    </label>
-                    <input
-                      type="password"
-                      maxLength={4}
-                      value={pin}
-                      onChange={(e) => setPin(e.target.value.replace(/\D/g, ''))}
-                      className="w-full px-3 py-2 bg-white border border-slate-300 rounded-lg text-center text-lg tracking-widest font-mono"
-                      autoFocus
-                      required
-                    />
-                  </div>
-                  <div>
-                    <label className="block text-slate-700 font-medium mb-1">
-                      {isEn ? 'Confirm PIN' : 'পিন নিশ্চিত করুন'}
-                    </label>
-                    <input
-                      type="password"
-                      maxLength={4}
-                      value={confirmPin}
-                      onChange={(e) => setConfirmPin(e.target.value.replace(/\D/g, ''))}
-                      className="w-full px-3 py-2 bg-white border border-slate-300 rounded-lg text-center text-lg tracking-widest font-mono"
-                      required
-                    />
-                  </div>
-                  <div className="flex gap-2 pt-1">
-                    <button
-                      type="submit"
-                      className="flex-1 py-1.5 bg-slate-900 hover:bg-slate-800 text-white rounded-lg font-medium shadow-2xs transition-colors"
-                    >
-                      {isEn ? 'Set PIN' : 'সংরক্ষণ'}
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => setShowPinSetup(false)}
-                      className="px-3 py-1.5 border border-slate-200 text-slate-600 rounded-lg font-medium hover:bg-slate-100"
-                    >
-                      {isEn ? 'Cancel' : 'বাতিল'}
-                    </button>
-                  </div>
-                </form>
-              )}
-            </div>
-          </div>
-        )}
+        {activeSubTab === 'security' && <SecuritySettings language={language} />}
 
         {/* Privacy Tab */}
         {activeSubTab === 'privacy' && (

@@ -1,4 +1,5 @@
-import React, { useState, useMemo, useEffect } from 'react';
+import { AppSelect } from './AppSelect';
+import React, { useState, useMemo, useEffect, useRef } from 'react';
 import { useApp } from '../context/AppContext';
 import {
   toPaisa,
@@ -120,6 +121,7 @@ export const AddTransactionTab: React.FC<AddTransactionTabProps> = ({ onSuccess 
   const [receiptName, setReceiptName] = useState<string | null>(null);
   const [receiptBase64, setReceiptBase64] = useState<string | null>(null);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
+  const submissionInFlight = useRef(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [successToast, setSuccessToast] = useState(false);
 
@@ -264,6 +266,8 @@ export const AddTransactionTab: React.FC<AddTransactionTabProps> = ({ onSuccess 
       }
     }
 
+    if (submissionInFlight.current) return;
+    submissionInFlight.current = true;
     setIsSubmitting(true);
 
     try {
@@ -403,6 +407,7 @@ export const AddTransactionTab: React.FC<AddTransactionTabProps> = ({ onSuccess 
     } catch (err: any) {
       setErrorMsg(err.message || (isEn ? 'Failed to save transaction' : 'লেনদেন সংরক্ষণ ব্যর্থ হয়েছে'));
     } finally {
+      submissionInFlight.current = false;
       setIsSubmitting(false);
     }
   };
@@ -615,7 +620,7 @@ export const AddTransactionTab: React.FC<AddTransactionTabProps> = ({ onSuccess 
                     <span>{isEn ? 'New' : 'নতুন'}</span>
                   </button>
                 </div>
-                <select
+                <AppSelect aria-label={isEn ? 'Main Category' : 'প্রধান খাত'}
                   value={categoryId}
                   onChange={(e) => handleParentCategoryChange(e.target.value)}
                   className="w-full px-3 py-2 bg-slate-50 border border-slate-300 rounded-xl text-xs font-medium focus:bg-white focus:outline-none focus:ring-2 focus:ring-blue-600"
@@ -625,7 +630,7 @@ export const AddTransactionTab: React.FC<AddTransactionTabProps> = ({ onSuccess 
                       {isEn && c.nameEn ? c.nameEn : c.name}
                     </option>
                   ))}
-                </select>
+                </AppSelect>
               </div>
             )}
           </div>
@@ -649,7 +654,7 @@ export const AddTransactionTab: React.FC<AddTransactionTabProps> = ({ onSuccess 
                   <span>{isEn ? 'Sub-category' : 'সাব-ক্যাটাগরি'}</span>
                 </button>
               </div>
-              <select
+              <AppSelect aria-label={isEn ? 'Sub-category' : 'উপখাত'}
                 value={subCategoryId}
                 onChange={(e) => setSubCategoryId(e.target.value)}
                 className="w-full px-3 py-2 bg-slate-50 border border-slate-300 rounded-xl text-xs font-medium focus:bg-white focus:outline-none focus:ring-2 focus:ring-blue-600"
@@ -662,7 +667,7 @@ export const AddTransactionTab: React.FC<AddTransactionTabProps> = ({ onSuccess 
                     {isEn && sc.nameEn ? sc.nameEn : sc.name}
                   </option>
                 ))}
-              </select>
+              </AppSelect>
             </div>
           )}
 
@@ -691,7 +696,7 @@ export const AddTransactionTab: React.FC<AddTransactionTabProps> = ({ onSuccess 
                 </button>
               </div>
 
-              <select
+              <AppSelect aria-label={isEn ? 'Associated Person' : 'সংশ্লিষ্ট ব্যক্তি'}
                 value={partyId}
                 onChange={(e) => setPartyId(e.target.value)}
                 className="w-full px-3 py-2 bg-white border border-slate-300 rounded-xl text-xs font-medium focus:bg-white focus:outline-none focus:ring-2 focus:ring-blue-600"
@@ -704,7 +709,7 @@ export const AddTransactionTab: React.FC<AddTransactionTabProps> = ({ onSuccess 
                     {p.name} — {getRoleLabel(p.role)} {p.phone ? `(${p.phone})` : ''}
                   </option>
                 ))}
-              </select>
+              </AppSelect>
             </div>
           )}
 
@@ -929,7 +934,7 @@ export const AddTransactionTab: React.FC<AddTransactionTabProps> = ({ onSuccess 
                 <label className="block text-slate-700 font-bold mb-1">
                   {isEn ? 'Role in Business' : 'ব্যবসার সাথে সম্পর্ক / পদবি'}
                 </label>
-                <select
+                <AppSelect aria-label={isEn ? 'Role in Business' : 'ব্যবসার সাথে সম্পর্ক'}
                   value={newPartyRole}
                   onChange={(e) => setNewPartyRole(e.target.value as PartyRole)}
                   className="w-full px-3 py-2 bg-slate-50 border border-slate-300 rounded-xl focus:bg-white focus:outline-none focus:ring-2 focus:ring-blue-600 font-medium"
@@ -939,7 +944,7 @@ export const AddTransactionTab: React.FC<AddTransactionTabProps> = ({ onSuccess 
                   <option value="customer">{isEn ? 'Customer / Client' : 'গ্রাহক / কাস্টমার'}</option>
                   <option value="supplier">{isEn ? 'Supplier / Vendor' : 'সরবরাহকারী / মহাজন'}</option>
                   <option value="other">{isEn ? 'Other' : 'অন্যান্য'}</option>
-                </select>
+                </AppSelect>
               </div>
 
               <div>

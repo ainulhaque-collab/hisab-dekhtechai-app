@@ -1,3 +1,4 @@
+import { AppSelect } from './AppSelect';
 import React, { useState, useMemo } from 'react';
 import { useApp } from '../context/AppContext';
 import { formatBDT, parsePaisaString, toPaisa } from '../domain/money';
@@ -524,7 +525,7 @@ export const ReportsTab: React.FC = () => {
                 <label className="block text-slate-700 font-medium mb-1">
                   {isEn ? 'Category' : 'খাত / ক্যাটাগরি'}
                 </label>
-                <select
+                <AppSelect aria-label={isEn ? 'Budget Category' : 'বাজেটের খাত'}
                   value={selectedCatId}
                   onChange={(e) => setSelectedCatId(e.target.value)}
                   className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-lg text-slate-900 focus:outline-none focus:border-slate-400"
@@ -536,7 +537,7 @@ export const ReportsTab: React.FC = () => {
                         {c.name}
                       </option>
                     ))}
-                </select>
+                </AppSelect>
               </div>
               <div>
                 <label className="block text-slate-700 font-medium mb-1">
@@ -619,7 +620,7 @@ export const ReportsTab: React.FC = () => {
                   <label className="block text-slate-700 font-medium mb-1">
                     {isEn ? 'Frequency' : 'পুনরাবৃত্তি'}
                   </label>
-                  <select
+                  <AppSelect aria-label={isEn ? 'Frequency' : 'পুনরাবৃত্তি'}
                     value={recFreq}
                     onChange={(e) => setRecFreq(e.target.value as any)}
                     className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-lg text-slate-900 focus:outline-none focus:border-slate-400"
@@ -627,7 +628,7 @@ export const ReportsTab: React.FC = () => {
                     <option value="monthly">{isEn ? 'Monthly' : 'মাসিক'}</option>
                     <option value="weekly">{isEn ? 'Weekly' : 'সাপ্তাহিক'}</option>
                     <option value="daily">{isEn ? 'Daily' : 'দৈনিক'}</option>
-                  </select>
+                  </AppSelect>
                 </div>
                 <div>
                   <label className="block text-slate-700 font-medium mb-1">
