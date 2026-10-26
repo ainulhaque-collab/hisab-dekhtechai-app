@@ -7,7 +7,7 @@ import { AIServiceError, googleIdentityVerifier, ownerHashForSubject } from '../
 import { DevelopmentAIBudget, RedisAIBudget } from '../../server/ai/budget';
 import { aiOptionsFromEnvironment } from '../../server/ai/runtime';
 import { validateEntryDraft } from '../ai/entryDraft';
-import { aiEndpoint, extractEntry, validateExtractionResult } from '../ai/client';
+import { aiEndpoint, aiErrorMessage, extractEntry, validateExtractionResult } from '../ai/client';
 import { validateReviewedEntry } from '../ai/review';
 import { receiptFromBytes } from '../storage/receipts';
 
@@ -145,10 +145,23 @@ test('Provider busy, quota and permission errors are safe actionable HTTP respon
   let code = 'AI_PROVIDER_BUSY';
   const server = await serve(t, { budget: new DevelopmentAIBudget({ perMinute: 10, perDay: 10, globalPerDay: 100 }),
     provider: { provider: 'gemini', extract: async () => { throw new Error(code); } } });
-  for (const [expectedCode, status] of [['AI_PROVIDER_BUSY', 503], ['AI_PROVIDER_QUOTA', 429], ['AI_PROVIDER_AUTH_ERROR', 503], ['AI_MODEL_UNAVAILABLE', 503]] as const) {
+  for (const [expectedCode, status] of [['AI_PROVIDER_BUSY', 503], ['AI_PROVIDER_QUOTA', 429], ['AI_PROVIDER_AUTH_ERROR', 503], ['AI_MODEL_UNAVAILABLE', 503], ['AI_RESPONSE_INCOMPLETE', 422], ['AI_CONTENT_BLOCKED', 422]] as const) {
     code = expectedCode;
     const response = await server.post(body());
     assert.equal(response.status, status);
     assert.deepEqual(await response.json(), { error: expectedCode });
   }
+});
+
+test('Google verification outage is actionable in the UI and diagnostics contain only stage/code/status', async t => {
+  const failures: unknown[] = [];
+  const server = await serve(t, { verifyToken: async () => { throw new AIServiceError('AI_AUTH_UNAVAILABLE', 503); }, onFailure: failure => failures.push(failure) });
+  await assert.rejects(extractEntry(input(), owner, { isTestMode: () => false, getValidAccessToken: async () => 'synthetic-valid-token', getProfile: () => ({ subjectHash: owner }) },
+    { endpoint: server.endpoint }), error => {
+      assert.equal((error as Error).message, 'AI_AUTH_UNAVAILABLE');
+      assert.match(aiErrorMessage(error, true), /sign-in could not be verified/);
+      assert.doesNotMatch(aiErrorMessage(error, true), /temporarily unavailable/);
+      return true;
+    });
+  assert.deepEqual(failures, [{ code: 'AI_AUTH_UNAVAILABLE', status: 503, stage: 'authentication' }]);
 });

@@ -3,20 +3,17 @@ import { EntryExtractionProvider, ExtractionInput } from './provider';
 import { GeminiEntryProvider } from './gemini';
 import { validateExtractionMedia } from '../../src/ai/media';
 
-/** Explicit policy: newest stable Flash family advertised by this key's model
- * catalog. Avoid Pro pricing, previews, experimental/live/image/TTS/tuned models.
- * Availability and a name are not a claim of measured extraction accuracy. */
+/** Reviewed production models, in reliability order. Google's catalog can also
+ * advertise retired/unsupported models, and a newer version may be overloaded.
+ * Confirmed against official model docs and this app's live extraction test.
+ * Keep auto within reviewed models; operators may explicitly pin another ID. */
+export const AUTOMATIC_GEMINI_MODELS = ['gemini-3.6-flash', 'gemini-3.8-flash'] as const;
 export function selectAutomaticGeminiModel(models: Model[], excluded: ReadonlySet<string> = new Set()): string {
-  const eligible = models.flatMap(model => {
-    const match = model.name?.match(/^(?:models\/)?gemini-(\d+)(?:\.(\d+))?-flash(?:-(\d{3}))?$/);
-    if (!match || excluded.has(model.name!.replace(/^models\//, '')) || !model.supportedActions?.includes('generateContent') || (model.outputTokenLimit || 0) < 2048) return [];
-    const major = Number(match[1]), minor = Number(match[2] || 0), revision = Number(match[3] || 0);
-    if (major < 2 || major === 2 && minor < 5) return [];
-    return [{ name: model.name!.replace(/^models\//, ''), major, minor, revision }];
-  });
-  eligible.sort((a, b) => b.major - a.major || b.minor - a.minor || b.revision - a.revision || a.name.localeCompare(b.name));
-  if (!eligible.length) throw new Error('AI_MODEL_UNAVAILABLE');
-  return eligible[0].name;
+  for (const name of AUTOMATIC_GEMINI_MODELS) {
+    if (!excluded.has(name) && models.some(model => model.name?.replace(/^models\//, '') === name &&
+      model.supportedActions?.includes('generateContent') && (model.outputTokenLimit || 0) >= 2048)) return name;
+  }
+  throw new Error('AI_MODEL_UNAVAILABLE');
 }
 
 export class AutomaticGeminiEntryProvider implements EntryExtractionProvider {

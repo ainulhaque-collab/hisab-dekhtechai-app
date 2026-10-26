@@ -56,7 +56,8 @@ export async function extractEntry(input: ExtractionInput, ownerHash: string, id
   if (!response.ok) {
     const allowed = ['AI_AUTH_REQUIRED', 'AI_OWNER_MISMATCH', 'AI_LIMIT_REACHED', 'AI_NOT_CONFIGURED',
       'AI_REQUEST_ALREADY_USED', 'AI_AUTH_UNAVAILABLE', 'AI_LIMIT_UNAVAILABLE', 'AI_RESPONSE_INVALID', 'AI_MODEL_UNAVAILABLE',
-      'AI_PROVIDER_BUSY', 'AI_PROVIDER_QUOTA', 'AI_PROVIDER_AUTH_ERROR'];
+      'AI_PROVIDER_BUSY', 'AI_PROVIDER_QUOTA', 'AI_PROVIDER_AUTH_ERROR', 'AI_CONTENT_BLOCKED', 'AI_RESPONSE_INCOMPLETE',
+      'AI_ORIGIN_DENIED', 'AI_MEDIA_TOO_LARGE', 'AI_MEDIA_OR_CONSENT_INVALID'];
     throw new Error(allowed.includes(raw?.error) ? raw.error : 'AI_PROVIDER_UNAVAILABLE');
   }
   return validateExtractionResult(raw, sourceSha256, requestId);
@@ -76,6 +77,13 @@ export function aiErrorMessage(error: unknown, isEn: boolean) {
     AI_PROVIDER_BUSY: ['Google AI is temporarily busy. You can try creating the draft again or enter manually.', 'Google AI এখন সাময়িকভাবে ব্যস্ত। আবার খসড়া তৈরি করতে পারেন অথবা নিজে এন্ট্রি দিন।'],
     AI_PROVIDER_QUOTA: ['The Google AI usage limit has been reached. Try later or enter manually.', 'Google AI-এর ব্যবহারসীমা শেষ হয়েছে। পরে চেষ্টা করুন অথবা নিজে এন্ট্রি দিন।'],
     AI_PROVIDER_AUTH_ERROR: ['AI entry needs attention from support. You can still enter transactions manually.', 'AI এন্ট্রির জন্য সহায়তা প্রয়োজন। আপাতত নিজে লেনদেন যোগ করতে পারবেন।'],
+    AI_AUTH_UNAVAILABLE: ['Google sign-in could not be verified right now. Check your connection and try again.', 'Google সংযোগ এখন যাচাই করা যাচ্ছে না। ইন্টারনেট পরীক্ষা করে আবার চেষ্টা করুন।'],
+    AI_LIMIT_UNAVAILABLE: ['AI usage could not be checked right now. Try later or enter manually.', 'AI ব্যবহারের অনুমতি এখন যাচাই করা যাচ্ছে না। পরে চেষ্টা করুন অথবা নিজে এন্ট্রি দিন।'],
+    AI_CONTENT_BLOCKED: ['AI could not process this content. You can enter the transaction manually.', 'AI এই ছবি বা অডিও প্রক্রিয়া করতে পারেনি। নিজে লেনদেন যোগ করতে পারবেন।'],
+    AI_RESPONSE_INCOMPLETE: ['The AI draft was incomplete. Try a shorter recording or enter the details manually.', 'AI খসড়া সম্পূর্ণ হয়নি। ছোট অডিও দিয়ে চেষ্টা করুন অথবা নিজে তথ্য লিখুন।'],
+    AI_ORIGIN_DENIED: ['AI entry is unavailable from this app address. Contact support.', 'অ্যাপের এই ঠিকানায় AI এন্ট্রি চালু নেই। সহায়তার জন্য যোগাযোগ করুন।'],
+    AI_MEDIA_TOO_LARGE: ['Choose an image or audio file up to 2 MB.', 'সর্বোচ্চ ২ মেগাবাইটের ছবি বা অডিও বেছে নিন।'],
+    AI_MEDIA_OR_CONSENT_INVALID: ['Check the selected image or audio and confirm permission to process it.', 'বেছে নেওয়া ছবি বা অডিও এবং প্রক্রিয়া করার অনুমতি পরীক্ষা করুন।'],
   };
   const message = messages[code] || ['AI is temporarily unavailable. Your existing entries are safe.', 'AI এখন সাময়িকভাবে কাজ করছে না। আগের লেনদেনগুলো সংরক্ষিত আছে।'];
   return message[isEn ? 0 : 1];

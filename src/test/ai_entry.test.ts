@@ -1,5 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { BlockedReason, FinishReason } from '@google/genai';
 import { validateEntryDraft } from '../ai/entryDraft';
 import { GeminiEntryProvider } from '../../server/ai/gemini';
 import { receiptFromBytes } from '../storage/receipts';
@@ -68,4 +69,20 @@ test('Google service statuses become fixed safe errors, without leaking response
       assert.equal((error as Error).message, expected); return true;
     });
   }
+});
+
+test('Gemini incomplete or blocked output cannot masquerade as a valid draft', async () => {
+  const media = { source: 'receipt' as const, receipt: receipt(), consentToProcess: true };
+  for (const [finishReason, code] of [[FinishReason.MAX_TOKENS, 'AI_RESPONSE_INCOMPLETE'], [FinishReason.SAFETY, 'AI_CONTENT_BLOCKED']] as const) {
+    const provider = new GeminiEntryProvider(config, async () => ({ text: JSON.stringify(raw()), candidates: [{ finishReason }] }));
+    await assert.rejects(provider.extract(media), new RegExp(code));
+  }
+  const blocked = new GeminiEntryProvider(config, async () => ({ text: JSON.stringify(raw()), promptFeedback: { blockReason: BlockedReason.SAFETY } }));
+  await assert.rejects(blocked.extract(media), /AI_CONTENT_BLOCKED/);
+  const checked = new GeminiEntryProvider({ ...config, model: 'gemini-3.6-flash' }, async request => {
+    assert.equal(request.config?.thinkingConfig?.thinkingLevel, 'MINIMAL');
+    assert.equal(request.config?.candidateCount, 1);
+    return { text: JSON.stringify(raw()), candidates: [{ finishReason: FinishReason.STOP }] };
+  });
+  assert.equal((await checked.extract(media)).draft.amountDecimal, '123.45');
 });

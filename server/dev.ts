@@ -5,6 +5,7 @@ import { aiOptionsFromEnvironment } from './ai/runtime';
 
 dotenv.config({ path: ['.env.ai.local', '.env'], quiet: true });
 const options = aiOptionsFromEnvironment(process.env, true);
+options.onFailure = failure => console.warn(JSON.stringify({ event: 'ai_request_failed', ...failure }));
 const app = express();
 app.disable('x-powered-by');
 app.use('/api/ai', createAIRouter(options));
