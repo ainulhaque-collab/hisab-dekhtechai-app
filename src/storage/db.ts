@@ -38,7 +38,7 @@ import {
   buildExpenseJournal,
   buildIncomeJournal,
 } from '../domain/journal';
-import { canonicalJson, computeSha256 } from '../sync/canonical';
+import { canonicalJson, computeSha256, computeSha256Sync } from '../sync/canonical';
 import { isDeleteConfirmed } from '../domain/confirmation';
 import { decodeBackup, encodeBackup, mergeBackup } from './backup';
 import {
@@ -623,6 +623,7 @@ export class LocalDatabase {
       payload: JSON.parse(JSON.stringify(payload)),
       contentSha256: '',
     };
+    op.contentSha256 = computeSha256Sync(canonicalJson(op.payload));
     this.state.syncOperations.set(opId, op);
     this.state.syncOutbox.set(opId, {
       opId,

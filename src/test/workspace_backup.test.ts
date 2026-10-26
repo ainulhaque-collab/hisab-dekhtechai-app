@@ -8,7 +8,7 @@ import { canonicalJson, computeSha256 } from '../sync/canonical';
 import { buildIncomeJournal, generateUUID } from '../domain/journal';
 import { SyncOrchestrator } from '../sync/orchestrator';
 import { SimulatedGoogleDriveTransport } from '../drive/transport';
-import { GoogleAuthManager } from '../auth/googleAuth';
+import { GoogleAuthManager, computeOwnerSubjectHash } from '../auth/googleAuth';
 import { googleErrorMessage } from '../auth/authErrors';
 
 async function database() {
@@ -24,6 +24,36 @@ async function post(db: LocalDatabase, amount = '12345') {
     type: 'journal.post', payload, createdAtUtc: new Date().toISOString(), contentSha256: await computeSha256(canonicalJson(payload)) });
   return journal;
 }
+
+test('Downloaded Drive backup imports after the same owner logs in and restores cloud records', async () => {
+  SimulatedGoogleDriveTransport.clearSharedCloud();
+  const profile = { subjectId: 'backup-restore-qa', subjectHash: await computeOwnerSubjectHash('backup-restore-qa'),
+    email: 'qa@example.invalid', displayName: 'QA', isDriveAuthorized: true, accessToken: 'synthetic-qa' };
+  const transport = new SimulatedGoogleDriveTransport(); const { db: source } = await database();
+  await post(source); source.createWorkspace('Synthetic workspace', 'business');
+  const original = new SyncOrchestrator(source, transport, { cloudBackups: true }); await original.bootstrapAndRestore(profile, true);
+  const file = await original.downloadCloudBackup();
+  const { db: restored } = await database(); const next = new SyncOrchestrator(restored, transport, { cloudBackups: true });
+  await next.bootstrapAndRestore(profile);
+  await restored.importBackupFile(file);
+  await restored.importBackupFile(file);
+  assert.equal(restored.getTransactions('ws-personal-default').length, 1);
+  assert.equal(restored.verifyLedgerIntegrity('ws-personal-default').isValid, true);
+});
+
+test('Legacy blank operation checksums merge with verified sync copies, but altered payloads or hashes are rejected', async () => {
+  const { db } = await database(); db.createWorkspace('Synthetic metadata', 'business'); await db.waitForPendingWrites();
+  const old = structuredClone(db.toSerializable()); const op = [...db.getRawState().syncOperations.values()][0];
+  const legacy = old.syncOperations.find(([id]: [string]) => id === op.operationId)[1]; legacy.contentSha256 = '';
+  op.contentSha256 = await computeSha256(canonicalJson(op.payload));
+  await db.importBackupFile(await encodeBackup(old)); assert.ok(db.getRawState().syncOperations.get(op.operationId)?.contentSha256);
+  const bad = structuredClone(old); bad.syncOperations[0][1].payload.workspace.name = 'Altered';
+  const before = canonicalJson(db.toSerializable());
+  await assert.rejects(db.importBackupFile(await encodeBackup(bad)), /BACKUP_CONFLICT/);
+  const damaged = structuredClone(old); damaged.syncOperations[0][1].contentSha256 = '0'.repeat(64);
+  await assert.rejects(db.importBackupFile(await encodeBackup(damaged)), /BACKUP_CHECKSUM/);
+  assert.equal(canonicalJson(db.toSerializable()), before);
+});
 
 test('Unused default workspaces delete even after a starter recovery point, and stay deleted after restart', async () => {
   const { db, driver, key } = await database(); await db.captureRecoverySnapshot();
@@ -136,6 +166,8 @@ test('A valid checksum cannot authorize a foreign owner or mixed workspace owner
 test('Unbalanced and conflicting financial records are rejected without replacing current records', async () => {
   const { db: source } = await database(); await post(source); const data = structuredClone(source.toSerializable());
   data.journalTransactions[0][1].lines[0].debitMinor = '999'; data.journalLines[0][1].debitMinor = '999';
+  // Keep the operation checksum valid so this specifically exercises ledger balance validation.
+  for (const [, op] of data.syncOperations) op.contentSha256 = await computeSha256(canonicalJson(op.payload));
   const { db } = await database(); await assert.rejects(db.importBackupFile(await encodeBackup(data)), /BACKUP_LEDGER/);
   const conflict = structuredClone(source.toSerializable()); conflict.journalTransactions[0][1].note = 'changed';
   await assert.rejects(source.importBackupFile(await encodeBackup(conflict)), /BACKUP_CONFLICT/);

@@ -1,4 +1,4 @@
-import { canonicalJson, computeSha256 } from '../sync/canonical';
+import { canonicalJson, computeSha256, computeSha256Sync } from '../sync/canonical';
 import { SYSTEM_ACCOUNTS } from '../contracts/ledger';
 
 export const MAX_BACKUP_BYTES = 40 * 1024 * 1024;
@@ -29,7 +29,7 @@ export async function decodeBackup(text: string): Promise<Data> {
   try { return JSON.parse(file.dataJson); } catch { throw new Error('BACKUP_INVALID'); }
 }
 
-/** Current records win. Immutable journals and operation IDs must agree exactly. */
+/** Current records win. Derived operation checksums may be absent in older local copies. */
 export function mergeBackup(current: Data, incoming: Data, replaceUntouchedStarters = false): Data {
   if (!incoming || ![4, 5].includes(incoming.schemaVersion)) throw new Error('BACKUP_VERSION');
   if (!Array.isArray(incoming.workspaces) || !Array.isArray(incoming.accounts) ||
@@ -49,7 +49,17 @@ export function mergeBackup(current: Data, incoming: Data, replaceUntouchedStart
       if (key !== 'preferences' && key !== 'syncDeviceHeads' && (!value || typeof value !== 'object')) throw new Error('BACKUP_INVALID');
       if (key === 'workspaces' && (!owned(value.ownerSubjectHash) || value.id !== id)) throw new Error('BACKUP_OWNER');
       if (key === 'syncOperations' && (!owned(value.ownerHash) || value.operationId !== id)) throw new Error('BACKUP_OWNER');
-      if (['journalTransactions', 'journalLines', 'syncOperations'].includes(key) && merged.has(id) &&
+      if (key === 'syncOperations') {
+        for (const op of [value, ...(merged.has(id) ? [merged.get(id)] : [])]) {
+          if (op.contentSha256 && op.contentSha256 !== computeSha256Sync(canonicalJson(op.payload))) throw new Error('BACKUP_CHECKSUM');
+        }
+        if (merged.has(id)) {
+          const { contentSha256: currentHash, ...currentOperation } = merged.get(id);
+          const { contentSha256: incomingHash, ...incomingOperation } = value;
+          if (canonicalJson(currentOperation) !== canonicalJson(incomingOperation)) throw new Error('BACKUP_CONFLICT');
+        }
+      }
+      if (['journalTransactions', 'journalLines'].includes(key) && merged.has(id) &&
           canonicalJson(merged.get(id)) !== canonicalJson(value)) throw new Error('BACKUP_CONFLICT');
       if (!replaceUntouchedStarters && ['accounts', 'parties'].includes(key) && merged.has(id) &&
           merged.get(id).openingBalanceMinor !== value.openingBalanceMinor) throw new Error('BACKUP_CONFLICT');

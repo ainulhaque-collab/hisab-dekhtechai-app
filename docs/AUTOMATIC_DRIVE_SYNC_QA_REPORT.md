@@ -40,6 +40,14 @@ Developer configuration: enable Google Drive API; register `http://localhost:300
 
 ## Remaining acceptance / limits
 
+### Backup import regression after same-owner login
+
+The owner reported `BACKUP_CONFLICT` after logging into the clean test browser and importing the downloaded file. A synthetic reproduction of that exact sequence failed before the fix: local operation copies in a backup could have a blank `contentSha256`, while the same operation downloaded through Drive had its computed payload checksum. Strict whole-operation comparison mistook this derived field for changed financial content.
+
+Restore now verifies any populated operation checksum, compares every other operation field exactly, and preserves existing records. New queued operations receive their payload checksum immediately. Legacy blank-checksum backups remain supported; changed payloads, wrong ownership, unbalanced journals and incompatible balances remain blocked. A ledger-validation fixture now recomputes its deliberately modified operation's checksum so it still tests journal balancing independently of checksum rejection.
+
+Verification: **115 / 115 tests passed**, TypeScript check passed, production Web build passed. New regressions cover repeated import after same-owner cloud restore, blank-versus-computed checksum compatibility, altered payloads and damaged checksums with no replacement of current state. The owner was asked to retry the same downloaded backup; real browser import acceptance is pending.
+
 - Live Web login and automatic sync after refresh are owner-confirmed. Still confirm that a verified backup can be downloaded and decoded.
 - Build/install the current Android source, log in with the same Google owner in Android and Web, then test both directions with a small entry, offline entries, relaunch, correction and deletion. Compare journal IDs and balances, then restore on a separate clean test profile. Never clear the existing customer's storage for testing.
 - Native Java compilation, installed APK behavior and actual cross-client Drive compatibility have not been proven in this environment. Native resume events have been wired, but there is no continuous background worker.
