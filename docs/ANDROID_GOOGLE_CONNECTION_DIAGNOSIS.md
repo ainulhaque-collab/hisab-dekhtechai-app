@@ -49,3 +49,11 @@ After saving the first expense, the owner saw a native Cancel / OK dialog with n
 Capacitor's installed BridgeWebChromeClient implements this prompt with `android.app.AlertDialog.Builder(view.getContext())`. The app combines a DayNight base theme with a forced white window surface. An explicit platform light alert-dialog theme now sets dark primary/secondary text and a blue accent, inherited by the activity's launch theme. This applies to other native backup/sign-out confirmations too. Native resource compilation and physical readability remain to be verified in the next signed candidate.
 
 The first version 7 build passed all 124 tests, TypeScript, Web build, native resource compilation and release lint, but the JVM crashed during R8. Its crash header explicitly reports insufficient native memory (`malloc` failed for 1,510,896 bytes) on this 8 GB host, with a 2 GB Java heap. No new APK was preserved or installed. The signed-build script now offers `-LowMemory` (1 GB heap, two JVM processors, one Gradle worker), targeting only `:app:assembleRelease`; all validation/signature gates remain required.
+
+## Version 7 low-memory build and installation
+
+- Source: `7f5ddd4afa551576995cb6a3d70f784dc141d176`. All 124 tests, TypeScript, Web build and native release build passed. Gradle completed 118 tasks in 9m 38s using `-LowMemory`.
+- Preserved APK: `build/test-apks/hisab-1.0.6-test-v7.apk`; verified package `com.hisabdekhtechai.app`, versionCode `7`, versionName `1.0.6-test`.
+- APK SHA-256: `B9B4BE759656A94B9878D4CE44663106A52520EC4907E852205DD999494FDDAA`; signature matches the permanent signing certificate.
+- Replacement installation over version 6 succeeded. Cold launch returned `Status: ok`; installed package reports version 7. Primary-user firstInstallTime remains `2026-10-26 19:17:09`, dataDir remains `/data/user/0/com.hisabdekhtechai.app`, lastUpdateTime is `2026-10-26 20:58:25`.
+- No uninstall/clear-data was performed. Owner has been asked to check the previously saved BDT 120 expense, confirm dialog readability, and then test Google connection/sync. These functional acceptance checks are pending; install timestamps alone do not prove financial-row retention.
