@@ -1,6 +1,6 @@
 # Automatic Google Drive sync and backup — implementation / QA
 
-Updated: 2026-10-26. Local implementation; live Google and Android acceptance remain pending.
+Updated: 2026-10-26 (Asia/Dhaka). The owner confirmed live Web login, connection retention after Chrome refresh, and automatic sync. Android/Web exchange and downloaded-backup acceptance remain pending.
 
 ## Implemented behavior
 
@@ -17,7 +17,7 @@ Updated: 2026-10-26. Local implementation; live Google and Android acceptance re
 
 - Initial automatic-sync change: `npm test` **105 / 105 passed**. Includes 16 new cases for durable notifications, debounce/polling, offline retry, fresh-device reconstruction, metadata, journal correction/deletion, corrupt backups, invalid journals, authorization expiry, device identity migration, dependency ordering, and offline writes to deleted empty accounts.
 - Refresh regression: 8 additional tests pass with actual Web Crypto AES-GCM and structured-cloned non-extractable keys, using an injected in-memory key store. They cover new-manager restoration without a popup, concurrent restore deduplication, subject/origin/client mismatch, tampering, expiry/revocation, logout during verification, temporary network failure, unavailable storage and historical sync receipts. This tests crypto and auth behavior, not a real browser IndexedDB implementation.
-- Combined refresh verification: `npm test` **113 / 113 passed**, `npm run lint` passed, `npm run build` passed. Browser reload acceptance was requested from the owner after implementation; do not infer its result from unit tests.
+- Combined refresh verification: `npm test` **113 / 113 passed**, `npm run lint` passed, `npm run build` passed. Separately, the owner confirmed that Chrome remained connected and automatically synchronized after signing in once with the new code and refreshing the same tab. This is owner-reported live acceptance, not an automated browser observation.
 - A REST contract test exercises the real Drive transport against synthetic HTTP responses: separate Android/Web tokens, multipart upload, appData listing, quota, read-back verification, backup download and changed-file cache invalidation. This does **not** establish that two real OAuth clients share Google storage.
 - `npm run lint`: passed. `npm run build`: passed (existing large-bundle warning remains). `npx cap sync android`: passed, including SQLite plugin discovery. Generated assets are rebuilt by CI and are excluded from this source change.
 - Browser visual QA for the new sync panel was unavailable: access to the local browser page was denied by the browser security policy. Existing screenshots from earlier work do not validate this change.
@@ -26,7 +26,7 @@ Updated: 2026-10-26. Local implementation; live Google and Android acceptance re
 
 The owner's first live attempt reported Google's "only developer-approved testers" screen. After the test-user guidance, the owner confirmed that login succeeded. The tester gate is resolved for that account; verified live backup/download and Android/Web exchange are still awaiting confirmation.
 
-The owner then reported that initial sign-in synced but refresh disconnected. Their screenshot showed a retained verified-backup timestamp alongside "Not connected" and "Not synced yet". Code inspection confirmed two causes: memory-only browser authorization was discarded on reload, and the successful-sync timestamp was only in orchestrator memory. The refresh corrections above address both. Real Chrome reload acceptance is pending; an existing login must be performed once more to create the new encrypted session envelope.
+The owner then reported that initial sign-in synced but refresh disconnected. Their screenshot showed a retained verified-backup timestamp alongside "Not connected" and "Not synced yet". Code inspection confirmed two causes: memory-only browser authorization was discarded on reload, and the successful-sync timestamp was only in orchestrator memory. After the fix in commit `9952952`, the owner confirmed that the same Chrome tab stayed connected after refresh and automatic sync continued. No actual token expiry, browser restart, or Android/Web exchange result is implied by this confirmation.
 
 In the Cloud project that owns the configured Web OAuth client:
 
@@ -40,7 +40,7 @@ Developer configuration: enable Google Drive API; register `http://localhost:300
 
 ## Remaining acceptance / limits
 
-- Confirm the tester can log in, the real Drive API accepts appData access, and a verified backup can be downloaded and decoded.
+- Live Web login and automatic sync after refresh are owner-confirmed. Still confirm that a verified backup can be downloaded and decoded.
 - Build/install the current Android source, log in with the same Google owner in Android and Web, then test both directions with a small entry, offline entries, relaunch, correction and deletion. Compare journal IDs and balances, then restore on a separate clean test profile. Never clear the existing customer's storage for testing.
 - Native Java compilation, installed APK behavior and actual cross-client Drive compatibility have not been proven in this environment. Native resume events have been wired, but there is no continuous background worker.
 - Complete checkpoints are recovery downloads; initial automatic reconstruction currently replays all retained operation files. Automatic checkpoint-based fast restore and log compaction are not implemented.
