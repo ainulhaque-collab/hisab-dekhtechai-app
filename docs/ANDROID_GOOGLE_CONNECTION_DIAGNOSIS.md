@@ -30,4 +30,14 @@ Each durable store previously constructed its own `SQLiteConnection`. The worksp
 
 All native stores now share one connection manager, with consistency checked once and database opening serialized/deduplicated. Existing database names/files stay unchanged. Failed store opening can retry without closing another store. Transaction begin waits for storage initialization and releases only its own local lock on rejection; the bridge's original storage error is preserved. No data deletion or silent fallback is used.
 
-Five focused tests and all 124 tests plus TypeScript passed. New regressions cover opening media while retaining the ledger connection, failed media-open retry, native begin failure and successful later journal retry. The next signed APK still needs physical confirmation of expense saving and Google/Drive sync; version 5 did not satisfy those checks.
+Five focused tests and all 124 tests plus TypeScript passed. New regressions cover opening media while retaining the ledger connection, failed media-open retry, native begin failure and a successful later transaction retry. Physical confirmation of expense saving and Google/Drive sync remains pending; version 5 did not satisfy those checks.
+
+## Version 6 build and replacement installation
+
+- Source: `db17bfff34fa31616266f9a85e25d668099df256`.
+- All 124 tests, TypeScript, Vite production build and native release build passed. Gradle completed 127 tasks in 10m 6s.
+- Preserved APK: `build/test-apks/hisab-1.0.5-test-v6.apk`; manifest package `com.hisabdekhtechai.app`, versionCode `6`, versionName `1.0.5-test`.
+- APK SHA-256: `B7BA4D76049DFE5E43EEDA7F0AA7B0E5A08A7B5A6959C60D620A09E5833011B8`; signature matches the existing permanent identity.
+- Replacement installation over version 5 succeeded on the owner's TECNO CM6. Cold launch returned `Status: ok`; installed package reports version 6 / `1.0.5-test`.
+- Primary-user first installation time remains `2026-10-26 19:17:09`, data directory remains `/data/user/0/com.hisabdekhtechai.app`, last update time is `2026-10-26 20:25:36`. No uninstall or clear-data was performed. These installation facts do not establish financial-row retention or successful sync.
+- Owner has been asked to save the previous test expense once before connecting Google, and report success or the exact first error. Expense saving, Google connection, cross-device parity and backup verification remain pending.
