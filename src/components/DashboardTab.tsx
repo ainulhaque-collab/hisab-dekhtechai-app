@@ -17,11 +17,11 @@ import {
   Receipt,
   Building,
   Smartphone,
-  Banknote,
-  PieChart
+  Banknote
 } from 'lucide-react';
 import { JournalTransaction } from '../contracts/types';
 import { Users, UserPlus } from 'lucide-react';
+import { DashboardCharts } from './DashboardCharts';
 
 interface DashboardTabProps {
   onNavigateToAdd: () => void;
@@ -182,6 +182,8 @@ export const DashboardTab: React.FC<DashboardTabProps> = ({
         </div>
       </div>
 
+      <DashboardCharts key={currentWorkspace?.id} data={dashboardData} language={language} visible={showBalance} />
+
       {/* Business Workspace: Members Strip */}
       {currentWorkspace?.kind === 'business' && (
         <div className="bg-white p-3.5 rounded-xl border border-slate-200/80 shadow-xs">
@@ -268,39 +270,6 @@ export const DashboardTab: React.FC<DashboardTabProps> = ({
           })}
         </div>
       </div>
-
-      {/* Top Expense Categories */}
-      {dashboardData.topExpenseCategories.length > 0 && (
-        <div className="bg-white p-4 rounded-xl border border-slate-200 shadow-xs">
-          <div className="flex items-center justify-between mb-3">
-            <div className="flex items-center gap-1.5 text-sm font-bold text-slate-800">
-              <PieChart className="w-4 h-4 text-blue-700" />
-              <span>{language === 'en' ? 'Top Expense Categories (This Month)' : 'শীর্ষ খরচ খাত (এই মাসে)'}</span>
-            </div>
-            <span className="text-xs text-slate-500 font-medium">{language === 'en' ? 'Share' : 'শতাংশ'}</span>
-          </div>
-
-          <div className="space-y-2.5">
-            {dashboardData.topExpenseCategories.map((cat) => (
-              <div key={cat.categoryId} className="text-xs">
-                <div className="flex items-center justify-between mb-1">
-                  <span className="font-medium text-slate-700">{cat.name}</span>
-                  <span className="font-semibold text-slate-900 tabular-nums">
-                    {formatBDT(cat.amountMinor, { locale: language, showDecimals: false })} (
-                    {cat.percentage}%)
-                  </span>
-                </div>
-                <div className="w-full h-1.5 bg-slate-100 rounded-full overflow-hidden">
-                  <div
-                    className="h-full bg-blue-600 rounded-full transition-all duration-500"
-                    style={{ width: `${Math.min(cat.percentage, 100)}%` }}
-                  />
-                </div>
-              </div>
-            ))}
-          </div>
-        </div>
-      )}
 
       {/* Recent Transactions List */}
       <div className="bg-white rounded-xl border border-slate-200/80 shadow-xs overflow-hidden">

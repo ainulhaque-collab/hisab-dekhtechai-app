@@ -50,7 +50,7 @@ Keep the production origin (scheme, hostname and port), IndexedDB name and datab
 
 ## Dashboard charts
 
-No charts were implemented during this audit. The supplied image is a style reference containing several specialized chart types. For this finance homepage, prioritize a dated income/expense comparison, category expense breakdown and balance trend derived from accepted ledger entries; chart work follows this safety audit and must not alter database identity, schema, signing configuration or financial calculations.
+No charts were implemented in the storage-audit commit `e3b9ab3`. After its 119 passing tests, two read-only homepage charts were added separately: this month's income versus expense, and a selectable expense-category donut. Both consume existing `DashboardData`; remaining categories and transfer fees are grouped as other expenses so the donut covers the expense total. Amounts remain integer minor units; only display ratios become numbers. Empty states and balance privacy are handled. Historical balance trends were not fabricated from the limited recent-history list. Chart TypeScript and production-build checks passed; live browser visual acceptance is pending. Database identity, schema, signing configuration and financial calculations are unchanged by the charts.
 
 References:
 
