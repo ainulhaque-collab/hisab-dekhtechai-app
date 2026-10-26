@@ -29,7 +29,7 @@ Free build tools are installed into ignored `.local-tools/`, without changing th
 
 ```powershell
 powershell -NoProfile -ExecutionPolicy Bypass -File scripts/Setup-AndroidTools.ps1
-powershell -NoProfile -ExecutionPolicy Bypass -File scripts/Build-SignedAndroid.ps1 -VersionCode 3 -VersionName 1.0.2-test
+powershell -NoProfile -ExecutionPolicy Bypass -File scripts/Build-SignedAndroid.ps1 -VersionCode 4 -VersionName 1.0.3-test
 ```
 
 The setup installs JDK 21, Android platform 36/build-tools/platform-tools, Gradle 9.1.0 and a wrapper. Gradle 8.13 twice failed on Windows with `Could not move temporary workspace ... to immutable location` during the appcompat library transform; the upgrade uses the [official Gradle Windows locking fix](https://github.com/gradle/gradle/pull/34369). AGP remains 8.13.0. It retains SDK license/install logs locally. The signed-build script runs type checks, tests, Web build, Capacitor sync and `assembleRelease`, then checks the APK signing certificate against the permanent key. It writes an APK hash, source commit and version evidence to the private local directory. VersionCode must increase after the last successful signed build. Build success is not physical-device acceptance.
@@ -44,8 +44,20 @@ No push, public release, paid account registration, OAuth production change, or 
 
 ## Acceptance still required
 
-- Register an Android OAuth client for the package/fingerprint above in the intended project, with the Web client and backup migration plan coordinated.
-- Confirm that native compilation/signature verification really succeeds; do not label APK ready from script preparation alone.
+- Android OAuth package/fingerprint configuration was confirmed by the owner; actual native Google consent and Drive sync still need phone acceptance.
 - On the owner's test phone verify offline journals, selectors, app lock, backup/restore, charts and same-owner Android ↔ Web sync.
 - Build a second, higher-version APK using the same key; install over the first without uninstall/clear-data and compare original UUIDs, balances, local preferences/media and pending operations.
 - Complete recovery backups, privacy/branding and distribution registration before inviting customers. Existing historical debug APKs are a different package (`.debug`) and must not be uninstalled to force a signed release update.
+
+## Verified first signed test APK
+
+On 2026-10-26 the Gradle 9.1.0 native release build completed successfully (127 tasks), including release lint and R8. TypeScript, all 119 tests and Vite production build passed. The development reference ZIP is absent from the actual APK.
+
+- Source commit: `e76b3f3acdcef327bb1992c77d5f998eca998e75`.
+- Actual manifest: `com.hisabdekhtechai.app`, versionCode `3`, versionName `1.0.2-test`, minSdk `24`, targetSdk `36`.
+- APK: `build/test-apks/hisab-1.0.2-test-v3.apk` (8,008,336 bytes); preserved for replacement-install comparisons.
+- APK SHA-256: `F11C867EC7A0E27B09389D3F3E77AA6BBBD562BAFA073409226ABACB89593AFE`.
+- `apksigner verify`: passed; APK Signature Scheme v2 valid; certificate SHA-1 and SHA-256 match the permanent identity above.
+- Owner's TECNO Camon 40 Pro (`TECNO_CM6`), Android 16/API 36: installation to primary user succeeded, Activity launch returned `Status: ok`, version confirmed from the installed package, app process remained running. The sampled process-filtered AndroidRuntime/Capacitor/Chromium error log was empty.
+
+This proves native compilation, APK identity/signature and initial installation/launch. It does not yet prove the visible dashboard, SQLite record retention, Google authorization, two-way sync, backup restore or in-place update acceptance. Those require the separate phone checklist and owner observations.

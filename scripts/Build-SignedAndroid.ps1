@@ -91,7 +91,14 @@ try {
     if ($LASTEXITCODE -ne 0) { throw 'APK signature verification failed.' }
     $expected = ($publicInfo.certificateSha256 -replace ':', '').ToLowerInvariant()
     if (!($signature -match [regex]::Escape($expected))) { throw 'APK signing certificate does not match the permanent key.' }
-    $evidence = @{ applicationId = $publicInfo.applicationId; versionCode = $VersionCode; versionName = $VersionName; commit = (git rev-parse HEAD); certificateSha256 = $publicInfo.certificateSha256; apkSha256 = (Get-FileHash -LiteralPath $apkPath -Algorithm SHA256).Hash; apkPath = $apkPath; builtAtUtc = [DateTime]::UtcNow.ToString('o'); physicalDeviceAcceptance = 'PENDING'; published = $false }
+    $apkHash = (Get-FileHash -LiteralPath $apkPath -Algorithm SHA256).Hash
+    $archiveRoot = Join-Path $workspaceRoot 'build/test-apks'
+    New-Item -ItemType Directory -Force -Path $archiveRoot | Out-Null
+    $archivePath = Join-Path $archiveRoot "hisab-$VersionName-v$VersionCode.apk"
+    if (Test-Path -LiteralPath $archivePath) {
+        if ((Get-FileHash -LiteralPath $archivePath -Algorithm SHA256).Hash -ne $apkHash) { throw 'A different preserved APK already uses this version; choose a new version.' }
+    } else { Copy-Item -LiteralPath $apkPath -Destination $archivePath }
+    $evidence = @{ applicationId = $publicInfo.applicationId; versionCode = $VersionCode; versionName = $VersionName; commit = (git rev-parse HEAD); certificateSha256 = $publicInfo.certificateSha256; apkSha256 = $apkHash; apkPath = $archivePath; builtAtUtc = [DateTime]::UtcNow.ToString('o'); physicalDeviceAcceptance = 'PENDING'; published = $false }
     $evidence | ConvertTo-Json | Set-Content -LiteralPath $evidencePath -Encoding UTF8
     $evidence | ConvertTo-Json
 } finally {
