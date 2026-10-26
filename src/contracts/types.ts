@@ -11,6 +11,7 @@ export interface Workspace {
   id: UUID;
   ownerSubjectHash: string;
   name: string;
+  description?: string;
   kind: WorkspaceKind;
   currency: 'BDT';
   archivedAt?: string | null;

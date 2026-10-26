@@ -54,8 +54,9 @@ export const DashboardTab: React.FC<DashboardTabProps> = ({
 
   const handleSyncClick = async () => {
     setIsSyncing(true);
-    await triggerManualSync();
-    setIsSyncing(false);
+    try { await triggerManualSync(); }
+    catch { onOpenSyncModal(); }
+    finally { setIsSyncing(false); }
   };
 
   const getAccountIcon = (kind: string) => {

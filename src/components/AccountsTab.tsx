@@ -33,6 +33,7 @@ import { Account, AccountGroup, AccountKind, UUID } from '../contracts/types';
 
 export const AccountsTab: React.FC = () => {
   const {
+    db,
     dashboardData,
     currentWorkspace,
     language,
@@ -55,6 +56,10 @@ export const AccountsTab: React.FC = () => {
 
   const isEn = language === 'en';
 
+  const [accountView, setAccountView] = useState<'active' | 'archived'>('active');
+  const [accountBusy, setAccountBusy] = useState(false);
+  const [accountError, setAccountError] = useState('');
+  const [undoAccount, setUndoAccount] = useState<string | null>(null);
   const [activeSegment, setActiveSegment] = useState<'accounts' | 'groups'>('accounts');
   const [showAddAccountModal, setShowAddAccountModal] = useState(false);
   const [showAddGroupModal, setShowAddGroupModal] = useState(false);
@@ -85,6 +90,22 @@ export const AccountsTab: React.FC = () => {
   const [expandedGroupId, setExpandedGroupId] = useState<UUID | null>(null);
 
   if (!dashboardData || !currentWorkspace) return null;
+
+  const allWorkspaceAccounts = db.getAllAccounts(currentWorkspace.id);
+  const visibleSummaries = dashboardData.accountSummaries.filter(summary => {
+    const account = allWorkspaceAccounts.find(a => a.id === summary.accountId);
+    return account && (accountView === 'archived' ? !!account.archivedAt : !account.archivedAt);
+  });
+  const changeAccountArchive = async (id: string, restore: boolean) => {
+    if (accountBusy) return; setAccountBusy(true); setAccountError('');
+    try {
+      await db.beginTransaction();
+      const changed = restore ? db.restoreAccount(id) : db.archiveAccount(id);
+      if (!changed) throw new Error('Account not found.');
+      await db.commitTransaction(); refreshState(); setUndoAccount(restore ? null : id);
+    } catch { await db.rollbackTransaction(); refreshState(); setAccountError(isEn ? 'Account changes could not be saved. Please retry.' : 'অ্যাকাউন্টের পরিবর্তন সংরক্ষণ হয়নি। আবার চেষ্টা করুন।'); }
+    finally { setAccountBusy(false); }
+  };
 
   const handleCreateAccountSubmit = (e: React.FormEvent) => {
     e.preventDefault();
@@ -266,14 +287,20 @@ export const AccountsTab: React.FC = () => {
       {/* Segment 1: Accounts List */}
       {activeSegment === 'accounts' && (
         <div className="space-y-3">
-          {dashboardData.accountSummaries.length === 0 ? (
+          <div className="flex items-center gap-2 text-xs">
+            <button type="button" aria-pressed={accountView === 'active'} onClick={() => setAccountView('active')} className={`rounded-full px-3 py-2 font-semibold ${accountView === 'active' ? 'bg-blue-700 text-white' : 'bg-white border border-slate-200 text-slate-500'}`}>{isEn ? 'Active' : 'সক্রিয়'} ({allWorkspaceAccounts.filter(a => !a.archivedAt).length})</button>
+            <button type="button" aria-pressed={accountView === 'archived'} onClick={() => setAccountView('archived')} className={`inline-flex items-center gap-1.5 rounded-full px-3 py-2 font-semibold ${accountView === 'archived' ? 'bg-blue-700 text-white' : 'bg-white border border-slate-200 text-slate-500'}`}><Archive className="h-3.5 w-3.5" />{isEn ? 'Archived' : 'আর্কাইভ'} ({allWorkspaceAccounts.filter(a => a.archivedAt).length})</button>
+          </div>
+          {undoAccount && <div role="status" className="flex items-center justify-between gap-3 rounded-xl bg-blue-50 p-3 text-xs text-blue-800"><span>{isEn ? 'Account archived. Find it in Archived whenever you need it.' : 'অ্যাকাউন্ট আর্কাইভ হয়েছে। আর্কাইভ তালিকা থেকে যেকোনো সময় ফেরত আনতে পারবেন।'}</span><button type="button" disabled={accountBusy} onClick={() => changeAccountArchive(undoAccount, true)} className="shrink-0 font-bold underline">{isEn ? 'Undo' : 'ফিরিয়ে আনুন'}</button></div>}
+          {accountError && <p role="alert" className="text-xs text-rose-700">{accountError}</p>}
+          {visibleSummaries.length === 0 ? (
             <div className="p-8 text-center bg-white rounded-2xl border border-dashed border-slate-200 text-slate-500">
               <Banknote className="w-8 h-8 mx-auto mb-2 opacity-40 text-slate-400" />
               <p className="text-xs font-medium">{isEn ? 'No accounts found' : 'কোনো অ্যাকাউন্ট পাওয়া যায়নি'}</p>
             </div>
           ) : (
-            dashboardData.accountSummaries.map((accSummary) => {
-              const fullAccount = accounts.find((a) => a.id === accSummary.accountId);
+            visibleSummaries.map((accSummary) => {
+              const fullAccount = allWorkspaceAccounts.find((a) => a.id === accSummary.accountId);
               const group = fullAccount?.groupId
                 ? accountGroups.find((g) => g.id === fullAccount.groupId)
                 : null;
@@ -368,7 +395,8 @@ export const AccountsTab: React.FC = () => {
                       {!!fullAccount.archivedAt ? (
                         <button
                           type="button"
-                          onClick={() => restoreAccount(fullAccount.id)}
+                          disabled={accountBusy}
+                          onClick={() => changeAccountArchive(fullAccount.id, true)}
                           className="p-1.5 text-blue-600 hover:text-blue-800 hover:bg-blue-50 rounded-lg flex items-center gap-1 transition-colors min-h-[40px] px-2"
                           title={isEn ? 'Restore Account' : 'পুনরুদ্ধার করুন'}
                         >
@@ -378,7 +406,8 @@ export const AccountsTab: React.FC = () => {
                       ) : (
                         <button
                           type="button"
-                          onClick={() => archiveAccount(fullAccount.id)}
+                          disabled={accountBusy}
+                          onClick={() => changeAccountArchive(fullAccount.id, false)}
                           className="p-1.5 text-slate-500 hover:text-slate-800 hover:bg-slate-100 rounded-lg flex items-center gap-1 transition-colors min-h-[40px] px-2"
                           title={isEn ? 'Archive Account' : 'আর্কাইভ করুন'}
                         >

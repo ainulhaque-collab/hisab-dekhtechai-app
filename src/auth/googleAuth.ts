@@ -207,6 +207,12 @@ export class GoogleAuthManager {
         return;
       }
 
+      if (window.location && window.location.protocol !== 'https:' &&
+          !['localhost', '127.0.0.1', '[::1]'].includes(window.location.hostname)) {
+        reject(new Error('GOOGLE_INSECURE_ORIGIN'));
+        return;
+      }
+
       if (!window.google?.accounts?.oauth2) {
         reject(
           new Error(
@@ -222,7 +228,7 @@ export class GoogleAuthManager {
           scope: this.DRIVE_SCOPE,
           callback: async (resp) => {
             if (resp.error || !resp.access_token) {
-              reject(new Error(resp.error?.message || 'Google authorization cancelled or failed'));
+              reject(new Error(typeof resp.error === 'string' ? resp.error : resp.error?.message || 'Google authorization cancelled or failed'));
               return;
             }
 
@@ -273,7 +279,7 @@ export class GoogleAuthManager {
             }
           },
           error_callback: (err) => {
-            reject(new Error(err?.message || 'Google OAuth error occurred during authorization.'));
+            reject(new Error(err?.type || err?.message || 'Google OAuth error occurred during authorization.'));
           },
         });
 

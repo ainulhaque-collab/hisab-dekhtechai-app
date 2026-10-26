@@ -10,10 +10,10 @@ export function ModalShell({ title, description, icon, children, footer, onClose
   const panel = useRef<HTMLElement>(null);
   const heading = useId();
   useDialog(true, panel, () => { if (!busy) onClose(); });
-  return createPortal(<div className="fixed inset-0 z-[100] flex items-end sm:items-center justify-center bg-slate-950/45 backdrop-blur-sm p-2 sm:p-5"
+  return createPortal(<div className="app-modal-backdrop fixed inset-0 z-[100] flex items-end sm:items-center justify-center bg-slate-950/45 backdrop-blur-sm p-2 sm:p-5"
     onClick={event => { if (event.target === event.currentTarget && !busy) onClose(); }}>
     <section ref={panel} role="dialog" aria-modal="true" aria-labelledby={heading}
-      className="flex max-h-[92dvh] w-full max-w-lg flex-col overflow-hidden rounded-[24px] bg-white text-slate-900 shadow-2xl ring-1 ring-white/70">
+      className="app-modal-panel flex max-h-[92dvh] w-full max-w-lg flex-col overflow-hidden rounded-[24px] bg-white text-slate-900 shadow-2xl ring-1 ring-white/70">
       <div className="flex items-start gap-3 px-5 py-5 sm:px-6 border-b border-slate-100">
         {icon && <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl bg-blue-50 text-blue-700 ring-1 ring-blue-100/70">{icon}</div>}
         <div className="min-w-0 flex-1 pt-0.5"><h2 id={heading} className="text-[17px] font-bold tracking-tight leading-tight">{title}</h2>

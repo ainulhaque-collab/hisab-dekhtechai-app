@@ -2,13 +2,14 @@ import React, { useState } from 'react';
 import { Cloud, CloudOff, CheckCheck, RefreshCw, Clock3, ShieldCheck, ArrowRight, AlertCircle, HelpCircle, ChevronDown } from 'lucide-react';
 import { useApp } from '../context/AppContext';
 import { ModalShell, primaryButton, secondaryButton } from './ModalShell';
+import { googleErrorMessage } from '../auth/authErrors';
 
 export function SyncModal({ isOpen, onClose, onOpenConflictModal, onOpenAuthModal }: {
   isOpen: boolean; onClose: () => void; onOpenConflictModal: () => void; onOpenAuthModal?: () => void;
 }) {
   const { syncStatus, isOnline, isLiveGoogleAuth, triggerManualSync, conflicts, language } = useApp();
   const [busy, setBusy] = useState(false);
-  const [error, setError] = useState(false);
+  const [error, setError] = useState<string | null>(null);
   if (!isOpen) return null;
   const en = language === 'en';
   const verified = isOnline && isLiveGoogleAuth && syncStatus.state === 'synced_verified' && !!syncStatus.lastSuccessfulSyncAt;
@@ -17,7 +18,7 @@ export function SyncModal({ isOpen, onClose, onOpenConflictModal, onOpenAuthModa
   const description = !isOnline ? (en ? 'You can keep recording offline. Sync when you reconnect.' : 'অফলাইনেও হিসাব রাখুন। ইন্টারনেট ফিরলে সিঙ্ক করুন।') : verified ? (en ? 'Your latest sync was verified with Google Drive.' : 'গুগল ড্রাইভে সর্বশেষ সিঙ্ক যাচাই হয়েছে।') : needsAuth ? (en ? 'Keep a private copy and continue across your devices.' : 'ব্যক্তিগত কপি রাখুন, অন্য ডিভাইসেও হিসাব দেখুন।') : (en ? 'Local records stay safe while synchronization completes.' : 'সিঙ্ক শেষ হওয়ার অপেক্ষায় স্থানীয় হিসাব সুরক্ষিত আছে।');
   const StatusIcon = !isOnline ? CloudOff : verified ? CheckCheck : Cloud;
   const connect = () => { onClose(); onOpenAuthModal?.(); };
-  async function syncNow() { setBusy(true); setError(false); try { await triggerManualSync(); } catch { setError(true); } finally { setBusy(false); } }
+  async function syncNow() { setBusy(true); setError(null); try { await triggerManualSync(); } catch (err) { setError(googleErrorMessage(err, en)); } finally { setBusy(false); } }
   return <ModalShell title={en ? 'Google Drive Sync' : 'গুগল ড্রাইভ সিঙ্ক'} description={en ? 'Your records. Your private Drive.' : 'আপনার হিসাব, আপনার ব্যক্তিগত ড্রাইভ।'} icon={<Cloud className="h-5 w-5" />} onClose={onClose} busy={busy}
     footer={<div className="space-y-2.5">
       <button className={`${primaryButton} w-full`} disabled={!isOnline || busy || (!needsAuth && !isLiveGoogleAuth)} onClick={needsAuth ? connect : syncNow}>
@@ -41,7 +42,7 @@ export function SyncModal({ isOpen, onClose, onOpenConflictModal, onOpenAuthModa
         <div className="px-4"><div className="mb-2 flex items-center gap-1.5 text-[11px] text-slate-400"><RefreshCw className="h-3 w-3" />{en ? 'Pending changes' : 'অপেক্ষমাণ পরিবর্তন'}</div><div className="text-xl font-bold tabular-nums tracking-tight">{syncStatus.pendingOutboxCount}<span className="ml-1.5 text-[10px] font-normal text-slate-400">{en ? 'to sync' : 'সিঙ্ক বাকি'}</span></div></div>
         <div className="px-4"><div className="mb-2 flex items-center gap-1.5 text-[11px] text-slate-400"><Clock3 className="h-3 w-3" />{en ? 'Last successful sync' : 'সর্বশেষ সফল সিঙ্ক'}</div><p className="text-xs font-semibold leading-relaxed text-slate-700">{syncStatus.lastSuccessfulSyncAt ? new Date(syncStatus.lastSuccessfulSyncAt).toLocaleString(en ? 'en-GB' : 'bn-BD') : (en ? 'Not synced yet' : 'এখনও সিঙ্ক হয়নি')}</p></div>
       </div>
-      {(syncStatus.lastError || error) && <div role="alert" className="flex gap-2.5 rounded-xl border border-amber-100 bg-amber-50 p-3 text-xs leading-relaxed text-amber-800"><AlertCircle className="mt-0.5 h-4 w-4 shrink-0" /><span>{en ? 'Sync could not finish. Your local records remain safe. Check your connection and reconnect the Google account that owns these records.' : 'সিঙ্ক সম্পূর্ণ হয়নি। স্থানীয় হিসাব সুরক্ষিত আছে। ইন্টারনেট পরীক্ষা করে হিসাবের মালিকের গুগল অ্যাকাউন্ট পুনরায় যুক্ত করুন।'}</span></div>}
+      {(syncStatus.lastError || error) && <div role="alert" className="flex gap-2.5 rounded-xl border border-amber-100 bg-amber-50 p-3 text-xs leading-relaxed text-amber-800"><AlertCircle className="mt-0.5 h-4 w-4 shrink-0" /><span>{error || googleErrorMessage(syncStatus.lastError, en)}</span></div>}
       {conflicts.some(c => c.status === 'needs_review') && <button className={`${secondaryButton} w-full border-amber-200 text-amber-700`} onClick={onOpenConflictModal}><AlertCircle className="h-4 w-4" />{en ? 'Review conflicting changes' : 'পরস্পরবিরোধী পরিবর্তন দেখুন'}</button>}
       <details className="group rounded-xl border border-slate-100 px-3.5 py-3 text-xs"><summary className="flex cursor-pointer list-none items-center gap-2 text-slate-500"><HelpCircle className="h-4 w-4" /><span className="flex-1 font-medium">{en ? 'Help & troubleshooting' : 'সাহায্য ও সমস্যা সমাধান'}</span><ChevronDown className="h-3.5 w-3.5 transition group-open:rotate-180" /></summary><p className="pt-3 leading-relaxed text-slate-500">{en ? 'Use the same Google account on every device and allow private Drive app storage when prompted. Offline changes remain pending until sync verification finishes. Never clear app storage to resolve a sync error.' : 'প্রতিটি ডিভাইসে একই গুগল অ্যাকাউন্ট ব্যবহার করুন এবং ব্যক্তিগত ড্রাইভ অ্যাপ স্টোরেজ অনুমোদন করুন। যাচাই শেষ না হওয়া পর্যন্ত পরিবর্তন অপেক্ষায় থাকবে। সিঙ্ক সমস্যায় অ্যাপের ডাটা মুছবেন না।'}</p></details>
     </div>

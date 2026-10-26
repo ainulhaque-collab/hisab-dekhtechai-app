@@ -11,6 +11,7 @@ export function WorkspaceManager({ onClose }: { onClose: () => void }) {
   const { db, refreshState, language } = useApp();
   const en = language === 'en';
   const [editing, setEditing] = useState<Workspace | null>(null);
+  const [description, setDescription] = useState('');
   const [name, setName] = useState('');
   const [confirmation, setConfirmation] = useState('');
   const [error, setError] = useState('');
@@ -31,7 +32,7 @@ export function WorkspaceManager({ onClose }: { onClose: () => void }) {
     finally { setBusy(false); }
   }
   async function openWorkspace(ws: Workspace) {
-    setEditing(ws); setName(ws.name); setConfirmation(''); setImage(null); setImageChanged(false); setError(''); setImageLoading(true);
+    setEditing(ws); setName(ws.name); setDescription(ws.description || ''); setConfirmation(''); setImage(null); setImageChanged(false); setError(''); setImageLoading(true);
     try { setImage(await workspaceMedia.get(ws.id, ws.ownerSubjectHash)); }
     catch { setError(en ? 'The image could not be loaded. Your workspace is safe.' : 'ছবি লোড হয়নি। আপনার খাতা সুরক্ষিত আছে।'); }
     finally { setImageLoading(false); }
@@ -41,7 +42,7 @@ export function WorkspaceManager({ onClose }: { onClose: () => void }) {
     setError(''); setBusy(true);
     try { if (imageChanged) await workspaceMedia.save(editing.id, editing.ownerSubjectHash, image); }
     catch (err) { setError((err as Error).message); setBusy(false); return; }
-    setBusy(false); await mutate(() => { db.editWorkspace(editing.id, { name }); });
+    setBusy(false); await mutate(() => { db.editWorkspace(editing.id, { name, description }); });
   }
   const kindName = (ws: Workspace) => ws.kind === 'business' ? (en ? 'Business' : 'ব্যবসা') : (en ? 'Personal' : 'ব্যক্তিগত');
   const blocker = editing ? db.workspaceDeleteBlocker(editing.id) : null;
@@ -81,12 +82,14 @@ export function WorkspaceManager({ onClose }: { onClose: () => void }) {
           </div>
         </div>
         <label className="block text-xs font-semibold text-slate-600">{en ? 'Workspace name' : 'খাতার নাম'}<input autoFocus value={name} maxLength={100} onChange={e => setName(e.target.value)} className={fieldClass} disabled={disabled} /></label>
+        <label className="block text-xs font-semibold text-slate-600">{en ? 'Description' : 'বিবরণ'} <span className="font-normal text-slate-400">{en ? '(optional)' : '(ঐচ্ছিক)'}</span><textarea value={description} maxLength={500} rows={3} onChange={e => setDescription(e.target.value)} className={fieldClass} disabled={disabled} placeholder={en ? 'What do you use this workspace for?' : 'এই খাতায় কীসের হিসাব রাখবেন?'} /><span className="mt-1 block text-right text-[10px] font-normal text-slate-400">{description.length}/500</span></label>
         <div className="grid grid-cols-2 gap-3"><div className="rounded-xl border border-slate-100 px-3.5 py-3"><Wallet className="mb-2 h-4 w-4 text-slate-400" /><span className="text-lg font-bold tabular-nums">{db.getAllAccounts(editing.id).length}</span><span className="ml-2 text-[11px] text-slate-400">{en ? 'accounts' : 'অ্যাকাউন্ট'}</span></div><div className="rounded-xl border border-slate-100 px-3.5 py-3"><ReceiptText className="mb-2 h-4 w-4 text-slate-400" /><span className="text-lg font-bold tabular-nums">{db.getTransactions(editing.id).length}</span><span className="ml-2 text-[11px] text-slate-400">{en ? 'transactions' : 'লেনদেন'}</span></div></div>
         <button className="flex w-full items-center gap-3 rounded-xl border border-slate-200/70 p-3.5 text-left hover:bg-slate-50 disabled:opacity-40" disabled={disabled} onClick={() => mutate(() => { if (editing.archivedAt) db.restoreWorkspace(editing.id); else db.archiveWorkspace(editing.id); })}>
           {editing.archivedAt ? <RotateCcw className="h-4 w-4 text-blue-600" /> : <Archive className="h-4 w-4 text-slate-500" />}<span className="flex-1"><span className="block text-xs font-semibold text-slate-700">{editing.archivedAt ? (en ? 'Restore workspace' : 'খাতা ফিরিয়ে আনুন') : (en ? 'Archive workspace' : 'খাতা আর্কাইভ করুন')}</span><span className="mt-1 block text-[10px] text-slate-400">{en ? 'Your accounts and financial history stay intact.' : 'অ্যাকাউন্ট ও পুরোনো হিসাব অক্ষত থাকবে।'}</span></span><ChevronRight className="h-4 w-4 text-slate-300" />
         </button>
         <details className="rounded-xl border border-rose-100/80 px-3.5 py-3"><summary className="cursor-pointer text-[11px] font-semibold text-rose-500">{en ? 'Delete workspace' : 'খাতা মুছুন'}</summary><div className="mt-3 space-y-3">
-          {blocker && <p className="text-xs leading-relaxed text-slate-500">{en ? blocker : 'এই খাতা মুছে ফেলা যাবে না। হিসাব ও ইতিহাস রাখতে আর্কাইভ ব্যবহার করুন।'}</p>}
+          {!blocker && <p className="text-xs text-slate-500">{en ? 'Unused starter accounts and categories do not prevent deletion. No financial history will be erased.' : 'অব্যবহৃত ডিফল্ট অ্যাকাউন্ট ও খাত থাকলেও মুছতে পারবেন। কোনো লেনদেনের ইতিহাস মুছবে না।'}</p>}
+          {blocker && <p className="text-xs leading-relaxed text-slate-500">{en ? blocker : 'এই খাতায় হিসাব বা পরিবর্তন করা তথ্য আছে। সেগুলো সুরক্ষিত রাখতে আর্কাইভ করুন—পরে আবার ফিরিয়ে আনতে পারবেন।'}</p>}
           {!blocker && <label className="block text-[11px] text-slate-500">{en ? 'Type DELETE to confirm permanent removal of this empty workspace.' : 'এই খালি খাতা মুছতে DELETE লিখুন।'}<input value={confirmation} onChange={e => setConfirmation(e.target.value)} autoComplete="off" className={fieldClass} /></label>}
           <button className="inline-flex min-h-10 items-center gap-2 rounded-xl bg-rose-600 px-3.5 py-2.5 text-xs font-semibold text-white disabled:opacity-30" disabled={disabled || !!blocker || confirmation !== DELETE_CONFIRMATION} onClick={() => mutate(() => db.safeDeleteWorkspace(editing.id, confirmation))}><Trash2 className="h-3.5 w-3.5" />{en ? 'Delete empty workspace' : 'খালি খাতা মুছুন'}</button>
         </div></details>

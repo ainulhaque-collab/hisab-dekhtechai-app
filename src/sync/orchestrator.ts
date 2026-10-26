@@ -255,10 +255,23 @@ export class SyncOrchestrator {
    * Packages pending outbox operations into an immutable batch file and uploads to Drive.
    */
   private async uploadPendingBatch(): Promise<void> {
-    const pendingOps = this.db.getPendingOutbox();
-    if (pendingOps.length === 0) return;
+    const pending = this.db.getPendingOutbox();
+    for (const deviceId of new Set(pending.map(op => op.deviceId))) {
+      await this.uploadDeviceBatch(pending.filter(op => op.deviceId === deviceId));
+    }
+  }
 
-    const deviceId = this.db.getDeviceId();
+  private async uploadDeviceBatch(sourceOps: SyncOperation[]): Promise<void> {
+    // A restored file can contain pending operations from another device.
+    // Keep each immutable operation's original device and sequence identity.
+    const pendingOps: SyncOperation[] = [];
+    for (const op of sourceOps) {
+      const hash = await computeSha256(canonicalJson(op.payload));
+      if (op.contentSha256 && op.contentSha256 !== hash) throw new Error('Local operation checksum mismatch. Export a file backup before requesting recovery support.');
+      pendingOps.push({ ...op, contentSha256: hash });
+    }
+
+    const deviceId = pendingOps[0].deviceId;
     const fromSeq = pendingOps[0].seq;
     const toSeq = pendingOps[pendingOps.length - 1].seq;
     const batchId = generateUUID();
@@ -393,6 +406,13 @@ export class SyncOrchestrator {
       fileName,
       JSON.stringify(fullBatch, null, 2)
     );
+
+    if (!uploadReceipt.fileId) throw new Error('Drive upload returned no file identity.');
+    const stored = JSON.parse(await this.transport.downloadBatchFile(uploadReceipt.fileId));
+    if (canonicalJson(stored) !== canonicalJson(fullBatch) ||
+        await SyncOrchestrator.computeBatchHash(stored) !== fullBatch.batchSha256) {
+      throw new Error('Drive upload read-back verification failed. Pending changes are retained.');
+    }
 
     // Atomically mark outbox operations as uploaded
     const opIds = pendingOps.map((op) => op.operationId);
@@ -750,6 +770,7 @@ export class SyncOrchestrator {
           const ws = this.db.getRawState().workspaces.get(payload.id)!;
           if (payload.name) ws.name = payload.name;
           if (payload.kind) ws.kind = payload.kind;
+          if (typeof payload.description === 'string') ws.description = payload.description.trim().slice(0, 500);
         }
         break;
 

@@ -40,6 +40,7 @@ import {
 } from '../domain/journal';
 import { canonicalJson, computeSha256 } from '../sync/canonical';
 import { isDeleteConfirmed } from '../domain/confirmation';
+import { decodeBackup, encodeBackup, mergeBackup } from './backup';
 import {
   createDurableStorageDriver,
   DurableStorageDriver,
@@ -515,154 +516,7 @@ export class LocalDatabase {
   /**
    * Seeds default workspace, asset accounts (Cash, bKash, Bank), and categories.
    */
-  public seedDefaultEntities(): void {
-    const now = new Date().toISOString();
-    const wsPersonalId = 'ws-personal-default';
-    const wsBusinessId = 'ws-business-default';
-
-    // 1. Personal Workspace
-    const wsPersonal: Workspace = {
-      id: wsPersonalId,
-      ownerSubjectHash: this.state.localIdentity?.ownerSubjectHash || 'local-owner',
-      name: 'ব্যক্তিগত (Personal)',
-      kind: 'personal',
-      currency: 'BDT',
-      createdAt: now,
-    };
-    this.state.workspaces.set(wsPersonal.id, wsPersonal);
-
-    // 2. Business Workspace
-    const wsBusiness: Workspace = {
-      id: wsBusinessId,
-      ownerSubjectHash: this.state.localIdentity?.ownerSubjectHash || 'local-owner',
-      name: 'দোকান / ব্যবসা (Business)',
-      kind: 'business',
-      currency: 'BDT',
-      createdAt: now,
-    };
-    this.state.workspaces.set(wsBusiness.id, wsBusiness);
-
-    // Default Personal Accounts (Clean slate: 0 opening balance)
-    const accCash: Account = {
-      id: 'acc-cash-1',
-      workspaceId: wsPersonalId,
-      name: 'Cash in Hand (নগদ ক্যাশ)',
-      kind: 'cash',
-      classification: 'asset',
-      openingBalanceMinor: '0',
-      createdAt: now,
-    };
-    const accBkash: Account = {
-      id: 'acc-bkash-1',
-      workspaceId: wsPersonalId,
-      name: 'bKash (বিকাশ একাউন্ট)',
-      kind: 'bkash',
-      classification: 'asset',
-      accountNumberMasked: '',
-      openingBalanceMinor: '0',
-      createdAt: now,
-    };
-    const accBank: Account = {
-      id: 'acc-bank-1',
-      workspaceId: wsPersonalId,
-      name: 'Bank Account (ব্যাংক হিসাব)',
-      kind: 'bank',
-      classification: 'asset',
-      accountNumberMasked: '',
-      openingBalanceMinor: '0',
-      createdAt: now,
-    };
-    this.state.accounts.set(accCash.id, accCash);
-    this.state.accounts.set(accBkash.id, accBkash);
-    this.state.accounts.set(accBank.id, accBank);
-
-    // Default Business Accounts (Clean slate: 0 opening balance)
-    const accBizCash: Account = {
-      id: 'acc-biz-cash',
-      workspaceId: wsBusinessId,
-      name: 'Cash Drawer (দোকানের ক্যাশ)',
-      kind: 'cash',
-      classification: 'asset',
-      openingBalanceMinor: '0',
-      createdAt: now,
-    };
-    const accBizBkash: Account = {
-      id: 'acc-biz-bkash',
-      workspaceId: wsBusinessId,
-      name: 'bKash Merchant (মার্চেন্ট)',
-      kind: 'bkash',
-      classification: 'asset',
-      accountNumberMasked: '',
-      openingBalanceMinor: '0',
-      createdAt: now,
-    };
-    this.state.accounts.set(accBizCash.id, accBizCash);
-    this.state.accounts.set(accBizBkash.id, accBizBkash);
-
-    // Default Categories with Sub-categories
-    const categories: Array<Omit<Category, 'workspaceId'> & { workspaceId?: UUID }> = [
-      // Personal Expenses
-      { id: 'cat-food', kind: 'expense', name: 'খাবার ও রেস্তোরাঁ', nameEn: 'Food & Dining', icon: 'Utensils', color: '#EF4444' },
-      { id: 'cat-food-restaurant', parentId: 'cat-food', kind: 'expense', name: 'রেস্তোরাঁ ও ডাইনিং', nameEn: 'Restaurant & Dining', icon: 'Utensils', color: '#EF4444' },
-      { id: 'cat-food-snacks', parentId: 'cat-food', kind: 'expense', name: 'চা ও নাশতা', nameEn: 'Tea & Snacks', icon: 'Coffee', color: '#EF4444' },
-
-      { id: 'cat-groceries', kind: 'expense', name: 'কাঁচাবাজার ও মুদি', nameEn: 'Groceries', icon: 'ShoppingCart', color: '#F97316' },
-      { id: 'cat-groc-veg', parentId: 'cat-groceries', kind: 'expense', name: 'শাকসবজি ও ফলমূল', nameEn: 'Vegetables & Fruits', icon: 'Apple', color: '#F97316' },
-      { id: 'cat-groc-fish', parentId: 'cat-groceries', kind: 'expense', name: 'মাছ, মাংস ও চাল-ডাল', nameEn: 'Meat, Fish & Rice', icon: 'Package', color: '#F97316' },
-
-      { id: 'cat-transport', kind: 'expense', name: 'যাতায়াত ও ভাড়া', nameEn: 'Transport & Commute', icon: 'Bus', color: '#3B82F6' },
-      { id: 'cat-transport-bus', parentId: 'cat-transport', kind: 'expense', name: 'বাস / রিকশা ভাড়া', nameEn: 'Bus & Rickshaw', icon: 'Bus', color: '#3B82F6' },
-      { id: 'cat-transport-fuel', parentId: 'cat-transport', kind: 'expense', name: 'বাইক / গাড়ির জ্বালানি', nameEn: 'Fuel & Gas', icon: 'Fuel', color: '#3B82F6' },
-
-      { id: 'cat-utility', kind: 'expense', name: 'বিদ্যুৎ ও গ্যাস বিল', nameEn: 'Utility Bills', icon: 'Zap', color: '#EAB308' },
-      { id: 'cat-medical', kind: 'expense', name: 'ওষুধ ও চিকিৎসা', nameEn: 'Medical & Healthcare', icon: 'HeartPulse', color: '#EC4899' },
-      { id: 'cat-rent', kind: 'expense', name: 'বাসা ভাড়া', nameEn: 'House Rent', icon: 'Home', color: '#8B5CF6' },
-
-      // Personal Income
-      { id: 'cat-salary', kind: 'income', name: 'মাসিক বেতন', nameEn: 'Monthly Salary', icon: 'Briefcase', color: '#10B981' },
-      { id: 'cat-freelance', kind: 'income', name: 'ফ্রিল্যান্সিং ও বোনাস', nameEn: 'Freelance & Bonus', icon: 'Laptop', color: '#06B6D4' },
-      { id: 'cat-investment', kind: 'income', name: 'বিনিয়োগ ও লভ্যাংশ', nameEn: 'Investments & Profit', icon: 'TrendingUp', color: '#14B8A6' },
-
-      // Transfer Fees
-      { id: 'cat-transfer-fee', kind: 'expense', name: 'ক্যাশআউট চার্জ ও ব্যাংক ফি', nameEn: 'Transfer & Cashout Fee', icon: 'Percent', color: '#64748B' },
-
-      // Business Categories
-      { id: 'cat-biz-sales', kind: 'income', name: 'পণ্য বিক্রয়', nameEn: 'Sales Revenue', icon: 'Store', color: '#10B981', workspaceId: wsBusinessId },
-      { id: 'cat-biz-purchase', kind: 'expense', name: 'মাল ক্রয় ও স্টক', nameEn: 'Stock Purchase', icon: 'Package', color: '#F97316', workspaceId: wsBusinessId },
-      { id: 'cat-biz-salary', kind: 'expense', name: 'কর্মচারীর বেতন', nameEn: 'Staff Salary', icon: 'Users', color: '#EF4444', workspaceId: wsBusinessId },
-      { id: 'cat-biz-rent', kind: 'expense', name: 'দোকান ভাড়া', nameEn: 'Shop Rent', icon: 'Building2', color: '#8B5CF6', workspaceId: wsBusinessId },
-    ];
-
-    for (const cat of categories) {
-      const fullCat: Category = {
-        ...cat,
-        workspaceId: cat.workspaceId || wsPersonalId,
-      };
-      this.state.categories.set(fullCat.id, fullCat);
-    }
-
-    // Default Business Parties (Partners, Staff, Suppliers, Customers)
-    const partyPartner: BusinessParty = {
-      id: 'party-partner-1',
-      workspaceId: wsBusinessId,
-      name: 'করিম সাহেব (পার্টনার)',
-      role: 'partner',
-      phone: '01711-000000',
-      openingBalanceMinor: '0',
-      createdAt: now,
-    };
-    const partyStaff: BusinessParty = {
-      id: 'party-staff-1',
-      workspaceId: wsBusinessId,
-      name: 'রাশেদ (কর্মচারী)',
-      role: 'staff',
-      phone: '01811-000000',
-      openingBalanceMinor: '0',
-      createdAt: now,
-    };
-    this.state.parties.set(partyPartner.id, partyPartner);
-    this.state.parties.set(partyStaff.id, partyStaff);
-  }
+  public seedDefaultEntities(): void { populateStarterEntities(this.state); }
 
   // --- Transactions and Atomic Commits ---
 
@@ -771,13 +625,14 @@ export class LocalDatabase {
     return this.state.workspaces.get(id);
   }
 
-  public createWorkspace(name: string, kind: 'personal' | 'business'): Workspace {
+  public createWorkspace(name: string, kind: 'personal' | 'business', description = ''): Workspace {
     if (!name.trim()) throw new Error('Workspace name is required.');
     const ws: Workspace = {
       id: generateUUID(),
       ownerSubjectHash: this.state.localIdentity?.ownerSubjectHash || 'local-owner',
       name: name.trim(),
       kind,
+      description: description.trim().slice(0, 500),
       currency: 'BDT',
       createdAt: new Date().toISOString(),
     };
@@ -810,14 +665,15 @@ export class LocalDatabase {
     return true;
   }
 
-  public editWorkspace(id: UUID, updates: Partial<Pick<Workspace, 'name' | 'kind'>>): boolean {
+  public editWorkspace(id: UUID, updates: Partial<Pick<Workspace, 'name' | 'kind' | 'description'>>): boolean {
     const ws = this.state.workspaces.get(id);
     if (!ws) return false;
     this.assertWorkspaceOwner(ws);
     if (updates.name !== undefined && !updates.name.trim()) throw new Error('Workspace name is required.');
     if (updates.name !== undefined) ws.name = updates.name.trim();
     if (updates.kind) ws.kind = updates.kind;
-    this.queueSyncOp('workspace.update', id, { id, name: ws.name, kind: ws.kind });
+    if (updates.description !== undefined) ws.description = updates.description.trim().slice(0, 500);
+    this.queueSyncOp('workspace.update', id, { id, name: ws.name, kind: ws.kind, description: ws.description });
     this.autoPersist();
     return true;
   }
@@ -831,16 +687,32 @@ export class LocalDatabase {
     const ws = this.state.workspaces.get(id);
     if (!ws || ws.deletedAt) return 'Workspace not found.';
     this.assertWorkspaceOwner(ws);
-    if (!ws.archivedAt && this.getWorkspaces().length <= 1) return 'Keep at least one active workspace.';
-    const collections = [this.state.accounts, this.state.accountGroups, this.state.accountPermissions,
-      this.state.categories, this.state.parties, this.state.journalTransactions, this.state.budgets,
-      this.state.recurringRules, this.state.recurringOccurrences, this.state.receiptBlobs, this.state.conflicts];
-    if (collections.some(collection => Array.from((collection as Map<string, any>).values()).some(record => record.workspaceId === id)))
-      return 'This workspace contains records. Archive it to preserve its history.';
-    // Retained operations/snapshots can reference a workspace even after visible records are removed.
+    const starter = { localIdentity: null, workspaces: new Map(), accounts: new Map(), categories: new Map(), parties: new Map() };
+    populateStarterEntities(starter);
+    const protectedCollections = [this.state.accountGroups, this.state.accountPermissions, this.state.journalTransactions,
+      this.state.budgets, this.state.recurringRules];
+    if (protectedCollections.some(collection => Array.from((collection as Map<string, any>).values()).some(record => record.workspaceId === id)))
+      return 'This workspace contains financial records. Archive it to preserve its history.';
+    for (const [records, templates] of [[this.state.accounts, starter.accounts], [this.state.categories, starter.categories], [this.state.parties, starter.parties]] as const) {
+      if (Array.from((records as Map<string, any>).values()).some(record => record.workspaceId === id && !sameStarterRecord(record, templates.get(record.id))))
+        return 'This workspace has custom accounts, categories or people. Archive it to keep them safe.';
+    }
+    // Financial operations still protect their workspace. Empty starter-only recovery
+    // points may retain the tombstone safely and must not make defaults undeletable.
+    const snapshotHasHistory = (snapshot: LocalSnapshot) => {
+      if (!snapshot.dataJson?.includes(id)) return false;
+      try {
+        const data = JSON.parse(snapshot.dataJson);
+        if ((data.localSnapshots || []).length) return true; // Older recursive snapshots are conservative.
+        if (['accountGroups', 'accountPermissions', 'journalTransactions', 'budgets', 'recurringRules']
+          .some(key => (data[key] || []).some(([, record]: [string, any]) => record.workspaceId === id))) return true;
+        return (['accounts', 'categories', 'parties'] as const).some(key =>
+          (data[key] || []).some(([, record]: [string, any]) => record.workspaceId === id && !sameStarterRecord(record, starter[key].get(record.id))));
+      } catch { return true; }
+    };
     if (Array.from(this.state.syncOperations.values()).some(op => !op.type.startsWith('workspace.') &&
       (op.entityId === id || JSON.stringify(op.payload).includes(id))) ||
-      Array.from(this.state.localSnapshots.values()).some(snapshot => JSON.stringify(snapshot).includes(id)))
+      Array.from(this.state.localSnapshots.values()).some(snapshotHasHistory))
       return 'Retained history or synchronization references this workspace. Archive it instead.';
     return null;
   }
@@ -1772,8 +1644,12 @@ export class LocalDatabase {
    * Captures an immutable recovery snapshot before running any schema migration.
    */
   public async captureRecoverySnapshot(): Promise<LocalSnapshot> {
-    const serialized = JSON.stringify(this.toSerializable());
+    await this.waitForPendingWrites();
+    if (this.inTransaction) throw new Error('Storage busy. Try backup again after the current save finishes.');
+    // Snapshots must not recursively embed all preceding snapshots.
+    const serialized = JSON.stringify({ ...this.toSerializable(), localSnapshots: [] });
     const hash = await computeSha256(serialized);
+    if (this.inTransaction) throw new Error('Storage busy. Try backup again after the current save finishes.');
 
     const snapshot: LocalSnapshot = {
       id: generateUUID(),
@@ -1788,7 +1664,8 @@ export class LocalDatabase {
     };
 
     this.state.localSnapshots.set(snapshot.id, snapshot);
-    await this.persist();
+    try { await this.persist(); }
+    catch (error) { this.state.localSnapshots.delete(snapshot.id); throw error; }
     return snapshot;
   }
 
@@ -1806,13 +1683,62 @@ export class LocalDatabase {
     // Verify hash integrity
     const computed = await computeSha256(snap.dataJson);
     if (computed !== snap.hash) {
-      throw new Error('Snapshot hash mismatch! Corrupted snapshot cannot be restored.');
+      throw new Error('BACKUP_CHECKSUM');
     }
 
-    const parsed = JSON.parse(snap.dataJson);
-    await this.loadFromSerializable(parsed);
-    await this.persist();
+    await this.restoreBackupData(JSON.parse(snap.dataJson));
     return true;
+  }
+
+  public async exportBackupFile(): Promise<string> {
+    // Export is an escape hatch when internal storage is full: settle writes,
+    // preserve the error, and copy the current records to a separate file.
+    await this.writeQueuePromise.catch(() => {});
+    if (this.inTransaction) throw new Error('Storage busy. Try backup again after the current save finishes.');
+    return encodeBackup(this.toSerializable());
+  }
+
+  public async importBackupFile(text: string): Promise<void> {
+    await this.restoreBackupData(await decodeBackup(text));
+  }
+
+  private async restoreBackupData(incoming: Record<string, any>): Promise<void> {
+    await this.waitForPendingWrites();
+    mergeBackup(this.toSerializable(), incoming, this.hasOnlyUntouchedStarters()); // Reject invalid/foreign files without writing anything.
+    // Capture a recovery point before import, then validate against the latest state
+    // inside the transaction. No newer journal, metadata or pending operation is removed.
+    await this.captureRecoverySnapshot();
+    await this.beginTransaction();
+    try {
+      const startersOnly = this.hasOnlyUntouchedStarters();
+      const merged = mergeBackup(this.toSerializable(), incoming, startersOnly);
+      await this.loadFromSerializable(merged);
+      if (startersOnly) {
+        // Publish recovered metadata after any initial workspace bootstrap operations.
+        // Existing immutable journal and pending operation IDs are never replaced.
+        for (const [key, type, field] of [
+          ['workspaces', 'workspace.create', 'workspace'], ['accounts', 'account.create', 'account'],
+          ['categories', 'category.create', 'category'], ['parties', 'party.create', 'party'],
+        ] as const) for (const [id] of incoming[key] || []) {
+          const record = (this.state[key] as Map<string, any>).get(id);
+          this.queueSyncOp(type, id, { [field]: { ...record } });
+        }
+      }
+      await this.commitTransaction();
+    } catch (error) { await this.rollbackTransaction(); throw error; }
+  }
+
+  private hasOnlyUntouchedStarters(): boolean {
+    if ([this.state.journalTransactions, this.state.journalLines, this.state.accountGroups, this.state.accountPermissions,
+      this.state.budgets, this.state.recurringRules, this.state.recurringOccurrences, this.state.receiptBlobs, this.state.conflicts]
+      .some(records => records.size > 0)) return false;
+    if (Array.from(this.state.syncOperations.values()).some(op => op.type !== 'workspace.create' ||
+        !['ws-personal-default', 'ws-business-default'].includes(op.entityId))) return false;
+    const starter = { localIdentity: null, workspaces: new Map(), accounts: new Map(), categories: new Map(), parties: new Map() };
+    populateStarterEntities(starter);
+    return (['workspaces', 'accounts', 'categories', 'parties'] as const).every(key =>
+      this.state[key].size === starter[key].size && Array.from((this.state[key] as Map<string, any>).values())
+        .every(record => sameStarterRecord(record, starter[key].get(record.id))));
   }
 
   // --- Serialization / Hydration ---
@@ -2069,3 +1995,159 @@ export class LocalDatabase {
     return this.state;
   }
 }
+
+function sameStarterRecord(record: any, template: any): boolean {
+  if (!template) return false;
+  const clean = (value: any) => Object.fromEntries(Object.entries(value).filter(([key, entry]) =>
+    !['createdAt', 'ownerSubjectHash'].includes(key) && entry !== null && entry !== undefined));
+  return canonicalJson(clean(record)) === canonicalJson(clean(template));
+}
+
+function populateStarterEntities(state: Pick<DatabaseState, 'localIdentity' | 'workspaces' | 'accounts' | 'categories' | 'parties'>): void {
+    const now = new Date().toISOString();
+    const wsPersonalId = 'ws-personal-default';
+    const wsBusinessId = 'ws-business-default';
+
+    // 1. Personal Workspace
+    const wsPersonal: Workspace = {
+      id: wsPersonalId,
+      ownerSubjectHash: state.localIdentity?.ownerSubjectHash || 'local-owner',
+      name: 'ব্যক্তিগত (Personal)',
+      kind: 'personal',
+      currency: 'BDT',
+      createdAt: now,
+    };
+    state.workspaces.set(wsPersonal.id, wsPersonal);
+
+    // 2. Business Workspace
+    const wsBusiness: Workspace = {
+      id: wsBusinessId,
+      ownerSubjectHash: state.localIdentity?.ownerSubjectHash || 'local-owner',
+      name: 'দোকান / ব্যবসা (Business)',
+      kind: 'business',
+      currency: 'BDT',
+      createdAt: now,
+    };
+    state.workspaces.set(wsBusiness.id, wsBusiness);
+
+    // Default Personal Accounts (Clean slate: 0 opening balance)
+    const accCash: Account = {
+      id: 'acc-cash-1',
+      workspaceId: wsPersonalId,
+      name: 'Cash in Hand (নগদ ক্যাশ)',
+      kind: 'cash',
+      classification: 'asset',
+      openingBalanceMinor: '0',
+      createdAt: now,
+    };
+    const accBkash: Account = {
+      id: 'acc-bkash-1',
+      workspaceId: wsPersonalId,
+      name: 'bKash (বিকাশ একাউন্ট)',
+      kind: 'bkash',
+      classification: 'asset',
+      accountNumberMasked: '',
+      openingBalanceMinor: '0',
+      createdAt: now,
+    };
+    const accBank: Account = {
+      id: 'acc-bank-1',
+      workspaceId: wsPersonalId,
+      name: 'Bank Account (ব্যাংক হিসাব)',
+      kind: 'bank',
+      classification: 'asset',
+      accountNumberMasked: '',
+      openingBalanceMinor: '0',
+      createdAt: now,
+    };
+    state.accounts.set(accCash.id, accCash);
+    state.accounts.set(accBkash.id, accBkash);
+    state.accounts.set(accBank.id, accBank);
+
+    // Default Business Accounts (Clean slate: 0 opening balance)
+    const accBizCash: Account = {
+      id: 'acc-biz-cash',
+      workspaceId: wsBusinessId,
+      name: 'Cash Drawer (দোকানের ক্যাশ)',
+      kind: 'cash',
+      classification: 'asset',
+      openingBalanceMinor: '0',
+      createdAt: now,
+    };
+    const accBizBkash: Account = {
+      id: 'acc-biz-bkash',
+      workspaceId: wsBusinessId,
+      name: 'bKash Merchant (মার্চেন্ট)',
+      kind: 'bkash',
+      classification: 'asset',
+      accountNumberMasked: '',
+      openingBalanceMinor: '0',
+      createdAt: now,
+    };
+    state.accounts.set(accBizCash.id, accBizCash);
+    state.accounts.set(accBizBkash.id, accBizBkash);
+
+    // Default Categories with Sub-categories
+    const categories: Array<Omit<Category, 'workspaceId'> & { workspaceId?: UUID }> = [
+      // Personal Expenses
+      { id: 'cat-food', kind: 'expense', name: 'খাবার ও রেস্তোরাঁ', nameEn: 'Food & Dining', icon: 'Utensils', color: '#EF4444' },
+      { id: 'cat-food-restaurant', parentId: 'cat-food', kind: 'expense', name: 'রেস্তোরাঁ ও ডাইনিং', nameEn: 'Restaurant & Dining', icon: 'Utensils', color: '#EF4444' },
+      { id: 'cat-food-snacks', parentId: 'cat-food', kind: 'expense', name: 'চা ও নাশতা', nameEn: 'Tea & Snacks', icon: 'Coffee', color: '#EF4444' },
+
+      { id: 'cat-groceries', kind: 'expense', name: 'কাঁচাবাজার ও মুদি', nameEn: 'Groceries', icon: 'ShoppingCart', color: '#F97316' },
+      { id: 'cat-groc-veg', parentId: 'cat-groceries', kind: 'expense', name: 'শাকসবজি ও ফলমূল', nameEn: 'Vegetables & Fruits', icon: 'Apple', color: '#F97316' },
+      { id: 'cat-groc-fish', parentId: 'cat-groceries', kind: 'expense', name: 'মাছ, মাংস ও চাল-ডাল', nameEn: 'Meat, Fish & Rice', icon: 'Package', color: '#F97316' },
+
+      { id: 'cat-transport', kind: 'expense', name: 'যাতায়াত ও ভাড়া', nameEn: 'Transport & Commute', icon: 'Bus', color: '#3B82F6' },
+      { id: 'cat-transport-bus', parentId: 'cat-transport', kind: 'expense', name: 'বাস / রিকশা ভাড়া', nameEn: 'Bus & Rickshaw', icon: 'Bus', color: '#3B82F6' },
+      { id: 'cat-transport-fuel', parentId: 'cat-transport', kind: 'expense', name: 'বাইক / গাড়ির জ্বালানি', nameEn: 'Fuel & Gas', icon: 'Fuel', color: '#3B82F6' },
+
+      { id: 'cat-utility', kind: 'expense', name: 'বিদ্যুৎ ও গ্যাস বিল', nameEn: 'Utility Bills', icon: 'Zap', color: '#EAB308' },
+      { id: 'cat-medical', kind: 'expense', name: 'ওষুধ ও চিকিৎসা', nameEn: 'Medical & Healthcare', icon: 'HeartPulse', color: '#EC4899' },
+      { id: 'cat-rent', kind: 'expense', name: 'বাসা ভাড়া', nameEn: 'House Rent', icon: 'Home', color: '#8B5CF6' },
+
+      // Personal Income
+      { id: 'cat-salary', kind: 'income', name: 'মাসিক বেতন', nameEn: 'Monthly Salary', icon: 'Briefcase', color: '#10B981' },
+      { id: 'cat-freelance', kind: 'income', name: 'ফ্রিল্যান্সিং ও বোনাস', nameEn: 'Freelance & Bonus', icon: 'Laptop', color: '#06B6D4' },
+      { id: 'cat-investment', kind: 'income', name: 'বিনিয়োগ ও লভ্যাংশ', nameEn: 'Investments & Profit', icon: 'TrendingUp', color: '#14B8A6' },
+
+      // Transfer Fees
+      { id: 'cat-transfer-fee', kind: 'expense', name: 'ক্যাশআউট চার্জ ও ব্যাংক ফি', nameEn: 'Transfer & Cashout Fee', icon: 'Percent', color: '#64748B' },
+
+      // Business Categories
+      { id: 'cat-biz-sales', kind: 'income', name: 'পণ্য বিক্রয়', nameEn: 'Sales Revenue', icon: 'Store', color: '#10B981', workspaceId: wsBusinessId },
+      { id: 'cat-biz-purchase', kind: 'expense', name: 'মাল ক্রয় ও স্টক', nameEn: 'Stock Purchase', icon: 'Package', color: '#F97316', workspaceId: wsBusinessId },
+      { id: 'cat-biz-salary', kind: 'expense', name: 'কর্মচারীর বেতন', nameEn: 'Staff Salary', icon: 'Users', color: '#EF4444', workspaceId: wsBusinessId },
+      { id: 'cat-biz-rent', kind: 'expense', name: 'দোকান ভাড়া', nameEn: 'Shop Rent', icon: 'Building2', color: '#8B5CF6', workspaceId: wsBusinessId },
+    ];
+
+    for (const cat of categories) {
+      const fullCat: Category = {
+        ...cat,
+        workspaceId: cat.workspaceId || wsPersonalId,
+      };
+      state.categories.set(fullCat.id, fullCat);
+    }
+
+    // Default Business Parties (Partners, Staff, Suppliers, Customers)
+    const partyPartner: BusinessParty = {
+      id: 'party-partner-1',
+      workspaceId: wsBusinessId,
+      name: 'করিম সাহেব (পার্টনার)',
+      role: 'partner',
+      phone: '01711-000000',
+      openingBalanceMinor: '0',
+      createdAt: now,
+    };
+    const partyStaff: BusinessParty = {
+      id: 'party-staff-1',
+      workspaceId: wsBusinessId,
+      name: 'রাশেদ (কর্মচারী)',
+      role: 'staff',
+      phone: '01811-000000',
+      openingBalanceMinor: '0',
+      createdAt: now,
+    };
+    state.parties.set(partyPartner.id, partyPartner);
+    state.parties.set(partyStaff.id, partyStaff);
+  }

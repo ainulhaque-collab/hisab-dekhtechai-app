@@ -1,19 +1,18 @@
-@import url('https://fonts.googleapis.com/css2?family=Hind+Siliguri:wght@400;500;600;700&family=Noto+Sans+Bengali:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600;700&display=swap');
 @import "tailwindcss";
 
 @theme {
-  --font-sans: 'Hind Siliguri', 'Noto Sans Bengali', system-ui, -apple-system, sans-serif;
-  --font-mono: 'JetBrains Mono', 'Hind Siliguri', 'Noto Sans Bengali', monospace;
+  --font-sans: 'Inter Variable', 'Noto Sans Bengali Variable', system-ui, sans-serif;
+  --font-mono: 'Inter Variable', 'Noto Sans Bengali Variable', ui-monospace, monospace;
 }
 
 body {
-  font-family: 'Hind Siliguri', 'Noto Sans Bengali', system-ui, -apple-system, sans-serif;
+  font-family: 'Inter Variable', 'Noto Sans Bengali Variable', system-ui, sans-serif;
   -webkit-font-smoothing: antialiased;
   -webkit-tap-highlight-color: transparent;
 }
 
 .tabular-nums {
-  font-variant-numeric: tabular-nums;
+  font-variant-numeric: lining-nums tabular-nums;
   font-feature-settings: "tnum";
 }
 
@@ -45,3 +44,11 @@ body {
   padding-top: max(env(safe-area-inset-top, 0px), 0px);
 }
 
+
+@keyframes app-surface-enter { from { opacity: 0; transform: translateY(10px) scale(.99); } to { opacity: 1; transform: translateY(0) scale(1); } }
+@keyframes app-backdrop-enter { from { opacity: 0; } to { opacity: 1; } }
+.app-modal-panel, .app-panel-enter { animation: app-surface-enter 180ms cubic-bezier(.2,.8,.2,1) both; }
+.app-modal-backdrop { animation: app-backdrop-enter 140ms ease-out both; }
+@media (prefers-reduced-motion: reduce) {
+  .app-modal-panel, .app-modal-backdrop, .app-panel-enter { animation: none !important; }
+}

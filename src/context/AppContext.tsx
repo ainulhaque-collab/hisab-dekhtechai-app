@@ -70,7 +70,7 @@ interface AppContextType {
   setLanguage: (lang: 'bn' | 'en') => void;
   refreshState: () => void;
   triggerManualSync: () => Promise<void>;
-  createWorkspace: (name: string, kind: 'personal' | 'business') => Promise<Workspace>;
+  createWorkspace: (name: string, kind: 'personal' | 'business', description?: string) => Promise<Workspace>;
   archiveWorkspace: (id: UUID) => boolean;
   restoreWorkspace: (id: UUID) => boolean;
   durabilityInfo: { type: string; isPersistent: boolean; warning?: string };
@@ -387,15 +387,17 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   const triggerManualSync = async () => {
     if (!auth.isRealGoogleAuthenticated() || !db.getIdentity()?.ownerSubjectHash) {
       sync.setAuthorized(false);
-      return;
+      throw new Error('AUTH_REQUIRED: Reconnect Google Drive.');
     }
     await sync.triggerSync();
     refreshState();
+    const status = sync.getStatus();
+    if (status.state !== 'synced_verified') throw new Error(status.lastError || status.state);
   };
 
-  const createWorkspace = async (name: string, kind: 'personal' | 'business') => {
+  const createWorkspace = async (name: string, kind: 'personal' | 'business', description = '') => {
     await db.beginTransaction();
-    try { const ws = db.createWorkspace(name, kind); await db.commitTransaction(); refreshState(); return ws; }
+    try { const ws = db.createWorkspace(name, kind, description); await db.commitTransaction(); refreshState(); return ws; }
     catch (error) { await db.rollbackTransaction(); throw error; }
   };
 
@@ -574,7 +576,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   };
 
   const signInWithGoogle = async (): Promise<GoogleUserProfile> => {
-    await db.init();
+    // Invoke GIS within the original tap. Awaiting storage first loses popup permission on mobile.
     const needsBinding = !db.getIdentity() && db.getRawState().syncOperations.size > 0;
     if (needsBinding && !window.confirm(language === 'en'
       ? 'Link all existing offline records on this device to the Google account you select? Use only your own account.'
@@ -591,14 +593,16 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         );
       }
       await sync.bootstrapAndRestore(profile, needsBinding);
-      refreshState();
-      return profile;
     } catch (err) {
       auth.signOut();
       sync.setAuthorized(false);
       refreshState();
       throw err;
     }
+    refreshState();
+    const status = sync.getStatus();
+    if (status.state !== 'synced_verified') throw new Error(status.lastError || status.state);
+    return profile;
   };
 
   const bootstrapWithTestProfile = async (profile: GoogleUserProfile): Promise<void> => {
