@@ -10,6 +10,16 @@
         <item name="android:windowLightStatusBar">true</item>
         <item name="android:navigationBarColor">@android:color/white</item>
         <item name="android:windowLightNavigationBar">true</item>
+        <!-- Capacitor's JS confirm/alert uses android.app.AlertDialog. Keep its
+             text and surface on the same light palette even in system dark mode. -->
+        <item name="android:alertDialogTheme">@style/AppAlertDialogTheme</item>
+    </style>
+
+    <style name="AppAlertDialogTheme" parent="android:style/Theme.Material.Light.Dialog.Alert">
+        <item name="android:colorAccent">#1D4ED8</item>
+        <item name="android:textColorPrimary">#0F172A</item>
+        <item name="android:textColorSecondary">#475569</item>
+        <item name="android:colorBackground">#FFFFFF</item>
     </style>
 
     <!-- Launch screen theme (no action bar, clean white background) -->

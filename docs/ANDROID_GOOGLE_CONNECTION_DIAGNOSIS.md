@@ -41,3 +41,9 @@ Five focused tests and all 124 tests plus TypeScript passed. New regressions cov
 - Replacement installation over version 5 succeeded on the owner's TECNO CM6. Cold launch returned `Status: ok`; installed package reports version 6 / `1.0.5-test`.
 - Primary-user first installation time remains `2026-10-26 19:17:09`, data directory remains `/data/user/0/com.hisabdekhtechai.app`, last update time is `2026-10-26 20:25:36`. No uninstall or clear-data was performed. These installation facts do not establish financial-row retention or successful sync.
 - Owner confirmed that saving the previous BDT 120 test expense succeeded on version 6 before connecting Google. This is physical confirmation of the expense-save correction. Google connection, cross-device parity, persistence after a later restart/update and backup verification remain pending.
+
+## Unreadable offline-ownership confirmation
+
+After saving the first expense, the owner saw a native Cancel / OK dialog with no readable message. The only confirmation before Google authorization in this path is AppContext's offline ownership binding prompt: link this device's existing offline records to the selected Google account, using only the owner's account. This prompt is required once a new unbound installation has financial records; it is not a Google authorization error. No consent is bypassed.
+
+Capacitor's installed BridgeWebChromeClient implements this prompt with `android.app.AlertDialog.Builder(view.getContext())`. The app combines a DayNight base theme with a forced white window surface. An explicit platform light alert-dialog theme now sets dark primary/secondary text and a blue accent, inherited by the activity's launch theme. This applies to other native backup/sign-out confirmations too. Native resource compilation and physical readability remain to be verified in the next signed candidate.
