@@ -209,7 +209,8 @@ export class LocalDatabase {
       if (raw) {
         try {
           const parsed = JSON.parse(raw);
-          this.loadFromSerializable(parsed);
+          // Constructor hydration must not launch asynchronous migrations before driver init.
+          this.hydrateState(parsed);
           return true;
         } catch (err) {
           console.error('[CRITICAL] Failed to parse or migrate database from localStorage. Preserving data to prevent wipe:', err);
@@ -248,7 +249,8 @@ export class LocalDatabase {
         try {
           const parsed = JSON.parse(durableData);
           await this.loadFromSerializable(parsed);
-          this.persistSync();
+          if ((parsed.schemaVersion || 1) < CURRENT_SCHEMA_VERSION) await this.persist();
+          else this.persistSync();
           return;
         } catch (err) {
           console.error('[CRITICAL] Failed to parse durable storage state. Preserving emergency snapshot before error:', err);
@@ -304,7 +306,8 @@ export class LocalDatabase {
       }
 
       // Step 3: Write to durable driver
-      await this.driver.setItem(this.storageKey, JSON.stringify(this.toSerializable()));
+      const expectedData = JSON.stringify(this.toSerializable());
+      await this.driver.setItem(this.storageKey, expectedData);
 
       // Step 4: Verification read-back
       const readBack = await this.driver.getItem(this.storageKey);
@@ -316,7 +319,8 @@ export class LocalDatabase {
       const verifiedTxCount = (verifiedParsed.journalTransactions || []).length;
       const verifiedAccCount = (verifiedParsed.accounts || []).length;
 
-      if (verifiedTxCount !== legacyTxCount || verifiedAccCount !== legacyAccCount) {
+      if (verifiedTxCount !== legacyTxCount || verifiedAccCount !== legacyAccCount ||
+          canonicalJson(verifiedParsed) !== canonicalJson(JSON.parse(expectedData))) {
         throw new Error(
           `Record count mismatch during migration verification! Expected ${legacyTxCount} txs, got ${verifiedTxCount}`
         );
@@ -334,7 +338,7 @@ export class LocalDatabase {
       };
     } catch (migrationErr) {
       console.error('[Storage Migration Error] Migration failed, rolling back to safety snapshot:', migrationErr);
-      return { migrated: false, verified: false, recordsMigrated: 0 };
+      throw migrationErr;
     }
   }
 
@@ -1809,8 +1813,22 @@ export class LocalDatabase {
   }
 
   public async loadFromSerializable(data: Record<string, any>): Promise<void> {
+    const previous = this.state;
+    try {
+      this.hydrateState(data);
+      const fromVer = data.schemaVersion || 1;
+      if (fromVer < 4) await this.runVersion4Migration(fromVer);
+      if (fromVer < 5) await this.runVersion5Migration(fromVer);
+    } catch (error) { this.state = previous; throw error; }
+  }
+
+  private hydrateState(data: Record<string, any>): void {
     const fromVer = data.schemaVersion || 1;
-    this.state.schemaVersion = Math.max(fromVer, CURRENT_SCHEMA_VERSION);
+    if (!Number.isSafeInteger(fromVer) || fromVer < 1 || fromVer > CURRENT_SCHEMA_VERSION) {
+      throw new Error('DATABASE_VERSION_UNSUPPORTED: Update the app before opening this database. Existing records have not been replaced.');
+    }
+    this.state = this.createEmptyState();
+    this.state.schemaVersion = fromVer;
     this.state.localIdentity = data.localIdentity || null;
     this.state.deviceIdentity = data.deviceIdentity || {
       deviceId: generateUUID(),
@@ -1836,17 +1854,9 @@ export class LocalDatabase {
     this.state.recurringOccurrences = new Map(data.recurringOccurrences || []);
     this.state.receiptBlobs = new Map(data.receiptBlobs || []);
     this.state.localSnapshots = new Map(data.localSnapshots || []);
-    this.state.schemaMigrations = data.schemaMigrations || [];
+    this.state.schemaMigrations = [...(data.schemaMigrations || [])];
     this.state.preferences = new Map(data.preferences || []);
 
-    // Perform non-destructive migrations if fromVer < 4
-    if (fromVer < 4) {
-      await this.runVersion4Migration(fromVer);
-    }
-    // Perform non-destructive migrations if fromVer < 5
-    if (fromVer < 5) {
-      await this.runVersion5Migration(fromVer);
-    }
   }
 
   private async runVersion4Migration(fromVer: number): Promise<void> {
@@ -1877,7 +1887,15 @@ export class LocalDatabase {
         await this.driver.setItem(`${this.storageKey}_pre_migration_v5`, rawCurrent);
       }
     }
-    await this.captureRecoverySnapshot();
+    // Stage the recovery point in memory. Never overwrite the original database
+    // until every migration and ledger check has succeeded.
+    const dataJson = JSON.stringify({ ...this.toSerializable(), localSnapshots: [] });
+    const createdAt = new Date().toISOString();
+    const snapshot: LocalSnapshot = { id: generateUUID(), dbSchemaVersion: this.state.schemaVersion,
+      hash: await computeSha256(dataJson), totalTransactions: this.state.journalTransactions.size,
+      totalLines: this.state.journalLines.size, pendingOutboxCount: this.getPendingOutbox().length,
+      verifiedAt: createdAt, createdAt, dataJson };
+    this.state.localSnapshots.set(snapshot.id, snapshot);
 
     // Step 2: Non-destructive accounts schema updates
     for (const [id, acc] of this.state.accounts.entries()) {

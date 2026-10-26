@@ -208,10 +208,8 @@ export class IndexedDBDurableDriver implements DurableStorageDriver {
         const transaction = this.db!.transaction(this.storeName, 'readwrite');
         const store = transaction.objectStore(this.storeName);
         const request = store.put(value, key);
-
-        request.onsuccess = () => {
-          resolve();
-        };
+        transaction.oncomplete = () => resolve();
+        transaction.onabort = transaction.onerror = () => reject(transaction.error || new Error('IndexedDB write did not commit.'));
         request.onerror = () => {
           reject(request.error);
         };
@@ -228,10 +226,8 @@ export class IndexedDBDurableDriver implements DurableStorageDriver {
         const transaction = this.db!.transaction(this.storeName, 'readwrite');
         const store = transaction.objectStore(this.storeName);
         const request = store.delete(key);
-
-        request.onsuccess = () => {
-          resolve();
-        };
+        transaction.oncomplete = () => resolve();
+        transaction.onabort = transaction.onerror = () => reject(transaction.error || new Error('IndexedDB delete did not commit.'));
         request.onerror = () => {
           reject(request.error);
         };
