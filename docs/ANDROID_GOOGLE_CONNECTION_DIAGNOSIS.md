@@ -57,3 +57,9 @@ The first version 7 build passed all 124 tests, TypeScript, Web build, native re
 - APK SHA-256: `B9B4BE759656A94B9878D4CE44663106A52520EC4907E852205DD999494FDDAA`; signature matches the permanent signing certificate.
 - Replacement installation over version 6 succeeded. Cold launch returned `Status: ok`; installed package reports version 7. Primary-user firstInstallTime remains `2026-10-26 19:17:09`, dataDir remains `/data/user/0/com.hisabdekhtechai.app`, lastUpdateTime is `2026-10-26 20:58:25`.
 - No uninstall/clear-data was performed. Owner has been asked to check the previously saved BDT 120 expense, confirm dialog readability, and then test Google connection/sync. These functional acceptance checks are pending; install timestamps alone do not prove financial-row retention.
+
+## Owner feedback after version 7
+
+The owner reports that Continue with Google now proceeds directly to syncing, without displaying the earlier confirmation. This confirms the owner's observed connection/sync flow now works; the exact account, successful-sync timestamp and verified-backup timestamp have not yet been independently checked. Existing Google authorization and a previously bound dataset can explain why account selection/ownership confirmation no longer appears. The absent dialog does not establish that its readability fix has been visually verified.
+
+The owner has been asked to check that the BDT 120 expense remains after the replacement update, that the correct Gmail and successful-sync time appear, and that the phone-created expense arrives in the same-account Web app. Cross-device parity, verified Drive backup and full update retention acceptance remain pending.
