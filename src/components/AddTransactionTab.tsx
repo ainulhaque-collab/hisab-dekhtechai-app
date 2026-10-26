@@ -388,9 +388,6 @@ export const AddTransactionTab: React.FC<AddTransactionTabProps> = ({ onSuccess 
       refreshState();
       setSuccessToast(true);
 
-      if (isOnline) {
-        triggerManualSync().catch(console.error);
-      }
 
       // Reset form
       setAmountStr('');

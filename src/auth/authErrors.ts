@@ -2,10 +2,13 @@
 export function googleErrorMessage(error: unknown, en: boolean): string {
   const text = error instanceof Error ? error.message : String(error);
   const pick = (english: string, bengali: string) => en ? english : bengali;
+  if (text.includes('GOOGLE_DRIVE_API_DISABLED')) return pick('The app owner must enable Google Drive API in the Google Cloud project used by both OAuth clients.', 'অ্যাপের মালিককে দুই OAuth client-এর একই Google Cloud project-এ Google Drive API চালু করতে হবে।');
   if (text.includes('GOOGLE_INSECURE_ORIGIN')) return pick(
     'Google Drive cannot connect from this LAN HTTP address. For phone testing, use USB port forwarding and localhost, or an authorized HTTPS address. File backups work here.',
     'এই LAN HTTP ঠিকানায় গুগল ড্রাইভ সংযোগ হয় না। ফোনে পরীক্ষার জন্য USB port forwarding দিয়ে localhost, অথবা অনুমোদিত HTTPS ঠিকানা ব্যবহার করুন। এখানে ফাইল ব্যাকআপ চলবে।');
-  if (/popup|cancel|access_denied/i.test(text)) return pick('Allow the Google sign-in popup and Drive app storage permission, then retry.', 'গুগল সাইন-ইন পপআপ ও ড্রাইভ অ্যাপ স্টোরেজের অনুমতি দিয়ে আবার চেষ্টা করুন।');
+  if (/developer-approved testers|test users|currently being tested|has not completed.*verification/i.test(text)) return pick('This test build requires account approval. Ask the app owner to add your Google account as a test user, then sign in again.', 'এই পরীক্ষামূলক বিল্ডে অ্যাকাউন্টের অনুমোদন প্রয়োজন। অ্যাপের মালিককে আপনার গুগল অ্যাকাউন্ট Test users তালিকায় যোগ করতে বলুন, এরপর আবার লগইন করুন।');
+  if (/access_denied/i.test(text)) return pick('Google did not authorize access. Allow private app storage; if this is a test build, ask the app owner to approve your account as a test user.', 'গুগল প্রবেশের অনুমোদন দেয়নি। ব্যক্তিগত অ্যাপ স্টোরেজের অনুমতি দিন; পরীক্ষামূলক বিল্ড হলে অ্যাপের মালিককে আপনার অ্যাকাউন্ট Test users তালিকায় যোগ করতে বলুন।');
+  if (/popup|cancel/i.test(text)) return pick('Allow the Google sign-in popup and Drive app storage permission, then retry.', 'গুগল সাইন-ইন পপআপ ও ড্রাইভ অ্যাপ স্টোরেজের অনুমতি দিয়ে আবার চেষ্টা করুন।');
   if (/origin|client|signing certificate|OAuth package/i.test(text) && !/library/.test(text)) return pick('Google rejected this build or address. The app owner must authorize its web origin or Android package and signing certificate.', 'গুগল এই বিল্ড বা ঠিকানা অনুমোদন করেনি। অ্যাপের মালিককে web origin অথবা Android package ও signing certificate অনুমোদন করতে হবে।');
   if (/owner|reassign|Foreign|subject/i.test(text)) return pick('Use the Google account that owns these records. Existing records have not been reassigned.', 'এই হিসাবের মূল মালিকের গুগল অ্যাকাউন্ট ব্যবহার করুন। হিসাবের মালিকানা বদলানো হয়নি।');
   if (/Quota|quota|storage.*full/i.test(text)) return pick('Google Drive storage is full. Free some space, then retry.', 'গুগল ড্রাইভের স্টোরেজ পূর্ণ। জায়গা খালি করে আবার চেষ্টা করুন।');

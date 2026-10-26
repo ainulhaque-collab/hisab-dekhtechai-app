@@ -4,10 +4,11 @@
  * and multi-device simulation.
  */
 
-import React, { createContext, useContext, useEffect, useState, useMemo } from 'react';
+import React, { createContext, useContext, useEffect, useState, useMemo, useRef } from 'react';
 import { Capacitor } from '@capacitor/core';
 import { LocalDatabase } from '../storage/db';
 import { SyncOrchestrator, SyncStatusInfo } from '../sync/orchestrator';
+import { AutomaticSync } from '../sync/automaticSync';
 import { SimulatedGoogleDriveTransport, RealGoogleDriveTransport } from '../drive/transport';
 import { GoogleAuthManager, GoogleUserProfile } from '../auth/googleAuth';
 import { generateUUID } from '../domain/journal';
@@ -154,7 +155,7 @@ const deviceDatabases: Map<string, LocalDatabase> = new Map();
 function getOrCreateDeviceDb(deviceId: string, deviceName: string): LocalDatabase {
   let db = deviceDatabases.get(deviceId);
   if (!db) {
-    db = new LocalDatabase(`hisab_db_${deviceId}`);
+    db = new LocalDatabase(`hisab_sim_db_${deviceId}`);
     db.setDeviceIdentity(deviceId, deviceName);
     deviceDatabases.set(deviceId, db);
   }
@@ -163,12 +164,14 @@ function getOrCreateDeviceDb(deviceId: string, deviceName: string): LocalDatabas
 
 export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const prod = isProduction();
-  const initialDevice: DeviceProfile = prod ? getProductionDeviceProfile() : SIMULATED_DEVICES[0];
+  const simulation = !prod && import.meta.env?.VITE_ENABLE_SYNC_SIMULATION === 'true';
+  const initialDevice = useMemo(() => simulation ? SIMULATED_DEVICES[0] : getProductionDeviceProfile(), [simulation]);
   const [currentDevice, setCurrentDevice] = useState<DeviceProfile>(initialDevice);
   const [db, setDb] = useState<LocalDatabase>(() =>
-    prod
+    !simulation
       ? (() => {
-          const mainDb = new LocalDatabase('hisab_dekhtechai_db');
+          // Keep both existing storage keys stable across this upgrade.
+          const mainDb = new LocalDatabase(prod ? 'hisab_dekhtechai_db' : 'hisab_db_device-android-A');
           mainDb.setDeviceIdentity(initialDevice.id, initialDevice.name);
           return mainDb;
         })()
@@ -192,16 +195,16 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   };
 
   const sharedTransport = useMemo(() => {
-    if (prod) {
+    if (!simulation) {
       // In production mode, never instantiate simulated cloud storage
       return new RealGoogleDriveTransport('', {
         tokenProvider: createSecureTokenProvider(db),
       });
     }
     return new SimulatedGoogleDriveTransport();
-  }, [prod, auth, db]);
+  }, [simulation, auth, db]);
 
-  const [sync, setSync] = useState<SyncOrchestrator>(() => new SyncOrchestrator(db, sharedTransport));
+  const [sync, setSync] = useState<SyncOrchestrator>(() => new SyncOrchestrator(db, sharedTransport, { cloudBackups: !simulation }));
 
   const [currentWorkspaceId, setCurrentWorkspaceId] = useState<UUID>('ws-personal-default');
   const [workspaces, setWorkspaces] = useState<Workspace[]>([]);
@@ -254,7 +257,8 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   useEffect(() => {
     let isMounted = true;
     setStorageReady(false);
-    db.init().then(() => {
+    db.init().then(async () => {
+      if (!simulation) { db.setDeviceIdentity(initialDevice.id, initialDevice.name); await db.persist(); }
       if (isMounted) {
         db.getDurabilityInfo().then((info) => {
           if (isMounted) setDurabilityInfo(info);
@@ -295,27 +299,48 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     setSyncStatus(sync.getStatus());
     setUserProfile(auth.getProfile());
   };
+  const refreshRef = useRef(refreshState);
+  refreshRef.current = refreshState;
+  const automatic = useRef<AutomaticSync | null>(null);
+
+  const authorizeAutomaticSync = async (): Promise<boolean> => {
+    const owner = db.getIdentity()?.ownerSubjectHash;
+    if (!owner || auth.isTestMode() || auth.getProfile()?.subjectHash !== owner) { sync.setAuthorized(false); return false; }
+    try { await auth.getValidAccessToken(); sync.setAuthorized(true); return true; }
+    catch { sync.setAuthorized(false); refreshRef.current(); return false; }
+  };
 
   useEffect(() => {
-    refreshState();
-    const currentProf = auth.getProfile();
-    const isRealGoogle = auth.isRealGoogleAuthenticated();
-    if (isRealGoogle && currentProf?.accessToken) {
-      sync.setTransport(
-        new RealGoogleDriveTransport(currentProf.accessToken, {
-          tokenProvider: createSecureTokenProvider(db),
-        })
-      );
-      sync.setAuthorized(true);
-    } else {
-      sync.setAuthorized(false);
-    }
+    sync.setAuthorized(auth.isRealGoogleAuthenticated() && !!db.getIdentity());
     const unsub = sync.subscribe((status) => {
       setSyncStatus(status);
-      refreshState();
+      refreshRef.current();
     });
     return unsub;
-  }, [db, sync, currentWorkspaceId, userProfile?.accessToken]);
+  }, [db, sync]);
+
+  useEffect(() => { refreshRef.current(); }, [currentWorkspaceId]);
+
+  useEffect(() => {
+    if (!storageReady || simulation) return;
+    const worker = new AutomaticSync(db, sync, {
+      enabled: () => (typeof navigator === 'undefined' || navigator.onLine) &&
+        (typeof document === 'undefined' || document.visibilityState === 'visible') && !!auth.getProfile(),
+      authorize: authorizeAutomaticSync,
+    });
+    automatic.current = worker;
+    const foreground = () => { if (document.visibilityState === 'visible') worker.request(true); };
+    document.addEventListener('visibilitychange', foreground);
+    window.addEventListener('focus', foreground);
+    window.addEventListener('hisab-foreground', foreground);
+    worker.start();
+    return () => {
+      worker.stop(); automatic.current = null;
+      document.removeEventListener('visibilitychange', foreground);
+      window.removeEventListener('focus', foreground);
+      window.removeEventListener('hisab-foreground', foreground);
+    };
+  }, [db, sync, auth, storageReady, simulation, userProfile?.subjectHash]);
 
   // Automatic sync on network connectivity restoration
   useEffect(() => {
@@ -323,11 +348,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       console.info('[Network] Connectivity restored. Automatically triggering sync.');
       setIsOnlineState(true);
       sync.setOnline(true);
-      if (auth.isRealGoogleAuthenticated()) {
-        sync.triggerSync().catch((err) => {
-          console.warn('[Auto-sync error on online restoration]:', err);
-        });
-      }
+      automatic.current?.request(true);
     };
 
     const handleOffline = () => {
@@ -348,7 +369,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   }, [sync, auth]);
 
   const switchDevice = async (dev: DeviceProfile) => {
-    if (isProduction()) {
+    if (!simulation) {
       console.warn('Security: Simulated device switching is forbidden in production mode.');
       return;
     }
@@ -370,7 +391,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     setCurrentDevice(dev);
     // Trigger sync on device switch
     if (isOnline && isRealGoogle) {
-      setTimeout(() => targetSync.triggerSync(), 200);
+      setTimeout(() => targetSync.triggerSync().catch(console.warn), 200);
     }
   };
 
@@ -378,14 +399,12 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     setIsOnlineState(online);
     sync.setOnline(online);
     if (online) {
-      sync.triggerSync().catch((err) => {
-        console.warn('[Auto-sync error on manual online toggle]:', err);
-      });
+      automatic.current?.request(true);
     }
   };
 
   const triggerManualSync = async () => {
-    if (!auth.isRealGoogleAuthenticated() || !db.getIdentity()?.ownerSubjectHash) {
+    if (!await authorizeAutomaticSync()) {
       sync.setAuthorized(false);
       throw new Error('AUTH_REQUIRED: Reconnect Google Drive.');
     }
@@ -562,22 +581,16 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   const deleteTransaction = async (id: UUID, reason?: string) => {
     await db.deleteTransaction(id, reason);
     refreshState();
-    if (isOnline) {
-      triggerManualSync().catch(console.error);
-    }
   };
 
   const editTransaction = async (id: UUID, cmd: any) => {
     await db.editTransaction(id, cmd);
     refreshState();
-    if (isOnline) {
-      triggerManualSync().catch(console.error);
-    }
   };
 
   const signInWithGoogle = async (): Promise<GoogleUserProfile> => {
     // Invoke GIS within the original tap. Awaiting storage first loses popup permission on mobile.
-    const needsBinding = !db.getIdentity() && db.getRawState().syncOperations.size > 0;
+    const needsBinding = !db.getIdentity() && !db.hasOnlyUntouchedStarters();
     if (needsBinding && !window.confirm(language === 'en'
       ? 'Link all existing offline records on this device to the Google account you select? Use only your own account.'
       : 'এই ডিভাইসের সব অফলাইন হিসাব নির্বাচিত গুগল অ্যাকাউন্টের সাথে যুক্ত করবেন? শুধুমাত্র নিজের অ্যাকাউন্ট ব্যবহার করুন।')) {

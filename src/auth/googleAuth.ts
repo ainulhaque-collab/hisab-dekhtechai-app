@@ -181,7 +181,7 @@ export class GoogleAuthManager {
 
   public isTokenExpired(): boolean {
     if (!this.currentProfile?.accessToken) return true;
-    if (!this.currentProfile.tokenExpiresAt) return false;
+    if (this.currentProfile.tokenExpiresAt == null) return true;
     return Date.now() >= this.currentProfile.tokenExpiresAt - 60000; // 1 min buffer
   }
 
@@ -336,6 +336,7 @@ export class GoogleAuthManager {
       throw new Error('No user profile available for simulated token renewal.');
     }
 
+    if (prompt === '') throw new Error('AUTH_REQUIRED: Reconnect Google Drive to renew browser access.');
     const clientId = this.getClientId();
     return new Promise((resolve, reject) => {
       if (typeof window === 'undefined' || !window.google?.accounts?.oauth2) {
@@ -410,11 +411,15 @@ export class GoogleAuthManager {
    * If forceRenew is true (e.g. after HTTP 401 error), invalidates local token and triggers renewal.
    */
   public async getValidAccessToken(forceRenew = false): Promise<string> {
-    if (forceRenew && Capacitor.getPlatform() === 'android' && !this.isSimulatedAuth) {
-      const invalidToken = this.currentProfile?.accessToken;
-      if (this.currentProfile) this.currentProfile.accessToken = undefined;
+    if (!this.currentProfile) throw new Error('AUTH_REQUIRED: User is not signed in to Google.');
+    if (Capacitor.getPlatform() === 'android' && !this.isSimulatedAuth && (forceRenew || this.isTokenExpired())) {
+      const invalidToken = forceRenew ? this.currentProfile.accessToken : undefined;
       const { accessToken } = await NativeGoogleDrive.authorize({ interactive: false, invalidToken });
       return (await this.acceptNativeToken(accessToken, true)).accessToken!;
+    }
+    if (!this.isSimulatedAuth && (forceRenew || this.isTokenExpired())) {
+      if (forceRenew) { this.currentProfile.accessToken = undefined; this.currentProfile.isDriveAuthorized = false; }
+      throw new Error('AUTH_REQUIRED: Reconnect Google Drive to renew browser access.');
     }
     if (!this.currentProfile?.accessToken && !forceRenew) {
       throw new Error('User is not signed in to Google.');

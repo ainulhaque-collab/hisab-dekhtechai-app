@@ -1,15 +1,17 @@
 import React, { useState } from 'react';
-import { Cloud, CloudOff, CheckCheck, RefreshCw, Clock3, ShieldCheck, ArrowRight, AlertCircle, HelpCircle, ChevronDown } from 'lucide-react';
+import { Cloud, CloudOff, CheckCheck, RefreshCw, Clock3, ShieldCheck, ArrowRight, AlertCircle, HelpCircle, ChevronDown, Download } from 'lucide-react';
 import { useApp } from '../context/AppContext';
 import { ModalShell, primaryButton, secondaryButton } from './ModalShell';
 import { googleErrorMessage } from '../auth/authErrors';
+import { saveBackupFile } from '../storage/backupFiles';
 
 export function SyncModal({ isOpen, onClose, onOpenConflictModal, onOpenAuthModal }: {
   isOpen: boolean; onClose: () => void; onOpenConflictModal: () => void; onOpenAuthModal?: () => void;
 }) {
-  const { syncStatus, isOnline, isLiveGoogleAuth, triggerManualSync, conflicts, language } = useApp();
+  const { sync, syncStatus, isOnline, isLiveGoogleAuth, triggerManualSync, conflicts, language } = useApp();
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [notice, setNotice] = useState('');
   if (!isOpen) return null;
   const en = language === 'en';
   const verified = isOnline && isLiveGoogleAuth && syncStatus.state === 'synced_verified' && !!syncStatus.lastSuccessfulSyncAt;
@@ -28,6 +30,7 @@ export function SyncModal({ isOpen, onClose, onOpenConflictModal, onOpenAuthModa
       <p className="flex items-center justify-center gap-1.5 text-[10px] text-slate-400"><ShieldCheck className="h-3 w-3" />{en ? 'Private app storage · Accessible only to you' : 'ব্যক্তিগত অ্যাপ স্টোরেজ · শুধু আপনার জন্য'}</p>
     </div>}>
     <div className="space-y-4">
+      <p className="rounded-xl bg-slate-50 p-3 text-xs leading-relaxed text-slate-500">{en ? 'Use the same Google account in the mobile app and website. While open and connected, changes sync automatically and a recovery copy is saved to your private Drive app storage.' : 'মোবাইল অ্যাপ ও ওয়েবে একই গুগল অ্যাকাউন্ট ব্যবহার করুন। অ্যাপ খোলা ও ইন্টারনেট যুক্ত থাকলে পরিবর্তন স্বয়ংক্রিয়ভাবে সিঙ্ক হবে এবং ব্যক্তিগত ড্রাইভ অ্যাপ স্টোরেজে ব্যাকআপ থাকবে।'}</p>
       <div role="status" className={`rounded-2xl border p-4 ${verified ? 'border-emerald-100 bg-emerald-50/60' : 'border-blue-100/80 bg-blue-50/50'}`}>
         <div className="mb-3 flex items-center justify-between">
           <StatusIcon className={`h-6 w-6 ${verified ? 'text-emerald-600' : 'text-blue-600'}`} />
@@ -43,6 +46,12 @@ export function SyncModal({ isOpen, onClose, onOpenConflictModal, onOpenAuthModa
         <div className="px-4"><div className="mb-2 flex items-center gap-1.5 text-[11px] text-slate-400"><Clock3 className="h-3 w-3" />{en ? 'Last successful sync' : 'সর্বশেষ সফল সিঙ্ক'}</div><p className="text-xs font-semibold leading-relaxed text-slate-700">{syncStatus.lastSuccessfulSyncAt ? new Date(syncStatus.lastSuccessfulSyncAt).toLocaleString(en ? 'en-GB' : 'bn-BD') : (en ? 'Not synced yet' : 'এখনও সিঙ্ক হয়নি')}</p></div>
       </div>
       {(syncStatus.lastError || error) && <div role="alert" className="flex gap-2.5 rounded-xl border border-amber-100 bg-amber-50 p-3 text-xs leading-relaxed text-amber-800"><AlertCircle className="mt-0.5 h-4 w-4 shrink-0" /><span>{error || googleErrorMessage(syncStatus.lastError, en)}</span></div>}
+      <div className="rounded-2xl border border-slate-100 p-4"><h3 className="text-xs font-semibold text-slate-700">{en ? 'Verified Drive backup' : 'যাচাইকৃত ড্রাইভ ব্যাকআপ'}</h3><p className="mt-2 text-xs text-slate-500">{syncStatus.lastCloudBackupAt ? new Date(syncStatus.lastCloudBackupAt).toLocaleString(en ? 'en-GB' : 'bn-BD') : (en ? 'No cloud backup verified yet' : 'এখনও ক্লাউড ব্যাকআপ যাচাই হয়নি')}</p><p className="mt-2 text-[11px] leading-relaxed text-slate-400">{en ? 'Stored in the app’s hidden private folder. Download a copy here to keep it in your files.' : 'অ্যাপের লুকানো ব্যক্তিগত ফোল্ডারে থাকে। নিজের ফাইলে রাখতে এখান থেকে কপি ডাউনলোড করুন।'}</p><button type="button" disabled={busy || !isOnline || !isLiveGoogleAuth || !syncStatus.lastCloudBackupAt} className={`${secondaryButton} mt-3 w-full`} onClick={async () => {
+        setBusy(true); setError(null); setNotice('');
+        try { await saveBackupFile(await sync.downloadCloudBackup()); setNotice(en ? 'Backup sent to your file downloads.' : 'ব্যাকআপ আপনার ফাইল ডাউনলোডে পাঠানো হয়েছে।'); }
+        catch (err) { setError(googleErrorMessage(err, en)); }
+        finally { setBusy(false); }
+      }}><Download className="h-4 w-4" />{en ? 'Download Drive backup' : 'ড্রাইভ ব্যাকআপ ডাউনলোড'}</button>{notice && <p role="status" className="mt-2 text-xs text-emerald-700">{notice}</p>}</div>
       {conflicts.some(c => c.status === 'needs_review') && <button className={`${secondaryButton} w-full border-amber-200 text-amber-700`} onClick={onOpenConflictModal}><AlertCircle className="h-4 w-4" />{en ? 'Review conflicting changes' : 'পরস্পরবিরোধী পরিবর্তন দেখুন'}</button>}
       <details className="group rounded-xl border border-slate-100 px-3.5 py-3 text-xs"><summary className="flex cursor-pointer list-none items-center gap-2 text-slate-500"><HelpCircle className="h-4 w-4" /><span className="flex-1 font-medium">{en ? 'Help & troubleshooting' : 'সাহায্য ও সমস্যা সমাধান'}</span><ChevronDown className="h-3.5 w-3.5 transition group-open:rotate-180" /></summary><p className="pt-3 leading-relaxed text-slate-500">{en ? 'Use the same Google account on every device and allow private Drive app storage when prompted. Offline changes remain pending until sync verification finishes. Never clear app storage to resolve a sync error.' : 'প্রতিটি ডিভাইসে একই গুগল অ্যাকাউন্ট ব্যবহার করুন এবং ব্যক্তিগত ড্রাইভ অ্যাপ স্টোরেজ অনুমোদন করুন। যাচাই শেষ না হওয়া পর্যন্ত পরিবর্তন অপেক্ষায় থাকবে। সিঙ্ক সমস্যায় অ্যাপের ডাটা মুছবেন না।'}</p></details>
     </div>

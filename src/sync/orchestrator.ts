@@ -21,6 +21,9 @@ import { canonicalJson, computeSha256 } from './canonical';
 import { generateUUID } from '../domain/journal';
 import { GoogleUserProfile, computeOwnerSubjectHash } from '../auth/googleAuth';
 import { workspaceMedia } from '../storage/workspaceMedia';
+import { ensureCloudBackup, getCloudBackupReceipt, verifyCloudBackup } from './cloudBackup';
+import { buildReversalJournal } from '../domain/journal';
+import { requireDependencies, SyncDependencyError, validateIncomingJournal } from './validation';
 
 export type SyncStatusState =
   | 'idle'
@@ -41,6 +44,7 @@ export interface SyncStatusInfo {
   lastError: string | null;
   isPaused: boolean;
   quotaWarning?: boolean;
+  lastCloudBackupAt?: string | null;
 }
 
 export type SyncEventListener = (status: SyncStatusInfo) => void;
@@ -57,10 +61,21 @@ export class SyncOrchestrator {
   private listeners: Set<SyncEventListener> = new Set();
   private isSyncInProgress = false;
   private bootstrapInProgress = false;
+  private needsBootstrapMetadata = false;
 
-  constructor(db: LocalDatabase, transport: DriveTransport) {
+  constructor(db: LocalDatabase, transport: DriveTransport, private options: { cloudBackups?: boolean } = {}) {
     this.db = db;
     this.transport = transport;
+  }
+
+  public isBusy(): boolean { return this.isSyncInProgress || this.bootstrapInProgress; }
+
+  public async downloadCloudBackup(): Promise<string> {
+    const receipt = getCloudBackupReceipt(this.db);
+    if (!receipt) throw new Error('No verified Drive backup is available yet.');
+    const text = await this.transport.downloadBatchFile(receipt.fileId);
+    await verifyCloudBackup(text, receipt.ownerHash, receipt.fingerprint);
+    return text;
   }
 
   public setTransport(transport: DriveTransport): void {
@@ -136,6 +151,7 @@ export class SyncOrchestrator {
       pendingOutboxCount: pendingCount,
       lastError: this.lastError,
       isPaused: this.isPaused,
+      lastCloudBackupAt: getCloudBackupReceipt(this.db)?.verifiedAt || null,
     };
   }
 
@@ -212,6 +228,14 @@ export class SyncOrchestrator {
     this.notifyListeners();
 
     try {
+      await this.db.waitForPendingWrites();
+      if (this.needsBootstrapMetadata || this.db.getRawState().preferences.has('sync-bootstrap-owner-v1') ||
+          (this.options.cloudBackups && this.db.getRawState().preferences.get('sync-metadata-version-v1') !== 1)) {
+        // A fresh device must read existing definitions before publishing its starter rows.
+        await this.downloadAndReconcileRemoteBatches();
+        await this.queueMissingMetadata();
+        this.needsBootstrapMetadata = false;
+      }
       // Step A: Upload local pending outbox batch if any
       await this.uploadPendingBatch();
 
@@ -223,16 +247,17 @@ export class SyncOrchestrator {
       if (quota.isFull) {
         this.currentState = 'quota_full';
       } else {
+        if (this.options.cloudBackups && this.db.getPendingOutbox().length === 0) await ensureCloudBackup(this.db, this.transport);
         this.currentState = 'synced_verified';
       }
 
-      this.lastSuccessfulSyncAt = new Date().toISOString();
+      if (!quota.isFull) this.lastSuccessfulSyncAt = new Date().toISOString();
       this.lastError = null;
     } catch (err: any) {
       const msg = err.message || String(err);
       this.lastError = msg;
 
-      if (msg.includes('401') || msg.includes('Unauthorized')) {
+      if (msg.includes('401') || msg.includes('Unauthorized') || msg.includes('AUTH_REQUIRED') || msg.includes('not signed in')) {
         this.currentState = 'auth_required';
         this.isAuthorized = false;
       } else if (msg.includes('403') && msg.includes('Forbidden')) {
@@ -257,7 +282,15 @@ export class SyncOrchestrator {
   private async uploadPendingBatch(): Promise<void> {
     const pending = this.db.getPendingOutbox();
     for (const deviceId of new Set(pending.map(op => op.deviceId))) {
-      await this.uploadDeviceBatch(pending.filter(op => op.deviceId === deviceId));
+      const operations = pending.filter(op => op.deviceId === deviceId);
+      let group: SyncOperation[] = [], bytes = 0;
+      for (const op of operations) {
+        const size = new TextEncoder().encode(JSON.stringify(op)).length;
+        if (size > 7 * 1024 * 1024) throw new Error('A synchronization record is too large. Export a file backup for recovery.');
+        if (group.length >= 100 || bytes + size > 7 * 1024 * 1024) { await this.uploadDeviceBatch(group); group = []; bytes = 0; }
+        group.push(op); bytes += size;
+      }
+      if (group.length) await this.uploadDeviceBatch(group);
     }
   }
 
@@ -304,7 +337,7 @@ export class SyncOrchestrator {
     const fullBatch: SyncBatch = {
       ...batchData,
       batchSha256,
-      byteLength: serializedForLen.length,
+      byteLength: new TextEncoder().encode(serializedForLen).length,
     };
 
     const fileName = `hsc-v1-ops-${deviceId}-${String(fromSeq).padStart(12, '0')}-${String(
@@ -404,7 +437,7 @@ export class SyncOrchestrator {
     // Upload to Drive appDataFolder
     const uploadReceipt = await this.transport.uploadBatchFile(
       fileName,
-      JSON.stringify(fullBatch, null, 2)
+      JSON.stringify(fullBatch)
     );
 
     if (!uploadReceipt.fileId) throw new Error('Drive upload returned no file identity.');
@@ -443,9 +476,15 @@ export class SyncOrchestrator {
     batchFiles.sort((a, b) => a.name.localeCompare(b.name));
 
     let failedFiles = 0;
+    const waiting: SyncBatch[] = [];
+    const versions = this.db.getRawState().preferences.get('verified-drive-file-versions-v1') || {};
+    let versionsChanged = false;
     for (const file of batchFiles) {
       try {
+        if (file.version && versions[file.id] === `${localOwner}:${file.version}`) continue;
+        if (Number(file.size || 0) > 8 * 1024 * 1024) throw new Error('Synchronization batch is too large.');
         const fileContent = await this.transport.downloadBatchFile(file.id);
+        if (new TextEncoder().encode(fileContent).length > 8 * 1024 * 1024) throw new Error('Synchronization batch is too large.');
         const batch: SyncBatch = JSON.parse(fileContent);
 
         // Verification checks
@@ -481,12 +520,30 @@ export class SyncOrchestrator {
           }
         }
 
-        // Apply operations
-        await this.applyBatchOperations(batch);
+        if (!batch.batchSha256) throw new Error('Remote batch checksum is missing.');
+        if (!Array.isArray(batch.operations) || !batch.operations.length || batch.operations.length > 10_000 ||
+            batch.operations.some(op => op.deviceId !== batch.deviceId)) throw new Error('Invalid remote batch operations.');
+        try {
+          await this.applyBatchOperations(batch);
+          if (file.version) { versions[file.id] = `${localOwner}:${file.version}`; versionsChanged = true; }
+        } catch (error) { if (error instanceof SyncDependencyError) waiting.push(batch); else throw error; }
       } catch (fileErr) {
         failedFiles++;
         console.error(`Failed to download/parse remote file ${file.name}:`, fileErr);
       }
+    }
+    while (waiting.length) {
+      let progress = false;
+      for (let i = waiting.length - 1; i >= 0; i--) {
+        try { await this.applyBatchOperations(waiting[i]); waiting.splice(i, 1); progress = true; }
+        catch (error) { if (!(error instanceof SyncDependencyError)) { waiting.splice(i, 1); failedFiles++; } }
+      }
+      if (!progress) break;
+    }
+    failedFiles += waiting.length;
+    if (versionsChanged) {
+      this.db.getRawState().preferences.set('verified-drive-file-versions-v1', versions);
+      await this.db.persist();
     }
     if (failedFiles) throw new Error('Remote synchronization verification is incomplete. Retry without clearing local records.');
   }
@@ -526,7 +583,7 @@ export class SyncOrchestrator {
     const rawState = this.db.getRawState();
     const hasTransactions = rawState.journalTransactions.size > 0;
     const hasSyncOps = rawState.syncOperations.size > 0;
-    const isNonEmpty = hasTransactions || hasSyncOps;
+    const isNonEmpty = hasTransactions || hasSyncOps || !this.db.hasOnlyUntouchedStarters();
 
     // 1. Prevent silent reassignment of an existing non-empty dataset to another Google account
     if (currentOwner && currentOwner !== profile.subjectHash) {
@@ -560,11 +617,6 @@ export class SyncOrchestrator {
     for (const ws of rawState.workspaces.values()) {
       if (temporary(ws.ownerSubjectHash)) ws.ownerSubjectHash = profile.subjectHash;
     }
-    // Bootstrap existing offline workspace definitions before their account/journal operations.
-    for (const ws of rawState.workspaces.values()) {
-      if (!Array.from(rawState.syncOperations.values()).some(op => op.type === 'workspace.create' && op.entityId === ws.id))
-        this.db.queueSyncOp('workspace.create', ws.id, { workspace: { ...ws } });
-    }
     for (const op of rawState.syncOperations.values()) {
       if (op.type === 'workspace.create' && temporary(op.payload.workspace?.ownerSubjectHash)) {
         op.payload.workspace.ownerSubjectHash = profile.subjectHash;
@@ -575,12 +627,14 @@ export class SyncOrchestrator {
 
     // 3. Establish verified identity on database
     this.db.setIdentity(profile.subjectHash, profile.displayName);
+    rawState.preferences.set('sync-bootstrap-owner-v1', profile.subjectHash);
     await this.db.commitTransaction();
     } catch (error) { await this.db.rollbackTransaction(); throw error; }
     // Independent asset-store failure keeps originals intact; reconnect retries the claim.
     await workspaceMedia.claimOfflineAssets(Array.from(this.db.getRawState().workspaces.keys()), profile.subjectHash)
       .catch(() => console.warn('Workspace image ownership migration will retry on reconnect.'));
     this.isAuthorized = true;
+    this.needsBootstrapMetadata = true;
 
     // 4. Trigger sync to download and apply all remote batches belonging to this verified owner,
     // and upload any preserved offline outbox operations to Google Drive
@@ -592,6 +646,37 @@ export class SyncOrchestrator {
       verifiedOwner: profile.subjectHash,
       preservedOfflineOpsCount,
     };
+  }
+
+  private async queueMissingMetadata(): Promise<void> {
+    await this.db.beginTransaction();
+    try {
+      const state = this.db.getRawState();
+      const definitions = new Set(Array.from(state.syncOperations.values()).map(op => `${op.type}:${op.entityId}`));
+      for (const [collection, type, field] of [
+        ['workspaces', 'workspace.create', 'workspace'], ['accounts', 'account.create', 'account'],
+        ['categories', 'category.create', 'category'], ['parties', 'party.create', 'party'],
+        ['accountGroups', 'group.create', 'group'], ['accountPermissions', 'permission.grant', 'grant'],
+        ['budgets', 'budget.set', 'budget'], ['recurringRules', 'recurring.rule.create', 'rule'],
+        ['recurringOccurrences', 'recurring.occurrence.post', 'occurrence'],
+        ['receiptBlobs', 'receipt.attach', 'blob'],
+      ] as const) for (const [id, record] of state[collection] as Map<string, any>) {
+        if (!definitions.has(`${type}:${id}`)) this.db.queueSyncOp(type, id, { [field]: record });
+      }
+      const journalIds = new Set<string>();
+      for (const op of state.syncOperations.values()) {
+        for (const key of ['balancedJournal', 'reversalBalanced', 'replacementBalanced']) {
+          const id = op.payload[key]?.transaction?.id; if (id) journalIds.add(id);
+        }
+      }
+      for (const tx of state.journalTransactions.values()) if (!journalIds.has(tx.id)) {
+        const { lines, ...transaction } = tx;
+        this.db.queueSyncOp('journal.post', tx.id, { balancedJournal: { transaction, lines } });
+      }
+      state.preferences.delete('sync-bootstrap-owner-v1');
+      state.preferences.set('sync-metadata-version-v1', 1);
+      await this.db.commitTransaction();
+    } catch (error) { await this.db.rollbackTransaction(); throw error; }
   }
 
   /**
@@ -611,19 +696,21 @@ export class SyncOrchestrator {
       );
     }
 
+    if (batch.operations.every(op => this.db.getRawState().appliedOperations.has(op.operationId))) return;
     await this.db.beginTransaction();
     try {
-    for (const op of batch.operations) {
+    let operations = [...batch.operations];
+    while (operations.length) {
+    const deferred: SyncOperation[] = [];
+    let progress = false;
+    for (const op of operations) {
+      if (!op || !op.payload || !op.operationId || !Number.isSafeInteger(op.seq) || op.seq < 1) throw new Error('Invalid synchronization operation.');
       // 1. Validate dataset owner identity on operation
       if (!op.ownerHash) {
-        console.warn(`Security Warning: Operation ${op.operationId} missing ownerHash. Skipping.`);
-        continue;
+        throw new Error('Synchronization operation owner is missing.');
       }
       if (localOwner && op.ownerHash !== localOwner) {
-        console.warn(
-          `Security Warning: Operation ${op.operationId} owner mismatch (${op.ownerHash} != ${localOwner}). Skipping.`
-        );
-        continue;
+        throw new Error('Synchronization operation owner mismatch.');
       }
 
       // 2. Idempotency: if already applied, skip
@@ -635,16 +722,21 @@ export class SyncOrchestrator {
       if (op.contentSha256) {
         const expectedHash = await computeSha256(canonicalJson(op.payload));
         if (op.contentSha256 !== expectedHash) {
-          console.warn(`Operation ${op.operationId} content SHA-256 corrupted. Skipping.`);
-          continue;
+          throw new Error('Synchronization operation checksum mismatch.');
         }
       }
 
       // 3. Process operation by type
-      await this.applySingleOperation(op, isFromSelf);
+      try { await this.applySingleOperation(op, isFromSelf); }
+      catch (error) { if (error instanceof SyncDependencyError) { deferred.push(op); continue; } throw error; }
 
       // 4. Record as applied
       this.db.getRawState().appliedOperations.add(op.operationId);
+      if (!this.db.getRawState().syncOperations.has(op.operationId)) this.db.getRawState().syncOperations.set(op.operationId, JSON.parse(JSON.stringify(op)));
+      progress = true;
+    }
+    if (deferred.length && !progress) throw new SyncDependencyError();
+    operations = deferred;
     }
 
     await this.db.commitTransaction();
@@ -652,12 +744,14 @@ export class SyncOrchestrator {
   }
 
   private async applySingleOperation(op: SyncOperation, isFromSelf: boolean): Promise<void> {
-    const payload = op.payload;
+    const payload: SyncOperation['payload'] = { ...op.payload, id: op.payload.id || op.entityId };
+    requireDependencies(this.db, op);
 
     switch (op.type) {
       case 'journal.post': {
         const balanced: BalancedJournal = payload.balancedJournal;
         if (balanced && balanced.transaction && balanced.lines) {
+          validateIncomingJournal(this.db, balanced);
           const assetLine = balanced.lines.find((l) => !l.categoryId);
           const assetAccId = assetLine?.accountId || balanced.lines[0]?.accountId;
           // Check employee permissions only for non-owner employee operations
@@ -674,10 +768,10 @@ export class SyncOrchestrator {
           }
           const fullTx: JournalTransaction = {
             ...balanced.transaction,
-            createdOpId: op.operationId,
+            createdOpId: balanced.transaction.createdOpId || op.operationId,
             lines: balanced.lines,
           };
-          this.db.getRawState().journalTransactions.set(fullTx.id, fullTx);
+          if (!this.db.getTransaction(fullTx.id)) this.db.getRawState().journalTransactions.set(fullTx.id, fullTx);
           for (const line of balanced.lines) {
             this.db.getRawState().journalLines.set(line.id, line);
           }
@@ -690,8 +784,7 @@ export class SyncOrchestrator {
         const originalTx = this.db.getTransaction(originalTransactionId);
 
         if (!originalTx) {
-          console.warn(`Original transaction ${originalTransactionId} not found for correction.`);
-          break;
+          throw new SyncDependencyError();
         }
 
         // Check if a correction has already been applied on this original transaction
@@ -734,6 +827,7 @@ export class SyncOrchestrator {
 
         // Apply reversal and replacement
         if (reversalBalanced) {
+          validateIncomingJournal(this.db, reversalBalanced);
           const revTx: JournalTransaction = {
             ...reversalBalanced.transaction,
             createdOpId: op.operationId,
@@ -745,6 +839,7 @@ export class SyncOrchestrator {
           }
         }
         if (replacementBalanced) {
+          validateIncomingJournal(this.db, replacementBalanced);
           const repTx: JournalTransaction = {
             ...replacementBalanced.transaction,
             createdOpId: op.operationId,
@@ -754,7 +849,25 @@ export class SyncOrchestrator {
           for (const line of replacementBalanced.lines) {
             this.db.getRawState().journalLines.set(line.id, line);
           }
+          originalTx.isReplacedBy = repTx.id;
         }
+        break;
+      }
+
+      case 'journal.delete': {
+        const original = this.db.getTransaction(payload.originalTransactionId)!;
+        let reversal: BalancedJournal = payload.reversalBalanced;
+        if (!reversal) {
+          reversal = buildReversalJournal(original, op.operationId, payload.reason || 'Deleted transaction');
+          reversal.transaction.id = payload.reversalTransactionId;
+          reversal.transaction.occurredAtUtc = op.createdAtUtc;
+          reversal.lines = reversal.lines.map((line, index) => ({ ...line, id: `${op.operationId}-reversal-${index}`,
+            transactionId: payload.reversalTransactionId }));
+        }
+        validateIncomingJournal(this.db, reversal);
+        if (!this.db.getTransaction(reversal.transaction.id)) this.db.getRawState().journalTransactions.set(reversal.transaction.id, { ...reversal.transaction, lines: reversal.lines });
+        for (const line of reversal.lines) this.db.getRawState().journalLines.set(line.id, line);
+        original.isDeleted = true;
         break;
       }
 
@@ -869,6 +982,7 @@ export class SyncOrchestrator {
           if (payload.name) c.name = payload.name;
           if (payload.nameEn !== undefined) c.nameEn = payload.nameEn;
           if (payload.color !== undefined) c.color = payload.color;
+          if (payload.parentId !== undefined) c.parentId = payload.parentId;
         }
         break;
 
@@ -919,6 +1033,11 @@ export class SyncOrchestrator {
         if (payload.occurrence) {
           this.db.getRawState().recurringOccurrences.set(payload.occurrence.id, payload.occurrence);
         }
+        break;
+
+      case 'receipt.attach':
+        if (!payload.blob?.sha256) throw new Error('Invalid receipt attachment.');
+        this.db.getRawState().receiptBlobs.set(payload.blob.sha256, payload.blob);
         break;
 
       default:

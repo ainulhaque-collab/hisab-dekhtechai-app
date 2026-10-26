@@ -85,4 +85,8 @@ public class MainActivity extends BridgeActivity {
         if (getBridge() != null) getBridge().triggerWindowJSEvent("hisab-background");
         super.onStop();
     }
+    @Override public void onResume() {
+        super.onResume();
+        if (getBridge() != null) getBridge().triggerWindowJSEvent("hisab-foreground");
+    }
 }

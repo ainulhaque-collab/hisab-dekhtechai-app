@@ -13,6 +13,8 @@ export interface DriveFileMetadata {
   size?: number;
   createdTime?: string;
   appProperties?: Record<string, string>;
+  version?: string;
+  modifiedTime?: string;
 }
 
 export interface DriveTransport {
@@ -61,7 +63,7 @@ export class RealGoogleDriveTransport implements DriveTransport {
     let pageToken: string | null = null;
 
     do {
-      let url = `${this.baseUrl}/files?spaces=appDataFolder&fields=nextPageToken,files(id,name,mimeType,size,createdTime)&pageSize=100`;
+      let url = `${this.baseUrl}/files?spaces=appDataFolder&fields=nextPageToken,files(id,name,mimeType,size,createdTime,modifiedTime,version)&pageSize=100`;
       if (pageToken) {
         url += `&pageToken=${encodeURIComponent(pageToken)}`;
       }
@@ -149,10 +151,20 @@ export class RealGoogleDriveTransport implements DriveTransport {
     let attempt = 0;
     let authRetryCount = 0;
     let delay = this.initialRetryDelayMs;
+    if (this.tokenProvider) {
+      this.accessToken = await this.tokenProvider(false);
+      const headers = new Headers(init?.headers);
+      headers.set('Authorization', `Bearer ${this.accessToken}`);
+      init = { ...init, headers };
+    }
 
     while (true) {
       try {
-        const res = await this.fetchFn(input, init);
+        const abort = new AbortController();
+        const timeout = setTimeout(() => abort.abort(), 20_000);
+        let res: Response;
+        try { res = await this.fetchFn(input, { ...init, signal: abort.signal }); }
+        finally { clearTimeout(timeout); }
         if (res.status === 401 && this.tokenProvider && authRetryCount === 0) {
           authRetryCount++;
           attempt++;
@@ -186,7 +198,9 @@ export class RealGoogleDriveTransport implements DriveTransport {
         if (res.status === 429 || (res.status >= 500 && res.status <= 599)) {
           attempt++;
           if (attempt >= maxRetries) return res;
-          await new Promise((r) => setTimeout(r, delay));
+          const hint = res.headers.get('Retry-After');
+          const retryAfter = hint ? (Number.isFinite(Number(hint)) ? Number(hint) * 1000 : Date.parse(hint) - Date.now()) : 0;
+          await new Promise((r) => setTimeout(r, Math.min(60_000, Math.max(delay, retryAfter || 0))));
           delay *= 2;
           continue;
         }
@@ -202,7 +216,7 @@ export class RealGoogleDriveTransport implements DriveTransport {
 
   public async deleteFile(fileId: string): Promise<void> {
     const url = `${this.baseUrl}/files/${fileId}`;
-    const res = await fetch(url, {
+    const res = await this.fetchWithRetry(url, {
       method: 'DELETE',
       headers: {
         Authorization: `Bearer ${this.accessToken}`,
@@ -241,6 +255,9 @@ export class RealGoogleDriveTransport implements DriveTransport {
       throw new Error(`Google Drive 401 Unauthorized: token expired or invalid.`);
     }
     if (status === 403) {
+      if (/accessNotConfigured|SERVICE_DISABLED|API has not been used|is disabled/i.test(message)) {
+        throw new Error('GOOGLE_DRIVE_API_DISABLED: Enable Google Drive API in the OAuth project.');
+      }
       if (message.includes('quota') || message.includes('storageQuotaExceeded')) {
         throw new Error(`Google Drive 403 Storage Quota Exceeded: User Google Drive is full.`);
       }

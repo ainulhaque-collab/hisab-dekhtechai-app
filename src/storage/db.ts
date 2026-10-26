@@ -95,6 +95,23 @@ export class LocalDatabase {
   private inTransaction = false;
   private snapshotBeforeTx: string | null = null;
   private driver: DurableStorageDriver | null = null;
+  private changeListeners = new Set<() => void>();
+  private notifiedPending = new Set<string>();
+
+  public subscribeToLocalChanges(listener: () => void): () => void {
+    this.changeListeners.add(listener);
+    return () => { this.changeListeners.delete(listener); };
+  }
+
+  public isTransactionInProgress(): boolean { return this.inTransaction; }
+
+  private notifyCommittedChanges(ids = this.getPendingOutbox().map(op => op.operationId)): void {
+    const changed = ids.some(id => !this.notifiedPending.has(id));
+    this.notifiedPending = new Set(ids);
+    if (changed) for (const listener of this.changeListeners) {
+      try { listener(); } catch { console.warn('Local change listener failed. Records are already saved.'); }
+    }
+  }
 
   constructor(storageKey = 'hisab_dekhtechai_db', driver?: DurableStorageDriver) {
     this.storageKey = storageKey;
@@ -364,11 +381,13 @@ export class LocalDatabase {
       })
       .then(async () => {
         try {
+          const committedIds = this.getPendingOutbox().map(op => op.operationId);
           if (this.driver) {
             const serializable = this.toSerializable();
             await this.driver.setItem(this.storageKey, JSON.stringify(serializable));
           }
           this.persistSync();
+          if (!this.inTransaction) this.notifyCommittedChanges(committedIds);
         } catch (err: any) {
           const errorObj = err instanceof Error ? err : new Error(String(err));
           this.lastPersistenceError = errorObj;
@@ -438,6 +457,7 @@ export class LocalDatabase {
       }
       this.inTransaction = false;
       this.snapshotBeforeTx = null;
+      this.notifyCommittedChanges();
     } catch (err) {
       await this.rollbackTransaction();
       throw err;
@@ -492,6 +512,10 @@ export class LocalDatabase {
   }
 
   public setDeviceIdentity(deviceId: UUID, deviceName: string): void {
+    if (deviceId !== this.state.deviceIdentity.deviceId) {
+      this.state.deviceIdentity.counter = Array.from(this.state.syncOperations.values())
+        .reduce((highest, op) => op.deviceId === deviceId ? Math.max(highest, op.seq) : highest, 0) + 1;
+    }
     this.state.deviceIdentity.deviceId = deviceId;
     this.state.deviceIdentity.deviceName = deviceName;
   }
@@ -596,7 +620,7 @@ export class LocalDatabase {
       entityId,
       type: opType,
       createdAtUtc: new Date().toISOString(),
-      payload,
+      payload: JSON.parse(JSON.stringify(payload)),
       contentSha256: '',
     };
     this.state.syncOperations.set(opId, op);
@@ -879,7 +903,7 @@ export class LocalDatabase {
     if (updates.name !== undefined) group.name = updates.name.trim();
     if (updates.icon !== undefined) group.icon = updates.icon;
     if (updates.description !== undefined) group.description = updates.description.trim();
-    this.queueSyncOp('group.update', id, updates);
+    this.queueSyncOp('group.update', id, { id, ...updates });
     this.autoPersist();
     return group;
   }
@@ -917,6 +941,7 @@ export class LocalDatabase {
     const group = this.state.accountGroups.get(groupId);
     if (!acc || !group || acc.workspaceId !== group.workspaceId) return false;
     acc.groupId = groupId;
+    this.queueSyncOp('account.update', accountId, { id: accountId, groupId });
     this.autoPersist();
     return true;
   }
@@ -925,6 +950,7 @@ export class LocalDatabase {
     const acc = this.state.accounts.get(accountId);
     if (!acc) return false;
     acc.groupId = null;
+    this.queueSyncOp('account.update', accountId, { id: accountId, groupId: null });
     this.autoPersist();
     return true;
   }
@@ -1122,6 +1148,7 @@ export class LocalDatabase {
       color,
     };
     this.state.categories.set(cat.id, cat);
+    this.queueSyncOp('category.create', cat.id, { category: cat });
     this.autoPersist();
     return cat;
   }
@@ -1136,6 +1163,7 @@ export class LocalDatabase {
     const cat = this.state.categories.get(categoryId);
     if (cat) {
       cat.archivedAt = new Date().toISOString();
+      this.queueSyncOp('category.archive', categoryId, { id: categoryId, archivedAt: cat.archivedAt });
       this.autoPersist();
     }
   }
@@ -1151,6 +1179,7 @@ export class LocalDatabase {
       cat.name = name;
       if (nameEn !== undefined) cat.nameEn = nameEn;
       if (parentId !== undefined) cat.parentId = parentId;
+      this.queueSyncOp('category.update', categoryId, { id: categoryId, name: cat.name, nameEn: cat.nameEn, parentId: cat.parentId });
       this.autoPersist();
     }
   }
@@ -1177,6 +1206,7 @@ export class LocalDatabase {
       createdAt: new Date().toISOString(),
     };
     this.state.parties.set(id, party);
+    this.queueSyncOp('party.create', id, { party });
     this.autoPersist();
     return party;
   }
@@ -1201,6 +1231,7 @@ export class LocalDatabase {
       if (updates.phone !== undefined) p.phone = updates.phone;
       if (updates.role !== undefined) p.role = updates.role;
       if (updates.notes !== undefined) p.notes = updates.notes;
+      this.queueSyncOp('party.update', id, { id, ...updates });
       this.autoPersist();
     }
   }
@@ -1209,6 +1240,7 @@ export class LocalDatabase {
     const p = this.state.parties.get(id);
     if (p) {
       p.archivedAt = new Date().toISOString();
+      this.queueSyncOp('party.archive', id, { id, archivedAt: p.archivedAt });
       this.autoPersist();
     }
   }
@@ -1251,11 +1283,12 @@ export class LocalDatabase {
       const payload = {
         originalTransactionId: tx.id,
         reversalTransactionId: reversalBalanced.transaction.id,
+        reversalBalanced,
         reason,
       };
       const op: SyncOperation = {
         protocolVersion: 1,
-        ownerHash: this.getIdentity()?.ownerSubjectHash || 'owner',
+        ownerHash: this.getIdentity()?.ownerSubjectHash || 'local-owner',
         deviceId: this.getDeviceId(),
         seq: this.getNextDeviceSeq(),
         operationId: opId,
@@ -1372,7 +1405,7 @@ export class LocalDatabase {
       };
       const op: SyncOperation = {
         protocolVersion: 1,
-        ownerHash: this.getIdentity()?.ownerSubjectHash || 'owner',
+        ownerHash: this.getIdentity()?.ownerSubjectHash || 'local-owner',
         deviceId: this.getDeviceId(),
         seq: this.getNextDeviceSeq(),
         operationId: opId,
@@ -1615,6 +1648,7 @@ export class LocalDatabase {
 
   public setBudget(budget: Budget): void {
     this.state.budgets.set(budget.id, budget);
+    this.queueSyncOp('budget.set', budget.id, { budget });
     this.autoPersist();
   }
 
@@ -1625,7 +1659,9 @@ export class LocalDatabase {
   }
 
   public setRecurringRule(rule: RecurringRule): void {
+    const exists = this.state.recurringRules.has(rule.id);
     this.state.recurringRules.set(rule.id, rule);
+    this.queueSyncOp(exists ? 'recurring.rule.update' : 'recurring.rule.create', rule.id, { rule });
     this.autoPersist();
   }
 
@@ -1728,7 +1764,7 @@ export class LocalDatabase {
     } catch (error) { await this.rollbackTransaction(); throw error; }
   }
 
-  private hasOnlyUntouchedStarters(): boolean {
+  public hasOnlyUntouchedStarters(): boolean {
     if ([this.state.journalTransactions, this.state.journalLines, this.state.accountGroups, this.state.accountPermissions,
       this.state.budgets, this.state.recurringRules, this.state.recurringOccurrences, this.state.receiptBlobs, this.state.conflicts]
       .some(records => records.size > 0)) return false;
@@ -1904,7 +1940,6 @@ export class LocalDatabase {
 
     // 1. Transaction-level balance and aggregate trial balance
     for (const tx of txs) {
-      if (tx.isDeleted) continue;
       let txDebits = 0n;
       let txCredits = 0n;
       for (const line of tx.lines) {
@@ -1933,7 +1968,7 @@ export class LocalDatabase {
     }
 
     // 2. Independently calculate account balances
-    const accounts = this.getAccounts(workspaceId);
+    const accounts = this.getAllAccounts(workspaceId);
     const summaries = this.calculateAccountSummaries(workspaceId);
     const summaryMap = new Map(summaries.map((s) => [s.accountId, s]));
 
@@ -1942,7 +1977,6 @@ export class LocalDatabase {
       let expectedDebits = 0n;
       let expectedCredits = 0n;
       for (const tx of txs) {
-        if (tx.isDeleted) continue;
         for (const line of tx.lines) {
           if (line.accountId === acc.id && !line.categoryId) {
             expectedDebits += toPaisa(line.debitMinor);
