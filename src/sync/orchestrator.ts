@@ -133,6 +133,9 @@ export class SyncOrchestrator {
   public getStatus(): SyncStatusInfo {
     const pendingCount = this.db.getPendingOutbox().length;
     const hasConflicts = this.db.getConflicts().some((c) => c.status === 'needs_review');
+    const receipt = this.db.getRawState().preferences.get('last-verified-sync-v1');
+    const historicalSyncAt = receipt?.ownerHash === this.db.getIdentity()?.ownerSubjectHash &&
+      typeof receipt?.at === 'string' && Number.isFinite(Date.parse(receipt.at)) ? receipt.at : null;
 
     let state = this.currentState;
     if (hasConflicts) {
@@ -147,7 +150,7 @@ export class SyncOrchestrator {
 
     return {
       state,
-      lastSuccessfulSyncAt: this.lastSuccessfulSyncAt,
+      lastSuccessfulSyncAt: this.lastSuccessfulSyncAt || historicalSyncAt,
       pendingOutboxCount: pendingCount,
       lastError: this.lastError,
       isPaused: this.isPaused,
@@ -248,10 +251,10 @@ export class SyncOrchestrator {
         this.currentState = 'quota_full';
       } else {
         if (this.options.cloudBackups && this.db.getPendingOutbox().length === 0) await ensureCloudBackup(this.db, this.transport);
+        await this.recordSuccessfulSync();
         this.currentState = 'synced_verified';
       }
 
-      if (!quota.isFull) this.lastSuccessfulSyncAt = new Date().toISOString();
       this.lastError = null;
     } catch (err: any) {
       const msg = err.message || String(err);
@@ -274,6 +277,22 @@ export class SyncOrchestrator {
       this.isSyncInProgress = false;
       this.notifyListeners();
     }
+  }
+
+  private async recordSuccessfulSync(): Promise<void> {
+    const at = new Date().toISOString(), ownerHash = this.db.getIdentity()?.ownerSubjectHash;
+    const preferences = this.db.getRawState().preferences;
+    const previous = preferences.get('last-verified-sync-v1');
+    // Keep a historical receipt across reloads without rewriting an idle ledger every poll.
+    if (ownerHash && (previous?.ownerHash !== ownerHash || !Number.isFinite(Date.parse(previous?.at)) || Date.now() - Date.parse(previous.at) >= 60_000)) {
+      preferences.set('last-verified-sync-v1', { ownerHash, at });
+      try { await this.db.persist(); }
+      catch (error) {
+        if (previous) preferences.set('last-verified-sync-v1', previous); else preferences.delete('last-verified-sync-v1');
+        throw error;
+      }
+    }
+    this.lastSuccessfulSyncAt = at;
   }
 
   /**
