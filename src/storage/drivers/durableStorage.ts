@@ -30,6 +30,7 @@ export class CapacitorSqliteDriver implements DurableStorageDriver {
   private sqliteConnection: any = null;
   private db: any = null;
   private isInitialized = false;
+  private transactionActive = false;
 
   constructor(dbName = 'hisab_dekhtechai_db') {
     this.dbName = dbName;
@@ -91,7 +92,8 @@ export class CapacitorSqliteDriver implements DurableStorageDriver {
     const now = new Date().toISOString();
     await this.db.run(
       'INSERT OR REPLACE INTO durable_kv (key, value, updated_at) VALUES (?, ?, ?);',
-      [key, value, now]
+      [key, value, now],
+      !this.transactionActive
     );
   }
 
@@ -99,25 +101,29 @@ export class CapacitorSqliteDriver implements DurableStorageDriver {
     if (!this.db) {
       throw new Error('SQLite database is not initialized or connection was lost.');
     }
-    await this.db.run('DELETE FROM durable_kv WHERE key = ?;', [key]);
+    await this.db.run('DELETE FROM durable_kv WHERE key = ?;', [key], !this.transactionActive);
   }
 
   public async beginTransaction(): Promise<void> {
     if (!this.db) await this.init();
     if (this.db && typeof this.db.beginTransaction === 'function') {
+      if (this.transactionActive) throw new Error('SQLite transaction already active.');
       await this.db.beginTransaction();
+      this.transactionActive = true;
     }
   }
 
   public async commitTransaction(): Promise<void> {
     if (this.db && typeof this.db.commitTransaction === 'function') {
       await this.db.commitTransaction();
+      this.transactionActive = false;
     }
   }
 
   public async rollbackTransaction(): Promise<void> {
     if (this.db && typeof this.db.rollbackTransaction === 'function') {
       await this.db.rollbackTransaction();
+      this.transactionActive = false;
     }
   }
 
