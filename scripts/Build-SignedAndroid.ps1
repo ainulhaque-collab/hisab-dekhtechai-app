@@ -1,7 +1,8 @@
 [CmdletBinding()]
 param(
     [Parameter(Mandatory = $true)][ValidateRange(3, 2100000000)][int]$VersionCode,
-    [Parameter(Mandatory = $true)][ValidatePattern('^[A-Za-z0-9][A-Za-z0-9.+-]{0,63}$')][string]$VersionName
+    [Parameter(Mandatory = $true)][ValidatePattern('^[A-Za-z0-9][A-Za-z0-9.+-]{0,63}$')][string]$VersionName,
+    [switch]$LowMemory
 )
 $ErrorActionPreference = 'Stop'
 if ([Security.Principal.WindowsIdentity]::GetCurrent().Name -match '\\CodexSandbox') {
@@ -75,7 +76,14 @@ try {
     Invoke-BuildStep 'npm.cmd' @('run', 'build')
     Invoke-BuildStep 'npx.cmd' @('cap', 'sync', 'android')
     Push-Location (Join-Path $workspaceRoot 'android')
-    try { Invoke-BuildStep $gradleExecutable @('assembleRelease', '--no-daemon', '--no-watch-fs', '--max-workers=2') }
+    try {
+        $gradleArguments = @(':app:assembleRelease', '--no-daemon', '--no-watch-fs')
+        if ($LowMemory) {
+            # Limit both Gradle work and the JVM/R8 processor count on small PCs.
+            $gradleArguments += @('--max-workers=1', '-Dorg.gradle.jvmargs=-Xmx1024m -XX:ActiveProcessorCount=2 -Dfile.encoding=UTF-8')
+        } else { $gradleArguments += '--max-workers=2' }
+        Invoke-BuildStep $gradleExecutable $gradleArguments
+    }
     finally { Pop-Location }
     $apkPath = Join-Path $workspaceRoot 'android/app/build/outputs/apk/release/app-release.apk'
     if (!(Test-Path -LiteralPath $apkPath)) { throw 'Signed APK output was not found.' }
