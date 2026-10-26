@@ -1,5 +1,7 @@
 # Hisab DekhteChai — Development Execution Tracker
 
+> Current reconciliation (26 October 2026): the historical PASS labels below are not proof of complete end-to-end implementation or release readiness. See [the source-backed feature audit](NOTION_FEATURE_RECONCILIATION_2026-10-26.md) and its canonical Notion plan. In particular, receipt persistence/replication, recurring execution, notification delivery and the Web PWA shell remain incomplete; physical release acceptance is tracked separately.
+
 ## Android FIRST
 - [x] A0 Git repository, correct package ID, supported stable toolchain, CI, build reproducibility (PASS)
 - [x] A1 Minimal blue/white Bangla-first UI and 5-tab mobile navigation (PASS)
