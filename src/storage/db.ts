@@ -49,6 +49,12 @@ import {
 
 export const CURRENT_SCHEMA_VERSION = 5;
 
+function storageError(error: unknown): Error {
+  if (error instanceof Error) return error;
+  const message = error && typeof error === 'object' && 'message' in error ? error.message : error;
+  return new Error(typeof message === 'string' ? message : 'Local database operation failed.');
+}
+
 export interface DatabaseState {
   schemaVersion: number;
   localIdentity: {
@@ -393,7 +399,7 @@ export class LocalDatabase {
           this.persistSync();
           if (!this.inTransaction) this.notifyCommittedChanges(committedIds);
         } catch (err: any) {
-          const errorObj = err instanceof Error ? err : new Error(String(err));
+          const errorObj = storageError(err);
           this.lastPersistenceError = errorObj;
           console.error('[CRITICAL LocalDatabase Storage Write Error]:', errorObj);
           throw errorObj;
@@ -438,15 +444,26 @@ export class LocalDatabase {
   // --- Atomic Database Transactions ---
 
   public async beginTransaction(): Promise<void> {
+    // The native connection must finish opening before taking the transaction lock.
+    await this.init();
     // Strictly wait for all in-flight writes in the durability queue to settle before beginning transaction
     await this.writeQueuePromise.catch(() => {});
     if (this.inTransaction) {
       throw new Error('Transaction already in progress.');
     }
+    const snapshot = JSON.stringify(this.toSerializable());
     this.inTransaction = true;
-    this.snapshotBeforeTx = JSON.stringify(this.toSerializable());
-    if (this.driver && typeof this.driver.beginTransaction === 'function') {
-      await this.driver.beginTransaction();
+    this.snapshotBeforeTx = snapshot;
+    try {
+      if (this.driver && typeof this.driver.beginTransaction === 'function') {
+        await this.driver.beginTransaction();
+      }
+    } catch (error) {
+      // A rejected native begin never grants the caller a transaction. Release
+      // only this attempt's memory lock; do not roll back another native owner.
+      this.inTransaction = false;
+      this.snapshotBeforeTx = null;
+      throw storageError(error);
     }
   }
 

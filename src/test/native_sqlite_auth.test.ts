@@ -6,6 +6,8 @@ import { SyncOrchestrator } from '../sync/orchestrator';
 import { SimulatedGoogleDriveTransport } from '../drive/transport';
 import { computeOwnerSubjectHash } from '../auth/googleAuth';
 import { googleErrorMessage } from '../auth/authErrors';
+import { LocalStorageFallbackDriver } from '../storage/drivers/durableStorage';
+import { NativeSqliteConnections } from '../storage/drivers/nativeSqliteConnections';
 
 // Reproduce the installed Android SQLite SDK contract: run() defaults to opening
 // a transaction, and beginTransaction rejects an already active transaction.
@@ -13,6 +15,8 @@ class StrictNativeConnection {
   values = new Map<string, string>();
   snapshot: Map<string, string> | null = null;
   failWrite = false;
+  async open() {}
+  async execute() {}
   async beginTransaction() {
     if (this.snapshot) throw new Error('Failed in beginTransactionAlready in transaction');
     this.snapshot = new Map(this.values);
@@ -95,6 +99,69 @@ test('Native bridge error objects show actionable static messages without exposi
   const marker = 'secret-token-must-stay-private';
   assert.match(googleErrorMessage({ code: 'GOOGLE_ANDROID_CONFIG', message: marker }, true), /package and signing SHA-1/);
   assert.match(googleErrorMessage({ message: 'Failed in beginTransactionAlready in transaction' }, true), /local database/);
+  assert.match(googleErrorMessage({ message: 'BeginTransaction: No available connection for database synthetic-db' }, true), /local database/);
   assert.match(googleErrorMessage({ code: 'UNIMPLEMENTED', message: '"NativeGoogleDrive" plugin is not implemented on android' }, true), /corrected signed APK/);
   assert.equal(googleErrorMessage({ code: 'AUTH_REQUIRED', message: marker }, true).includes(marker), false);
+});
+
+test('Rejected native transaction begin releases the local lock and preserves the original bridge error', async () => {
+  class FailingBeginDriver extends LocalStorageFallbackDriver {
+    rejectBegin = true;
+    async beginTransaction() {
+      if (this.rejectBegin) throw { message: 'BeginTransaction: synthetic connection unavailable' };
+      await super.beginTransaction();
+    }
+  }
+  const driver = new FailingBeginDriver();
+  const db = new LocalDatabase('native-begin-failure-qa', driver);
+  await db.init();
+  const original = JSON.stringify(db.toSerializable());
+  await assert.rejects(db.beginTransaction(), /synthetic connection unavailable/);
+  assert.equal(db.isTransactionInProgress(), false);
+  assert.equal(JSON.stringify(db.toSerializable()), original);
+  driver.rejectBegin = false;
+  await db.beginTransaction();
+  db.createWorkspace('Retry succeeds', 'business');
+  await db.commitTransaction();
+  assert.equal(db.isTransactionInProgress(), false);
+  assert.ok(db.getAllWorkspaces().some(ws => ws.name === 'Retry succeeds'));
+});
+
+test('Opening workspace media keeps the ledger native connection alive and retries failed stores without closing others', async () => {
+  const connections = new Map<string, StrictNativeConnection>();
+  let consistencyChecks = 0, factories = 0, failMedia = true;
+  const pool = new NativeSqliteConnections(async () => {
+    factories++;
+    return {
+      async checkConnectionsConsistency() {
+        consistencyChecks++;
+        // Installed SDK behavior for a new empty JS dictionary.
+        connections.clear();
+      },
+      async isConnection(name) { return { result: connections.has(name) }; },
+      async retrieveConnection(name) { return connections.get(name); },
+      async createConnection(name) {
+        if (name === 'media-qa' && failMedia) throw new Error('synthetic media open failure');
+        const connection = new StrictNativeConnection(); connections.set(name, connection); return connection;
+      },
+    };
+  });
+  const ledger = new CapacitorSqliteDriver('ledger-qa', pool);
+  await ledger.init();
+  await ledger.setItem('journal', 'retained ledger snapshot');
+  const original = connections.get('ledger-qa');
+  const media = new CapacitorSqliteDriver('media-qa', pool);
+  await assert.rejects(media.init(), /synthetic media open failure/);
+  assert.equal(connections.get('ledger-qa'), original);
+  failMedia = false;
+  await Promise.all([media.init(), pool.open('ledger-qa')]);
+  assert.equal(factories, 1);
+  assert.equal(consistencyChecks, 1);
+  assert.equal(connections.get('ledger-qa'), original);
+  assert.equal(await ledger.getItem('journal'), 'retained ledger snapshot');
+  await ledger.beginTransaction();
+  await ledger.setItem('journal', 'next committed snapshot');
+  await ledger.commitTransaction();
+  assert.equal(await ledger.getItem('journal'), 'next committed snapshot');
+  assert.equal(await media.getItem('journal'), null);
 });

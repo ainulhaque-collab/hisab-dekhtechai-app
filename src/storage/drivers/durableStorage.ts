@@ -7,6 +7,7 @@
  */
 
 import { Capacitor } from '@capacitor/core';
+import { NativeSqliteConnections, nativeSqliteConnections } from './nativeSqliteConnections';
 
 export type StorageType = 'sqlite-native' | 'indexeddb-durable' | 'localstorage-fallback';
 
@@ -27,12 +28,11 @@ export interface DurableStorageDriver {
  */
 export class CapacitorSqliteDriver implements DurableStorageDriver {
   private dbName: string;
-  private sqliteConnection: any = null;
   private db: any = null;
   private isInitialized = false;
   private transactionActive = false;
 
-  constructor(dbName = 'hisab_dekhtechai_db') {
+  constructor(dbName = 'hisab_dekhtechai_db', private connections: NativeSqliteConnections = nativeSqliteConnections) {
     this.dbName = dbName;
   }
 
@@ -40,25 +40,7 @@ export class CapacitorSqliteDriver implements DurableStorageDriver {
     if (this.isInitialized) return;
 
     try {
-      const { CapacitorSQLite, SQLiteConnection } = await import('@capacitor-community/sqlite');
-      this.sqliteConnection = new SQLiteConnection(CapacitorSQLite);
-
-      const isConsistent = await this.sqliteConnection.checkConnectionsConsistency();
-      const isConnected = await this.sqliteConnection.isConnection(this.dbName, false);
-
-      if (isConsistent.result && isConnected.result) {
-        this.db = await this.sqliteConnection.retrieveConnection(this.dbName, false);
-      } else {
-        this.db = await this.sqliteConnection.createConnection(
-          this.dbName,
-          false,
-          'no-encryption',
-          1,
-          false
-        );
-      }
-
-      await this.db.open();
+      this.db = await this.connections.open(this.dbName);
 
       // Create durable key-value store table and transaction journal tables
       await this.db.execute(`

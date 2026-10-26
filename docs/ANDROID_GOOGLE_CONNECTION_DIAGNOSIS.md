@@ -21,3 +21,13 @@ Version 4 (`1.0.3-test`) finished building before this correction and was preser
 - TECNO CM6 / Android 16: replacement installation over version 3 succeeded and launch returned `Status: ok`.
 - Primary-user first installation time remains `2026-10-26 19:17:09`; data directory remains `/data/user/0/com.hisabdekhtechai.app`; last update time became `2026-10-26 19:55:59`. This confirms replacement installation, not financial-row parity.
 - Fixed native diagnostic after launch: `Google plugin registered=true`. Google retry and record/sync acceptance remain pending owner feedback.
+
+## Version 5 result and confirmed connection-lifecycle root cause
+
+The owner reported that Google connection still failed and saving an expense displayed `Transaction already in progress.` Restarting only the app process exposed the first failure: `BeginTransaction: No available connection for database hisab_dekhtechai_db`.
+
+Each durable store previously constructed its own `SQLiteConnection`. The workspace image store opens `hisab_workspace_media_v1`; its fresh, empty JavaScript connection dictionary calls `checkConnectionsConsistency()`. The installed Android SDK explicitly calls `closeAllConnections()` when that dictionary is empty, closing the already-open financial database. The old driver's stale handle then fails transaction begin. LocalDatabase also set its in-memory lock before native begin and did not release it if begin rejected, blocking later journals.
+
+All native stores now share one connection manager, with consistency checked once and database opening serialized/deduplicated. Existing database names/files stay unchanged. Failed store opening can retry without closing another store. Transaction begin waits for storage initialization and releases only its own local lock on rejection; the bridge's original storage error is preserved. No data deletion or silent fallback is used.
+
+Five focused tests and all 124 tests plus TypeScript passed. New regressions cover opening media while retaining the ledger connection, failed media-open retry, native begin failure and successful later journal retry. The next signed APK still needs physical confirmation of expense saving and Google/Drive sync; version 5 did not satisfy those checks.
