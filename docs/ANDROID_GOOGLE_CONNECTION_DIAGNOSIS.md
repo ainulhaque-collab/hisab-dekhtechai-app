@@ -67,3 +67,7 @@ The owner has been asked to check that the BDT 120 expense remains after the rep
 The owner subsequently confirmed that a sync timestamp is displayed and the phone-created expense has arrived in the Web app. This establishes owner-observed Android-to-Web record propagation on version 7. It does not establish exact UUID/count/balance parity, reverse propagation, a verified backup or full upgrade retention.
 
 Next manual check: create one BDT 10 test income in the same workspace on Web, note `Web sync test`, save once and confirm arrival on Android. Also check whether the Google Drive Sync panel shows a Verified Drive backup timestamp. Both results remain pending.
+
+The owner answered that this combined check succeeded: the Web-created test record arrived on Android and the Verified Drive backup timestamp is displayed. Together with the previous feedback, basic record propagation now passes in both directions on the signed version 7 APK and Web app, and the owner reports the verified-backup status. These are owner-observed results, not an independently downloaded/restored backup or an exact UUID/count/balance audit.
+
+Remaining release acceptance includes offline pending-record synchronization exactly once, backup download/restore parity, full update retention (including pending records/security/media), and visual verification of the previously unreadable native confirmation when it next appears. Public hosting/OAuth production and key recovery preparation remain separate release work; this test APK has not been published.
