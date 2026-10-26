@@ -36,13 +36,11 @@ export const Navbar: React.FC<NavbarProps> = ({
     setCurrentWorkspaceId,
     syncStatus,
     isOnline,
-    triggerManualSync,
     createWorkspace,
     language,
     conflicts,
     userProfile,
     isLiveGoogleAuth,
-    auth,
   } = useApp();
 
   const isEn = language === 'en';
@@ -54,7 +52,6 @@ export const Navbar: React.FC<NavbarProps> = ({
   const [newWsDescription, setNewWsDescription] = useState('');
   const [newWsName, setNewWsName] = useState('');
   const [newWsKind, setNewWsKind] = useState<'personal' | 'business'>('business');
-  const [isSyncing, setIsSyncing] = useState(false);
 
   const hamburgerRef = useRef<HTMLDivElement>(null);
   const workspaceRef = useRef<HTMLDivElement>(null);
@@ -93,19 +90,6 @@ export const Navbar: React.FC<NavbarProps> = ({
     };
   }, []);
 
-  const handleManualSyncClick = async (e: React.MouseEvent) => {
-    e.stopPropagation();
-    if (!isOnline || isSyncing) return;
-    setIsSyncing(true);
-    try {
-      await triggerManualSync();
-    } catch {
-      onOpenSyncModal();
-    } finally {
-      setIsSyncing(false);
-    }
-  };
-
   const handleCreateWorkspaceSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!newWsName.trim()) return;
@@ -134,22 +118,13 @@ export const Navbar: React.FC<NavbarProps> = ({
         title: isEn ? 'Offline mode: changes saved locally in SQLite' : 'অফলাইন মোড: সমস্ত হিসাব ডিভাইসে সুরক্ষিত',
       };
     }
-    if (!isLiveGoogleAuth && !userProfile) {
+    if (!isLiveGoogleAuth || syncStatus.state === 'auth_required') {
       return {
         icon: CloudOff,
-        text: isEn ? 'Drive Not Connected' : 'ড্রাইভ যুক্ত নয়',
+        text: userProfile ? (isEn ? 'Reconnect Drive' : 'ড্রাইভ পুনরায় যুক্ত করুন') : (isEn ? 'Drive Not Connected' : 'ড্রাইভ যুক্ত নয়'),
         bgColor: 'bg-amber-50 text-amber-800 border-amber-300',
         dotColor: 'bg-amber-500',
         title: isEn ? 'Connect Google Drive for cross-device sync' : 'সিঙ্ক করার জন্য গুগল ড্রাইভ যুক্ত করুন',
-      };
-    }
-    if (auth.isTokenExpired() && isLiveGoogleAuth) {
-      return {
-        icon: AlertTriangle,
-        text: isEn ? 'Auth Expired' : 'লগইন মেয়াদোত্তীর্ণ',
-        bgColor: 'bg-rose-50 text-rose-800 border-rose-300',
-        dotColor: 'bg-rose-500 animate-pulse',
-        title: isEn ? 'Google token expired. Tap to reconnect.' : 'গুগল টোকেনের মেয়াদ শেষ হয়েছে। পুনরায় যুক্ত করুন।',
       };
     }
     if (conflicts.some((c) => c.status === 'needs_review')) {
@@ -161,7 +136,7 @@ export const Navbar: React.FC<NavbarProps> = ({
         title: isEn ? 'Cloud conflict requires your review' : 'ক্লাউড সংঘাত পর্যালোচনা প্রয়োজন',
       };
     }
-    if (syncStatus.state === 'syncing' || isSyncing) {
+    if (syncStatus.state === 'syncing') {
       return {
         icon: RefreshCw,
         text: isEn ? 'Syncing...' : 'সিঙ্ক হচ্ছে...',
@@ -170,13 +145,22 @@ export const Navbar: React.FC<NavbarProps> = ({
         title: isEn ? 'Synchronizing with Google Drive' : 'গুগল ড্রাইভের সাথে সিঙ্ক হচ্ছে',
       };
     }
+    if (syncStatus.state === 'quota_full') {
+      return {
+        icon: AlertTriangle,
+        text: isEn ? 'Drive storage full' : 'ড্রাইভের স্টোরেজ পূর্ণ',
+        bgColor: 'bg-amber-50 text-amber-800 border-amber-300',
+        dotColor: 'bg-amber-500',
+        title: isEn ? 'Drive storage is full. Open sync details.' : 'ড্রাইভের স্টোরেজ পূর্ণ। সিঙ্কের বিস্তারিত দেখুন।',
+      };
+    }
     if (syncStatus.state === 'error_retryable' || !!syncStatus.lastError) {
       return {
         icon: AlertTriangle,
         text: isEn ? 'Sync Failed / Retry' : 'সিঙ্ক ব্যর্থ / পুনরায় চেষ্টা',
         bgColor: 'bg-rose-50 text-rose-800 border-rose-300',
         dotColor: 'bg-rose-500',
-        title: syncStatus.lastError || (isEn ? 'Sync error occurred' : 'সিঙ্কে ত্রুটি ঘটেছে'),
+        title: isEn ? 'Sync failed. Open details to retry.' : 'সিঙ্ক ব্যর্থ। বিস্তারিত খুলে আবার চেষ্টা করুন।',
       };
     }
     if (syncStatus.pendingOutboxCount > 0) {
@@ -191,6 +175,15 @@ export const Navbar: React.FC<NavbarProps> = ({
       };
     }
 
+    if (syncStatus.state !== 'synced_verified' || !syncStatus.lastSuccessfulSyncAt) {
+      return {
+        icon: Cloud,
+        text: isEn ? 'Waiting to sync' : 'সিঙ্কের অপেক্ষায়',
+        bgColor: 'bg-slate-50 text-slate-600 border-slate-200',
+        dotColor: 'bg-slate-400',
+        title: isEn ? 'Open Google Drive sync details' : 'গুগল ড্রাইভ সিঙ্কের বিস্তারিত দেখুন',
+      };
+    }
     const lastSyncTimeStr = syncStatus.lastSuccessfulSyncAt
       ? new Date(syncStatus.lastSuccessfulSyncAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
       : '';
@@ -342,25 +335,14 @@ export const Navbar: React.FC<NavbarProps> = ({
             <button
               type="button"
               onClick={onOpenSyncModal}
-              className={`flex items-center gap-1.5 px-2 py-1 text-xs font-medium rounded-lg transition-colors border ${badge.bgColor} min-h-[40px]`}
+              className={`flex items-center justify-center gap-1.5 px-2 py-1 text-xs font-medium rounded-lg transition-colors border ${badge.bgColor} min-h-[44px] min-w-[44px]`}
               title={badge.title}
-              aria-label={badge.text}
+              aria-label={`${badge.text}. ${isEn ? 'Open sync details' : 'সিঙ্কের বিস্তারিত খুলুন'}`}
+              aria-haspopup="dialog"
             >
               <span className={`w-1.5 h-1.5 rounded-full shrink-0 ${badge.dotColor}`} />
               <span className="hidden xs:inline text-[11px] font-medium max-w-[110px] truncate">{badge.text}</span>
-              <BadgeIcon className="w-3.5 h-3.5 shrink-0 xs:hidden text-slate-600" />
-            </button>
-
-            {/* Quick Manual Sync Refresh */}
-            <button
-              type="button"
-              onClick={handleManualSyncClick}
-              disabled={!isOnline || isSyncing}
-              className="p-2 rounded-lg text-slate-500 hover:text-slate-900 hover:bg-slate-100 transition-colors disabled:opacity-40 min-h-[44px] min-w-[44px] flex items-center justify-center"
-              title={isEn ? 'Sync Now' : 'এখনই সিঙ্ক করুন'}
-              aria-label="Sync Now"
-            >
-              <RefreshCw className={`w-4 h-4 ${isSyncing ? 'animate-spin text-blue-700' : ''}`} />
+              <BadgeIcon className={`w-3.5 h-3.5 shrink-0 xs:hidden ${syncStatus.state === 'syncing' ? 'motion-safe:animate-spin' : ''}`} />
             </button>
 
             {/* FEAT-007: Top-Right ☰ Hamburger Menu */}
