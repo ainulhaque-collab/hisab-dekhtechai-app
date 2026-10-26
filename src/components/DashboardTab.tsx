@@ -112,24 +112,24 @@ export const DashboardTab: React.FC<DashboardTabProps> = ({
             <span className="truncate">
               {formatAccountTitle(currentWorkspace?.name || '', language)} · {t.totalBalance}
             </span>
-            <button
-              type="button"
-              onClick={() => setShowBalance(!showBalance)}
-              className="p-1 hover:text-white transition-colors"
-              aria-label={showBalance ? 'Hide balance' : 'Show balance'}
-            >
-              {showBalance ? <EyeOff className="w-3.5 h-3.5" /> : <Eye className="w-3.5 h-3.5 text-slate-400" />}
-            </button>
           </div>
           <span className="text-[10px] font-mono tracking-wider px-2 py-0.5 rounded-md bg-slate-800 text-slate-300 border border-slate-700">
             BDT
           </span>
         </div>
 
-        <div className="text-3xl sm:text-4xl font-bold tracking-tight mb-4 tabular-nums text-white">
-          {showBalance
+        <div className="mb-4 flex items-center gap-2">
+          <span className="min-w-0 break-all text-3xl sm:text-4xl font-bold tracking-tight tabular-nums text-white">{showBalance
             ? formatBDT(dashboardData.totalConsolidatedBalanceMinor, { locale: language })
-            : '৳ ••••••••'}
+            : '৳ ••••••••'}</span>
+          <button
+            type="button"
+            onClick={() => setShowBalance(value => !value)}
+            className="flex h-11 w-11 shrink-0 items-center justify-center rounded-lg text-slate-400 transition-colors hover:bg-slate-800 hover:text-white focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-400"
+            aria-label={showBalance ? (language === 'en' ? 'Hide balance' : 'ব্যালেন্স লুকান') : (language === 'en' ? 'Show balance' : 'ব্যালেন্স দেখান')}
+          >
+            {showBalance ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+          </button>
         </div>
 
         {/* 3-Metric Summary Strip */}
