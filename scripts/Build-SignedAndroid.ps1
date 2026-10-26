@@ -36,6 +36,8 @@ $signer = Get-ChildItem -LiteralPath (Join-Path $sdkRoot 'build-tools') -Directo
     Sort-Object { [version]($_.Name -replace '-.*$', '') } -Descending |
     ForEach-Object { Join-Path $_.FullName 'apksigner.bat' } | Where-Object { Test-Path -LiteralPath $_ } | Select-Object -First 1
 if (!$signer) { throw 'Android apksigner is missing from SDK build-tools.' }
+$aapt = Join-Path (Split-Path $signer -Parent) 'aapt.exe'
+if (!(Test-Path -LiteralPath $aapt)) { throw 'Android aapt is missing from SDK build-tools.' }
 $gradleWrapper = Join-Path $workspaceRoot 'android/gradlew.bat'
 if (!(Test-Path -LiteralPath $gradleWrapper)) { throw 'Gradle wrapper is missing. Run Setup-AndroidTools.ps1 before building.' }
 $gradleExecutable = $gradleWrapper
@@ -77,9 +79,16 @@ try {
     finally { Pop-Location }
     $apkPath = Join-Path $workspaceRoot 'android/app/build/outputs/apk/release/app-release.apk'
     if (!(Test-Path -LiteralPath $apkPath)) { throw 'Signed APK output was not found.' }
+    $publicInfo = Get-Content -LiteralPath $publicPath -Raw | ConvertFrom-Json
+    $badging = (& $aapt dump badging $apkPath) -join "`n"
+    if ($LASTEXITCODE -ne 0) { throw 'APK manifest inspection failed.' }
+    $expectedPackage = [regex]::Escape($publicInfo.applicationId)
+    $expectedName = [regex]::Escape($VersionName)
+    if ($badging -notmatch "(?m)^package: name='$expectedPackage' versionCode='$VersionCode' versionName='$expectedName'") {
+        throw 'Built APK package or version does not match the requested signed release.'
+    }
     $signature = & $signer verify --verbose --print-certs $apkPath
     if ($LASTEXITCODE -ne 0) { throw 'APK signature verification failed.' }
-    $publicInfo = Get-Content -LiteralPath $publicPath -Raw | ConvertFrom-Json
     $expected = ($publicInfo.certificateSha256 -replace ':', '').ToLowerInvariant()
     if (!($signature -match [regex]::Escape($expected))) { throw 'APK signing certificate does not match the permanent key.' }
     $evidence = @{ applicationId = $publicInfo.applicationId; versionCode = $VersionCode; versionName = $VersionName; commit = (git rev-parse HEAD); certificateSha256 = $publicInfo.certificateSha256; apkSha256 = (Get-FileHash -LiteralPath $apkPath -Algorithm SHA256).Hash; apkPath = $apkPath; builtAtUtc = [DateTime]::UtcNow.ToString('o'); physicalDeviceAcceptance = 'PENDING'; published = $false }
