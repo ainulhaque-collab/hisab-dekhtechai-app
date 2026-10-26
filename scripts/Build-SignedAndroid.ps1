@@ -37,7 +37,16 @@ $signer = Get-ChildItem -LiteralPath (Join-Path $sdkRoot 'build-tools') -Directo
     ForEach-Object { Join-Path $_.FullName 'apksigner.bat' } | Where-Object { Test-Path -LiteralPath $_ } | Select-Object -First 1
 if (!$signer) { throw 'Android apksigner is missing from SDK build-tools.' }
 $gradleWrapper = Join-Path $workspaceRoot 'android/gradlew.bat'
-if (!(Test-Path -LiteralPath $gradleWrapper)) { throw 'Gradle wrapper is missing. Use Gradle 8.13 to generate the wrapper in android before building.' }
+if (!(Test-Path -LiteralPath $gradleWrapper)) { throw 'Gradle wrapper is missing. Run Setup-AndroidTools.ps1 before building.' }
+$gradleExecutable = $gradleWrapper
+$wrapperProperties = Get-Content -LiteralPath (Join-Path $workspaceRoot 'android/gradle/wrapper/gradle-wrapper.properties') -Raw
+if ($toolsConfig -and $toolsConfig.gradleHome -and $wrapperProperties -match 'gradle-([0-9.]+)-bin\.zip') {
+    $localGradle = Join-Path $toolsConfig.gradleHome 'bin/gradle.bat'
+    if ((Split-Path $toolsConfig.gradleHome -Leaf) -eq "gradle-$($Matches[1])" -and (Test-Path -LiteralPath $localGradle)) {
+        # Setup verified this same pinned distribution; avoid downloading it twice.
+        $gradleExecutable = $localGradle
+    }
+}
 $credentials = Get-Content -LiteralPath $credentialsPath -Raw | ConvertFrom-Json
 $securePassword = ConvertTo-SecureString $credentials.storePasswordProtected
 $pointer = [Runtime.InteropServices.Marshal]::SecureStringToBSTR($securePassword)
@@ -64,7 +73,7 @@ try {
     Invoke-BuildStep 'npm.cmd' @('run', 'build')
     Invoke-BuildStep 'npx.cmd' @('cap', 'sync', 'android')
     Push-Location (Join-Path $workspaceRoot 'android')
-    try { Invoke-BuildStep $gradleWrapper @('assembleRelease', '--no-daemon', '--no-watch-fs', '--max-workers=2') }
+    try { Invoke-BuildStep $gradleExecutable @('assembleRelease', '--no-daemon', '--no-watch-fs', '--max-workers=2') }
     finally { Pop-Location }
     $apkPath = Join-Path $workspaceRoot 'android/app/build/outputs/apk/release/app-release.apk'
     if (!(Test-Path -LiteralPath $apkPath)) { throw 'Signed APK output was not found.' }

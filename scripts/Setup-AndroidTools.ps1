@@ -1,5 +1,5 @@
 [CmdletBinding()]
-param()
+param([ValidateSet('8.13', '9.1.0')][string]$GradleVersion = '9.1.0')
 $ErrorActionPreference = 'Stop'
 $ProgressPreference = 'SilentlyContinue'
 $workspaceRoot = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot '..'))
@@ -50,18 +50,20 @@ try {
     & $sdkManager "--sdk_root=$sdkRoot" 'platform-tools' 'platforms;android-36' 'build-tools;36.0.0' *> (Join-Path $toolsRoot 'sdk-install.log')
     if ($LASTEXITCODE -ne 0) { throw 'Android SDK package installation failed; review sdk-install.log.' }
 } finally { $ErrorActionPreference = $previousErrorPreference }
-Write-Output 'Preparing Gradle 8.13 (verified download).'
-$hashResponse = (Invoke-WebRequest -UseBasicParsing -Uri 'https://services.gradle.org/distributions/gradle-8.13-bin.zip.sha256').Content
+Write-Output "Preparing Gradle $GradleVersion (verified download)."
+$gradleUrl = "https://services.gradle.org/distributions/gradle-$GradleVersion-bin.zip"
+$hashResponse = (Invoke-WebRequest -UseBasicParsing -Uri "$gradleUrl.sha256").Content
 $gradleHash = if ($hashResponse -is [byte[]]) { [Text.Encoding]::UTF8.GetString($hashResponse).Trim() } else { ([string]$hashResponse).Trim() }
 if ($gradleHash -notmatch '^[a-fA-F0-9]{64}$') { throw 'Official Gradle checksum response is invalid.' }
-$gradleArchive = Get-VerifiedArchive 'https://services.gradle.org/distributions/gradle-8.13-bin.zip' $gradleHash 'gradle-8.13.zip'
+$gradleArchive = Get-VerifiedArchive $gradleUrl $gradleHash "gradle-$GradleVersion.zip"
 $gradleRoot = Join-Path $toolsRoot 'gradle'
-if (!(Test-Path -LiteralPath $gradleRoot)) { Expand-Archive -LiteralPath $gradleArchive -DestinationPath $gradleRoot }
-$gradle = Join-Path $gradleRoot 'gradle-8.13/bin/gradle.bat'
-if (!(Test-Path -LiteralPath (Join-Path $workspaceRoot 'android/gradlew.bat'))) {
+if (!(Test-Path -LiteralPath (Join-Path $gradleRoot "gradle-$GradleVersion/bin/gradle.bat"))) { Expand-Archive -LiteralPath $gradleArchive -DestinationPath $gradleRoot -Force }
+$gradle = Join-Path $gradleRoot "gradle-$GradleVersion/bin/gradle.bat"
+$wrapperProperties = Join-Path $workspaceRoot 'android/gradle/wrapper/gradle-wrapper.properties'
+if (!(Test-Path -LiteralPath $wrapperProperties) -or !(Select-String -LiteralPath $wrapperProperties -SimpleMatch "gradle-$GradleVersion-bin.zip" -Quiet)) {
     Push-Location (Join-Path $workspaceRoot 'android')
-    try { & $gradle wrapper --gradle-version 8.13 --gradle-distribution-sha256-sum $gradleHash --no-daemon *> (Join-Path $toolsRoot 'gradle-wrapper.log'); if ($LASTEXITCODE -ne 0) { throw 'Gradle wrapper generation failed; review gradle-wrapper.log.' } }
+    try { & $gradle wrapper --gradle-version $GradleVersion --gradle-distribution-sha256-sum $gradleHash --no-daemon --no-watch-fs --max-workers=2 *> (Join-Path $toolsRoot 'gradle-wrapper.log'); if ($LASTEXITCODE -ne 0) { throw 'Gradle wrapper generation failed; review gradle-wrapper.log.' } }
     finally { Pop-Location }
 }
-@{ javaHome = $javaRoot; androidHome = $sdkRoot; gradleHome = (Join-Path $gradleRoot 'gradle-8.13'); gradleUserHome = $env:GRADLE_USER_HOME } | ConvertTo-Json | Set-Content -LiteralPath (Join-Path $toolsRoot 'environment.json') -Encoding UTF8
+@{ javaHome = $javaRoot; androidHome = $sdkRoot; gradleHome = (Join-Path $gradleRoot "gradle-$GradleVersion"); gradleUserHome = $env:GRADLE_USER_HOME } | ConvertTo-Json | Set-Content -LiteralPath (Join-Path $toolsRoot 'environment.json') -Encoding UTF8
 Write-Output 'Workspace-local Android build tools are ready. No app or customer release has been published.'
