@@ -15,3 +15,15 @@ coverage/
 android/app/src/main/assets/public/
 .qa-test-output.txt
 .qa-auto-output.txt
+
+# Private Android signing identity. Never commit these or machine-bound passwords.
+.local-signing/
+.local-signing-sandbox-incomplete/
+.local-tools/
+.gradle/
+android/local.properties
+*.keystore
+*.jks
+*.p12
+*.pfx
+*.key

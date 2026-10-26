@@ -1,0 +1,14 @@
+.git/
+.local-signing/
+.local-signing-sandbox-incomplete/
+.local-tools/
+.gradle/
+android/
+docs/
+scripts/
+.qa*
+*.keystore
+*.jks
+*.p12
+*.pfx
+*.key

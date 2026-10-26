@@ -8,12 +8,6 @@ const config: CapacitorConfig = {
     androidScheme: 'https',
     cleartext: false,
   },
-  android: {
-    buildOptions: {
-      keystorePath: 'release-key.keystore',
-      keystoreAlias: 'hisabdekhtechai',
-    },
-  },
 };
 
 export default config;

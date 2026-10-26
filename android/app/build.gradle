@@ -2,6 +2,16 @@ plugins {
     id 'com.android.application'
 }
 
+def signingFile = System.getenv('HISAB_ANDROID_KEYSTORE_FILE')
+def signingStorePassword = System.getenv('HISAB_ANDROID_STORE_PASSWORD')
+def signingAlias = System.getenv('HISAB_ANDROID_KEY_ALIAS')
+def signingKeyPassword = System.getenv('HISAB_ANDROID_KEY_PASSWORD')
+def signingReady = signingFile && signingStorePassword && signingAlias && signingKeyPassword
+def requestedVersion = System.getenv('HISAB_ANDROID_VERSION_CODE')
+if (requestedVersion && (!(requestedVersion ==~ /[1-9][0-9]*/) || requestedVersion.toLong() > 2100000000L)) {
+    throw new GradleException('HISAB_ANDROID_VERSION_CODE must be a positive Android version code.')
+}
+
 android {
     namespace "com.hisabdekhtechai.app"
     compileSdk 36
@@ -10,16 +20,28 @@ android {
         applicationId "com.hisabdekhtechai.app"
         minSdk 24
         targetSdk 36
-        versionCode 2
-        versionName "1.0.1-dev"
+        versionCode requestedVersion ? requestedVersion.toInteger() : 2
+        versionName System.getenv('HISAB_ANDROID_VERSION_NAME') ?: "1.0.1-dev"
         testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
         vectorDrawables {
             useSupportLibrary true
         }
     }
 
+    signingConfigs {
+        if (signingReady) {
+            localRelease {
+                storeFile file(signingFile)
+                storeType 'PKCS12'
+                storePassword signingStorePassword
+                keyAlias signingAlias
+                keyPassword signingKeyPassword
+            }
+        }
+    }
     buildTypes {
         release {
+            if (signingReady) signingConfig signingConfigs.localRelease
             minifyEnabled true
             shrinkResources true
             proguardFiles getDefaultProguardFile('proguard-android-optimize.txt'), 'proguard-rules.pro'
@@ -38,6 +60,17 @@ android {
     packagingOptions {
         jniLibs {
             useLegacyPackaging = true
+        }
+    }
+}
+
+gradle.taskGraph.whenReady { graph ->
+    if (graph.allTasks.any { it.project.path == ':app' && it.name.toLowerCase().contains('release') }) {
+        if (!signingReady || !file(signingFile).isFile()) {
+            throw new GradleException('Release signing is unavailable. Use the local signed-build script; never distribute an unsigned/debug substitute.')
+        }
+        if (!requestedVersion || requestedVersion.toInteger() <= 2 || !System.getenv('HISAB_ANDROID_VERSION_NAME')) {
+            throw new GradleException('A release requires an explicit version name and versionCode greater than the development baseline (2).')
         }
     }
 }
