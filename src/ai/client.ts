@@ -55,7 +55,8 @@ export async function extractEntry(input: ExtractionInput, ownerHash: string, id
   if (identity.getProfile()?.subjectHash !== ownerHash || settings.signal?.aborted) throw new Error('AI_OWNER_MISMATCH');
   if (!response.ok) {
     const allowed = ['AI_AUTH_REQUIRED', 'AI_OWNER_MISMATCH', 'AI_LIMIT_REACHED', 'AI_NOT_CONFIGURED',
-      'AI_REQUEST_ALREADY_USED', 'AI_AUTH_UNAVAILABLE', 'AI_LIMIT_UNAVAILABLE', 'AI_RESPONSE_INVALID', 'AI_MODEL_UNAVAILABLE'];
+      'AI_REQUEST_ALREADY_USED', 'AI_AUTH_UNAVAILABLE', 'AI_LIMIT_UNAVAILABLE', 'AI_RESPONSE_INVALID', 'AI_MODEL_UNAVAILABLE',
+      'AI_PROVIDER_BUSY', 'AI_PROVIDER_QUOTA', 'AI_PROVIDER_AUTH_ERROR'];
     throw new Error(allowed.includes(raw?.error) ? raw.error : 'AI_PROVIDER_UNAVAILABLE');
   }
   return validateExtractionResult(raw, sourceSha256, requestId);
@@ -71,7 +72,10 @@ export function aiErrorMessage(error: unknown, isEn: boolean) {
     AI_NETWORK_ERROR: ['AI did not respond. Check your connection before trying again.', 'AI-এর উত্তর পাওয়া যায়নি। আবার চেষ্টা করার আগে ইন্টারনেট পরীক্ষা করুন।'],
     AI_REQUEST_ALREADY_USED: ['This request was already processed. Review the existing result or start a new request.', 'এই অনুরোধটি আগেই নেওয়া হয়েছে। আগের ফল দেখুন অথবা নতুন করে চেষ্টা করুন।'],
     AI_RESPONSE_INVALID: ['The AI draft could not be verified. Review the source and try again.', 'AI খসড়া যাচাই করা যায়নি। রিসিপ্ট বা অডিও দেখে আবার চেষ্টা করুন।'],
-    AI_MODEL_UNAVAILABLE: ['No suitable Gemini model is available for this key yet. You can enter manually.', 'এই key-এর জন্য উপযুক্ত Gemini মডেল পাওয়া যায়নি। সাধারণভাবে এন্ট্রি দিতে পারবেন।'],
+    AI_MODEL_UNAVAILABLE: ['AI entry is unavailable right now. Try later or enter manually.', 'AI এন্ট্রি এখন পাওয়া যাচ্ছে না। পরে চেষ্টা করুন অথবা নিজে এন্ট্রি দিন।'],
+    AI_PROVIDER_BUSY: ['Google AI is temporarily busy. You can try creating the draft again or enter manually.', 'Google AI এখন সাময়িকভাবে ব্যস্ত। আবার খসড়া তৈরি করতে পারেন অথবা নিজে এন্ট্রি দিন।'],
+    AI_PROVIDER_QUOTA: ['The Google AI usage limit has been reached. Try later or enter manually.', 'Google AI-এর ব্যবহারসীমা শেষ হয়েছে। পরে চেষ্টা করুন অথবা নিজে এন্ট্রি দিন।'],
+    AI_PROVIDER_AUTH_ERROR: ['AI entry needs attention from support. You can still enter transactions manually.', 'AI এন্ট্রির জন্য সহায়তা প্রয়োজন। আপাতত নিজে লেনদেন যোগ করতে পারবেন।'],
   };
   const message = messages[code] || ['AI is temporarily unavailable. Your existing entries are safe.', 'AI এখন সাময়িকভাবে কাজ করছে না। আগের লেনদেনগুলো সংরক্ষিত আছে।'];
   return message[isEn ? 0 : 1];

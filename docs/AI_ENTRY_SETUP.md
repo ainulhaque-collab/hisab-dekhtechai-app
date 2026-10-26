@@ -13,7 +13,7 @@ This batch implements selected items **37/38** through the transaction review fo
 
 `GEMINI_MODEL=auto` is the default. On an authenticated, quota-reserved request, the server reads the model catalog available to the configured key. It chooses the newest numeric stable **Gemini Flash** model supporting `generateContent` with at least 2048 output tokens, minimum 2.5. It excludes Pro, preview/experimental/latest aliases, lite, live, image, TTS and tuned models. Selection is cached for 15 minutes. This is an availability/version policy, not a benchmark claim that every newer model is more accurate or cheaper. Prices are not inferred from the catalog.
 
-No suitable model → an honest unavailable message. No automatic switch to Pro or other paid models; generation retries are disabled. Operators may pin a supported `gemini-*` model later. `AI_PROVIDER` defaults to `gemini`; unsupported providers fail closed until their adapter is implemented.
+No suitable model → an honest unavailable message. One generation attempt per click; retries within the request are disabled. A model returning 5xx or 404 is cooled down for 10 minutes in that runtime instance, so the **next user-requested extraction** may choose another advertised stable Flash model. There is no hidden generation fallback, no Pro/preview switch and no quota/auth-error retry. Catalog and health state are local to the runtime, not a shared global health guarantee. Operators may pin a supported `gemini-*` model later. `AI_PROVIDER` defaults to `gemini`; unsupported providers fail closed until their adapter is implemented.
 
 ## Local Web test without sharing the API key
 
@@ -23,7 +23,7 @@ No suitable model → an honest unavailable message. No automatic switch to Pro 
 4. In one terminal run `npm run dev:api`; expect the loopback address `127.0.0.1:3001` and `configured=true`. In another, run the usual `npm run dev` (or use the existing dev server after it reloads the Vite proxy config).
 5. Open `http://localhost:3000`, connect the same Google account and use Add → AI. Try a synthetic receipt/short voice entry. Check/correct the draft, confirm, choose account/category and Save once. Confirm exactly one History entry and a receipt image for image-based entries. Repeat with cancel/denied mic permission/offline/unknown currency. A full app refresh may be needed after this code update.
 
-No key is configured or charged by creating these files. Automated tests inject synthetic provider responses; a real key, current catalog and Bengali receipt/audio accuracy still need live acceptance.
+No key is configured or charged merely by creating these files. The owner has now saved the key locally: a real model-catalog request succeeded, but synthetic receipt generation returned Google 503 on `gemini-3.8-flash` and `gemini-3.7-flash`; advertised `gemini-2.5-flash` returned model unavailable. No real financial data was submitted or posted. Automated success tests inject synthetic responses; actual receipt/voice accuracy and successful live generation remain pending.
 
 ## Server authorization and spending limits
 

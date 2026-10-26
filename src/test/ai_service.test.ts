@@ -140,3 +140,15 @@ test('Review requires positive exact BDT amount and explicit type, retaining mis
   for (const change of [{ currency: '' }, { type: '' }, { amount: '0' }, { amount: '1.111' }, { date: '2026-02-30' }, { time: '25:20' }])
     assert.throws(() => validateReviewedEntry({ ...review, ...change }));
 });
+
+test('Provider busy, quota and permission errors are safe actionable HTTP responses', async t => {
+  let code = 'AI_PROVIDER_BUSY';
+  const server = await serve(t, { budget: new DevelopmentAIBudget({ perMinute: 10, perDay: 10, globalPerDay: 100 }),
+    provider: { provider: 'gemini', extract: async () => { throw new Error(code); } } });
+  for (const [expectedCode, status] of [['AI_PROVIDER_BUSY', 503], ['AI_PROVIDER_QUOTA', 429], ['AI_PROVIDER_AUTH_ERROR', 503], ['AI_MODEL_UNAVAILABLE', 503]] as const) {
+    code = expectedCode;
+    const response = await server.post(body());
+    assert.equal(response.status, status);
+    assert.deepEqual(await response.json(), { error: expectedCode });
+  }
+});

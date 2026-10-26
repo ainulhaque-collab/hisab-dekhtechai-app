@@ -35,7 +35,15 @@ export class GeminiEntryProvider implements EntryExtractionProvider {
           maxOutputTokens: 2048, httpOptions: { timeout: 30_000, retryOptions: { attempts: 1 } },
         },
       });
-    } catch { throw new Error('AI_PROVIDER_UNAVAILABLE'); }
+    } catch (error) {
+      // Status only: never expose the SDK's response body, request or credentials.
+      const status = error && typeof error === 'object' ? (error as { status?: unknown }).status : undefined;
+      if (status === 429) throw new Error('AI_PROVIDER_QUOTA');
+      if (status === 401 || status === 403) throw new Error('AI_PROVIDER_AUTH_ERROR');
+      if (status === 404) throw new Error('AI_MODEL_UNAVAILABLE');
+      if (typeof status === 'number' && status >= 500 && status <= 599) throw new Error('AI_PROVIDER_BUSY');
+      throw new Error('AI_PROVIDER_UNAVAILABLE');
+    }
     if (typeof response.text !== 'string' || response.text.length > 30_000) throw new Error('AI_RESPONSE_INVALID');
     let parsed: unknown;
     try { parsed = JSON.parse(response.text); } catch { throw new Error('AI_RESPONSE_INVALID'); }

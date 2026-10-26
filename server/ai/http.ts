@@ -57,6 +57,9 @@ export function createAIRouter(options: AIHttpOptions) {
     } catch (error) {
       if (error instanceof AIServiceError) { response.status(error.status).json({ error: error.code }); return; }
       if (error instanceof Error && error.message === 'AI_MODEL_UNAVAILABLE') { response.status(503).json({ error: 'AI_MODEL_UNAVAILABLE' }); return; }
+      if (error instanceof Error && ['AI_PROVIDER_BUSY', 'AI_PROVIDER_QUOTA', 'AI_PROVIDER_AUTH_ERROR'].includes(error.message)) {
+        response.status(error.message === 'AI_PROVIDER_QUOTA' ? 429 : 503).json({ error: error.message }); return;
+      }
       const code = error instanceof Error && ['AI_RESPONSE_INVALID', 'AI_DRAFT_INVALID', 'AI_DRAFT_INVALID_AMOUNT', 'AI_DRAFT_INVALID_DATE_TIME'].includes(error.message)
         ? 'AI_RESPONSE_INVALID' : 'AI_PROVIDER_UNAVAILABLE';
       response.status(502).json({ error: code });

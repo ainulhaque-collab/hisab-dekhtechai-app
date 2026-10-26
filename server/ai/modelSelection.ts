@@ -6,10 +6,10 @@ import { validateExtractionMedia } from '../../src/ai/media';
 /** Explicit policy: newest stable Flash family advertised by this key's model
  * catalog. Avoid Pro pricing, previews, experimental/live/image/TTS/tuned models.
  * Availability and a name are not a claim of measured extraction accuracy. */
-export function selectAutomaticGeminiModel(models: Model[]): string {
+export function selectAutomaticGeminiModel(models: Model[], excluded: ReadonlySet<string> = new Set()): string {
   const eligible = models.flatMap(model => {
     const match = model.name?.match(/^(?:models\/)?gemini-(\d+)(?:\.(\d+))?-flash(?:-(\d{3}))?$/);
-    if (!match || !model.supportedActions?.includes('generateContent') || (model.outputTokenLimit || 0) < 2048) return [];
+    if (!match || excluded.has(model.name!.replace(/^models\//, '')) || !model.supportedActions?.includes('generateContent') || (model.outputTokenLimit || 0) < 2048) return [];
     const major = Number(match[1]), minor = Number(match[2] || 0), revision = Number(match[3] || 0);
     if (major < 2 || major === 2 && minor < 5) return [];
     return [{ name: model.name!.replace(/^models\//, ''), major, minor, revision }];
@@ -21,7 +21,9 @@ export function selectAutomaticGeminiModel(models: Model[]): string {
 
 export class AutomaticGeminiEntryProvider implements EntryExtractionProvider {
   readonly provider = 'gemini';
-  private chosen?: { provider: EntryExtractionProvider; expires: number };
+  private chosen?: { model: string; provider: EntryExtractionProvider; expires: number };
+  private catalog?: { models: Model[]; expires: number };
+  private cooldowns = new Map<string, number>();
   private selecting?: Promise<EntryExtractionProvider>;
   private list: () => Promise<Model[]>;
   private build: (model: string) => EntryExtractionProvider;
@@ -43,9 +45,11 @@ export class AutomaticGeminiEntryProvider implements EntryExtractionProvider {
     if (!this.chosen || this.chosen.expires <= Date.now()) {
       if (!this.selecting) this.selecting = (async () => {
         try {
-          const model = selectAutomaticGeminiModel(await this.list());
+          for (const [model, until] of this.cooldowns) if (until <= Date.now()) this.cooldowns.delete(model);
+          if (!this.catalog || this.catalog.expires <= Date.now()) this.catalog = { models: await this.list(), expires: Date.now() + 15 * 60_000 };
+          const model = selectAutomaticGeminiModel(this.catalog.models, new Set(this.cooldowns.keys()));
           const provider = this.build(model);
-          this.chosen = { provider, expires: Date.now() + 15 * 60_000 };
+          this.chosen = { model, provider, expires: Date.now() + 15 * 60_000 };
           return provider;
         } catch (error) {
           if (error instanceof Error && error.message === 'AI_MODEL_UNAVAILABLE') throw error;
@@ -54,8 +58,17 @@ export class AutomaticGeminiEntryProvider implements EntryExtractionProvider {
       })();
       await this.selecting;
     }
-    // One generation attempt. No automatic fallback to other paid models.
-    return this.chosen!.provider.extract(input);
+    // One generation attempt per click. A failed model is cooled down only for
+    // the next explicitly requested extraction, never retried within this one.
+    const chosen = this.chosen!;
+    try { return await chosen.provider.extract(input); }
+    catch (error) {
+      if (error instanceof Error && ['AI_PROVIDER_BUSY', 'AI_MODEL_UNAVAILABLE'].includes(error.message)) {
+        this.cooldowns.set(chosen.model, Date.now() + 10 * 60_000);
+        if (this.chosen === chosen) this.chosen = undefined;
+      }
+      throw error;
+    }
   }
 }
 

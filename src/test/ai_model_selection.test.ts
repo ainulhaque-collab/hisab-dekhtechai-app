@@ -42,3 +42,21 @@ test('No suitable catalog model fails explicitly, without a hidden fallback or g
   });
   await assert.rejects(provider.extract(input()), /AI_MODEL_UNAVAILABLE/); assert.equal(builds, 0);
 });
+
+test('A busy model is skipped on the next explicit request, with one generation per request', async () => {
+  let lists = 0;
+  const attempts: string[] = [];
+  const provider = new AutomaticGeminiEntryProvider('synthetic-key', {
+    list: async () => { lists++; return [model('gemini-3-flash'), model('gemini-2.5-flash')]; },
+    build: name => ({ provider: 'gemini', extract: async media => {
+      attempts.push(name);
+      if (name === 'gemini-3-flash') throw new Error('AI_PROVIDER_BUSY');
+      return { provider: 'gemini', sourceSha256: media.source === 'receipt' ? media.receipt.sha256 : '',
+        draft: validateEntryDraft({ transactionType: 'expense', amountDecimal: '120', currency: 'BDT', merchant: null, transactionDate: null, transactionTime: null, transcript: null, note: '', warnings: [] }) };
+    } }),
+  });
+  await assert.rejects(provider.extract(input()), /AI_PROVIDER_BUSY/);
+  assert.deepEqual(attempts, ['gemini-3-flash']);
+  assert.equal((await provider.extract(input())).draft.amountDecimal, '120.00');
+  assert.deepEqual(attempts, ['gemini-3-flash', 'gemini-2.5-flash']); assert.equal(lists, 1);
+});

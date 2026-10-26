@@ -60,3 +60,12 @@ test('Malformed audio is rejected locally and provider failures never echo crede
   const invalidJson = new GeminiEntryProvider(config, async () => ({ text: 'private malformed response' }));
   await assert.rejects(invalidJson.extract({ source: 'receipt', receipt: receipt(), consentToProcess: true }), /AI_RESPONSE_INVALID/);
 });
+
+test('Google service statuses become fixed safe errors, without leaking response details', async () => {
+  for (const [status, expected] of [[503, 'AI_PROVIDER_BUSY'], [429, 'AI_PROVIDER_QUOTA'], [403, 'AI_PROVIDER_AUTH_ERROR'], [404, 'AI_MODEL_UNAVAILABLE']] as const) {
+    const provider = new GeminiEntryProvider(config, async () => { throw Object.assign(new Error('sensitive synthetic response'), { status }); });
+    await assert.rejects(provider.extract({ source: 'receipt', receipt: receipt(), consentToProcess: true }), error => {
+      assert.equal((error as Error).message, expected); return true;
+    });
+  }
+});
