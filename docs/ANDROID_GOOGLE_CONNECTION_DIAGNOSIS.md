@@ -63,3 +63,7 @@ The first version 7 build passed all 124 tests, TypeScript, Web build, native re
 The owner reports that Continue with Google now proceeds directly to syncing, without displaying the earlier confirmation. This confirms the owner's observed connection/sync flow now works; the exact account, successful-sync timestamp and verified-backup timestamp have not yet been independently checked. Existing Google authorization and a previously bound dataset can explain why account selection/ownership confirmation no longer appears. The absent dialog does not establish that its readability fix has been visually verified.
 
 The owner has been asked to check that the BDT 120 expense remains after the replacement update, that the correct Gmail and successful-sync time appear, and that the phone-created expense arrives in the same-account Web app. Cross-device parity, verified Drive backup and full update retention acceptance remain pending.
+
+The owner subsequently confirmed that a sync timestamp is displayed and the phone-created expense has arrived in the Web app. This establishes owner-observed Android-to-Web record propagation on version 7. It does not establish exact UUID/count/balance parity, reverse propagation, a verified backup or full upgrade retention.
+
+Next manual check: create one BDT 10 test income in the same workspace on Web, note `Web sync test`, save once and confirm arrival on Android. Also check whether the Google Drive Sync panel shows a Verified Drive backup timestamp. Both results remain pending.
