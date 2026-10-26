@@ -130,8 +130,10 @@ export interface JournalTransaction {
   id: UUID;
   workspaceId: UUID;
   transactionType: TransactionType;
-  effectiveDate: string; // YYYY-MM-DD in Asia/Dhaka
+  effectiveDate: string; // YYYY-MM-DD at occurrence; legacy records retain their existing date.
   occurredAtUtc: string; // ISO-8601 UTC
+  occurredTimezoneOffsetMinutes?: number; // Optional for legacy records; offset at occurrence.
+  createdAtUtc?: string; // Actual entry/audit time, distinct from a user-selected occurrence.
   note?: string;
   partyId?: UUID | null; // Associated person/party in business workspace
   reversalOf?: UUID | null; // Pointer to original transaction if reversal/correction

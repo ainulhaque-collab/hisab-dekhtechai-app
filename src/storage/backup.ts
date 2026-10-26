@@ -1,4 +1,6 @@
 import { canonicalJson, computeSha256, computeSha256Sync } from '../sync/canonical';
+import { validateTransactionTime } from '../domain/transactionTime';
+import { validateReceiptBlob } from './receipts';
 import { SYSTEM_ACCOUNTS } from '../contracts/ledger';
 
 export const MAX_BACKUP_BYTES = 40 * 1024 * 1024;
@@ -49,6 +51,10 @@ export function mergeBackup(current: Data, incoming: Data, replaceUntouchedStart
       if (key !== 'preferences' && key !== 'syncDeviceHeads' && (!value || typeof value !== 'object')) throw new Error('BACKUP_INVALID');
       if (key === 'workspaces' && (!owned(value.ownerSubjectHash) || value.id !== id)) throw new Error('BACKUP_OWNER');
       if (key === 'syncOperations' && (!owned(value.ownerHash) || value.operationId !== id)) throw new Error('BACKUP_OWNER');
+      if (key === 'receiptBlobs') {
+        validateReceiptBlob(value);
+        if (value.sha256 !== id) throw new Error('BACKUP_INVALID');
+      }
       if (key === 'syncOperations') {
         for (const op of [value, ...(merged.has(id) ? [merged.get(id)] : [])]) {
           if (op.contentSha256 && op.contentSha256 !== computeSha256Sync(canonicalJson(op.payload))) throw new Error('BACKUP_CHECKSUM');
@@ -86,6 +92,7 @@ export function mergeBackup(current: Data, incoming: Data, replaceUntouchedStart
   }
   for (const [id, tx] of journals) {
     if (tx.id !== id || !ws.has(tx.workspaceId) || !Array.isArray(tx.lines) || tx.lines.length < 2) throw new Error('BACKUP_LEDGER');
+    validateTransactionTime(tx);
     let debit = 0n, credit = 0n; const seen = new Set<string>();
     for (const line of tx.lines) {
       if (!line || seen.has(line.id) || line.transactionId !== id ||
@@ -99,6 +106,10 @@ export function mergeBackup(current: Data, incoming: Data, replaceUntouchedStart
       debit += BigInt(line.debitMinor); credit += BigInt(line.creditMinor);
     }
     if (debit !== credit) throw new Error('BACKUP_LEDGER');
+  }
+  for (const [id, blob] of result.receiptBlobs) {
+    validateReceiptBlob(blob);
+    if (id !== blob.sha256) throw new Error('BACKUP_INVALID');
   }
   for (const [id, line] of lines) {
     if (line.id !== id || !journals.get(line.transactionId)?.lines.some((item: any) => item.id === id)) throw new Error('BACKUP_LEDGER');

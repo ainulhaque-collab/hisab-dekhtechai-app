@@ -23,6 +23,8 @@ import {
   Phone
 } from 'lucide-react';
 import { JournalTransaction, PartyRole } from '../contracts/types';
+import { localDate, transactionTimeLabel } from '../domain/transactionTime';
+import { receiptImageUrl } from '../storage/receipts';
 
 interface HistoryTabProps {
   selectedTransaction?: JournalTransaction | null;
@@ -71,6 +73,7 @@ export const HistoryTab: React.FC<HistoryTabProps> = ({
   const [editCategoryId, setEditCategoryId] = useState('');
   const [editPartyId, setEditPartyId] = useState<string>('');
   const [editEffectiveDate, setEditEffectiveDate] = useState('');
+  const [editEffectiveTime, setEditEffectiveTime] = useState('');
   const [editNote, setEditNote] = useState('');
   const [editError, setEditError] = useState<string | null>(null);
 
@@ -84,6 +87,12 @@ export const HistoryTab: React.FC<HistoryTabProps> = ({
   const accountsMap = useMemo(() => new Map(accounts.map((a) => [a.id, a])), [accounts]);
   const categoriesMap = useMemo(() => new Map(categories.map((c) => [c.id, c])), [categories]);
   const partiesMap = useMemo(() => new Map(parties.map((p) => [p.id, p])), [parties]);
+  const receiptPreview = useMemo(() => {
+    const hash = activeModalTx?.receiptBlobSha256;
+    const blob = hash ? db.getReceiptBlob(hash) : undefined;
+    if (!blob) return null;
+    try { return receiptImageUrl(blob); } catch { return null; }
+  }, [activeModalTx, transactions, db]);
 
   const getRoleLabel = (r: PartyRole) => {
     switch (r) {
@@ -102,7 +111,7 @@ export const HistoryTab: React.FC<HistoryTabProps> = ({
 
   // Filter transactions
   const filteredTransactions = useMemo(() => {
-    const todayStr = new Date().toISOString().slice(0, 10);
+    const todayStr = localDate();
     const now = new Date();
     const currentMonthPrefix = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
 
@@ -179,6 +188,7 @@ export const HistoryTab: React.FC<HistoryTabProps> = ({
     setEditCategoryId(tx.lines.find((l) => l.categoryId)?.categoryId || categories[0]?.id || '');
     setEditPartyId(tx.partyId || '');
     setEditEffectiveDate(tx.effectiveDate);
+    setEditEffectiveTime('');
     setEditNote(tx.note || '');
   };
 
@@ -222,6 +232,7 @@ export const HistoryTab: React.FC<HistoryTabProps> = ({
       await editTransaction(activeModalTx.id, {
         amountMinor: parsedPaisa.toString(),
         effectiveDate: editEffectiveDate,
+        effectiveTime: editEffectiveTime,
         assetAccountId: editAccountId,
         categoryId: editCategoryId,
         partyId: editPartyId || null,
@@ -462,7 +473,7 @@ export const HistoryTab: React.FC<HistoryTabProps> = ({
                       )}
                     </div>
                     <div className="text-[11px] text-slate-500 truncate flex items-center gap-1.5 mt-0.5">
-                      <span>{tx.effectiveDate}</span>
+                      <span>{transactionTimeLabel(tx)}</span>
                       <span>•</span>
                       <span>{primaryAcc?.name || 'Account'}</span>
                       {tx.note && <span className="truncate max-w-[140px] text-slate-400">• {tx.note}</span>}
@@ -532,7 +543,11 @@ export const HistoryTab: React.FC<HistoryTabProps> = ({
                     <span className="text-slate-400 text-[10px] font-medium">
                       {isEn ? 'Date' : 'তারিখ'}
                     </span>
-                    <div className="font-semibold text-slate-800">{activeModalTx.effectiveDate}</div>
+                    <div className="font-semibold text-slate-800">{transactionTimeLabel(activeModalTx)}</div>
+                    {activeModalTx.createdAtUtc && <div className="mt-1 text-[11px] text-slate-500">
+                      {isEn ? 'Recorded: ' : 'এন্ট্রির সময়: '}
+                      {new Date(activeModalTx.createdAtUtc).toLocaleString(isEn ? 'en-GB' : 'bn-BD')}
+                    </div>}
                   </div>
                   <div>
                     <span className="text-slate-400 text-[10px] font-medium">
@@ -543,6 +558,12 @@ export const HistoryTab: React.FC<HistoryTabProps> = ({
                     </div>
                   </div>
 
+                  {activeModalTx.receiptBlobSha256 && <div className="col-span-2 space-y-2">
+                    <span className="text-xs font-semibold text-slate-700">{isEn ? 'Receipt' : 'রসিদ'}</span>
+                    {receiptPreview
+                      ? <img src={receiptPreview} alt={activeModalTx.receiptName || (isEn ? 'Transaction receipt' : 'লেনদেনের রসিদ')} className="max-h-80 w-full rounded-xl object-contain bg-white" />
+                      : <p className="text-xs text-amber-800">{isEn ? 'Receipt is not available on this device yet. Sync with the device holding the original image.' : 'রসিদটি এখনও এই ডিভাইসে নেই। মূল ছবি থাকা ডিভাইসের সঙ্গে সিঙ্ক করুন।'}</p>}
+                  </div>}
                   {/* Associated Member */}
                   {activeModalTx.partyId && partiesMap.get(activeModalTx.partyId) && (
                     <div className="col-span-2 p-2.5 bg-white border border-slate-200 rounded-lg">
@@ -790,6 +811,15 @@ export const HistoryTab: React.FC<HistoryTabProps> = ({
                   />
                 </div>
 
+                <div>
+                  <label htmlFor="edit-transaction-time" className="block text-slate-700 font-semibold mb-1">
+                    {isEn ? 'Change time (optional)' : 'সময় পরিবর্তন (ঐচ্ছিক)'}
+                  </label>
+                  <input id="edit-transaction-time" type="time" value={editEffectiveTime}
+                    onChange={event => setEditEffectiveTime(event.target.value)}
+                    className="w-full px-3 py-2 bg-slate-50 border border-slate-300 rounded-xl focus:bg-white focus:outline-none focus:ring-2 focus:ring-blue-600" />
+                  <p className="mt-1 text-[11px] text-slate-500">{isEn ? 'With the same date, leaving this blank keeps the original time.' : 'তারিখ একই থাকলে সময় খালি রাখলে আগের সময় থাকবে।'}</p>
+                </div>
                 <div>
                   <label className="block text-slate-700 font-semibold mb-1">
                     {isEn ? 'Note / Description' : 'বিবরণ / নোট'}

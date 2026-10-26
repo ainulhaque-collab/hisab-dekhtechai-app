@@ -40,6 +40,8 @@ import {
 } from '../domain/journal';
 import { canonicalJson, computeSha256, computeSha256Sync } from '../sync/canonical';
 import { isDeleteConfirmed } from '../domain/confirmation';
+import { resolveJournalTime, validateTransactionTime } from '../domain/transactionTime';
+import { validateReceiptBlob } from './receipts';
 import { decodeBackup, encodeBackup, mergeBackup } from './backup';
 import {
   createDurableStorageDriver,
@@ -570,10 +572,16 @@ export class LocalDatabase {
    */
   public async commitJournalWithOutbox(
     balanced: BalancedJournal,
-    op: SyncOperation
+    op: SyncOperation,
+    receipt?: ReceiptBlob | null
   ): Promise<UUID> {
     const tx = balanced.transaction;
     const lines = balanced.lines;
+    validateTransactionTime(tx);
+    if (receipt) {
+      validateReceiptBlob(receipt);
+      if (receipt.sha256 !== tx.receiptBlobSha256) throw new Error('Receipt does not match the transaction.');
+    }
 
     // Check if operation was already applied
     if (this.state.appliedOperations.has(op.operationId)) {
@@ -612,6 +620,11 @@ export class LocalDatabase {
       // Advance device sequence head if this device generated it
       if (op.deviceId === this.state.deviceIdentity.deviceId) {
         this.state.syncDeviceHeads.set(op.deviceId, op.seq);
+      }
+
+      if (receipt && !this.state.receiptBlobs.has(receipt.sha256)) {
+        this.state.receiptBlobs.set(receipt.sha256, { ...receipt });
+        this.queueSyncOp('receipt.attach', receipt.sha256, { blob: receipt });
       }
 
       await this.commitTransaction();
@@ -1346,6 +1359,7 @@ export class LocalDatabase {
     cmd: {
       amountMinor: string;
       effectiveDate: string;
+      effectiveTime?: string;
       assetAccountId: UUID;
       categoryId: UUID;
       note?: string;
@@ -1358,6 +1372,9 @@ export class LocalDatabase {
 
     const opId = generateUUID();
     const effectivePartyId = cmd.partyId !== undefined ? cmd.partyId : origTx.partyId || null;
+    const timing = resolveJournalTime(!cmd.effectiveTime && cmd.effectiveDate === origTx.effectiveDate && origTx.occurredTimezoneOffsetMinutes !== undefined
+      ? { effectiveDate: origTx.effectiveDate, occurredAtUtc: origTx.occurredAtUtc, occurredTimezoneOffsetMinutes: origTx.occurredTimezoneOffsetMinutes }
+      : { effectiveDate: cmd.effectiveDate, effectiveTime: cmd.effectiveTime });
 
     // 1. Build reversal journal
     const reversalBalanced = buildReversalJournal(
@@ -1374,9 +1391,11 @@ export class LocalDatabase {
         assetAccountId: cmd.assetAccountId,
         revenueCategoryId: cmd.categoryId,
         amountMinor: cmd.amountMinor,
-        effectiveDate: cmd.effectiveDate,
+        ...timing,
         note: cmd.note,
         partyId: effectivePartyId,
+        receiptBlobSha256: origTx.receiptBlobSha256,
+        receiptName: origTx.receiptName,
         opId,
       });
     } else {
@@ -1385,9 +1404,11 @@ export class LocalDatabase {
         assetAccountId: cmd.assetAccountId,
         expenseCategoryId: cmd.categoryId,
         amountMinor: cmd.amountMinor,
-        effectiveDate: cmd.effectiveDate,
+        ...timing,
         note: cmd.note,
         partyId: effectivePartyId,
+        receiptBlobSha256: origTx.receiptBlobSha256,
+        receiptName: origTx.receiptName,
         opId,
       });
     }
@@ -1692,8 +1713,15 @@ export class LocalDatabase {
   }
 
   public async storeReceiptBlob(blob: ReceiptBlob): Promise<void> {
-    this.state.receiptBlobs.set(blob.sha256, blob);
-    await this.persist();
+    validateReceiptBlob(blob);
+    await this.beginTransaction();
+    try {
+      if (!this.state.receiptBlobs.has(blob.sha256)) {
+        this.state.receiptBlobs.set(blob.sha256, { ...blob });
+        this.queueSyncOp('receipt.attach', blob.sha256, { blob });
+      }
+      await this.commitTransaction();
+    } catch (error) { await this.rollbackTransaction(); throw error; }
   }
 
   // --- Snapshot and Non-destructive Migration Safeguards ---

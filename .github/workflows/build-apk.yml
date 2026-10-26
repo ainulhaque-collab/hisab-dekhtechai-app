@@ -9,6 +9,7 @@ on:
       - 'stabilization/**'
       - 'development/**'
       - 'fix/**'
+      - 'codex/**'
     tags:
       - 'v*'
   pull_request:

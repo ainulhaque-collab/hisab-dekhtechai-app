@@ -8,9 +8,14 @@ on:
       - 'stabilization/**'
       - 'development/**'
       - 'fix/**'
+      - 'codex/**'
   pull_request:
     branches:
       - '**'
+  workflow_dispatch:
+
+permissions:
+  contents: read
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}

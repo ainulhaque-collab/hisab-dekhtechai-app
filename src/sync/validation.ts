@@ -3,6 +3,7 @@ import { BalancedJournal, SyncOperation } from '../contracts/types';
 import { SYSTEM_ACCOUNTS } from '../contracts/ledger';
 import { assertJournalBalanced } from '../domain/journal';
 import { canonicalJson } from './canonical';
+import { validateTransactionTime } from '../domain/transactionTime';
 
 export class SyncDependencyError extends Error {
   constructor() { super('Synchronization is waiting for referenced records.'); }
@@ -32,6 +33,7 @@ export function requireDependencies(db: LocalDatabase, op: SyncOperation): void 
 export function validateIncomingJournal(db: LocalDatabase, balanced: BalancedJournal): void {
   if (!balanced?.transaction?.id || !Array.isArray(balanced.lines)) throw new Error('Invalid synchronized journal.');
   const tx = balanced.transaction, state = db.getRawState();
+  validateTransactionTime(tx);
   if (!state.workspaces.has(tx.workspaceId)) throw new SyncDependencyError();
   assertJournalBalanced(balanced.lines);
   const ids = new Set<string>();

@@ -21,6 +21,7 @@ import { canonicalJson, computeSha256 } from './canonical';
 import { generateUUID } from '../domain/journal';
 import { GoogleUserProfile, computeOwnerSubjectHash } from '../auth/googleAuth';
 import { workspaceMedia } from '../storage/workspaceMedia';
+import { validateReceiptBlob } from '../storage/receipts';
 import { ensureCloudBackup, getCloudBackupReceipt, verifyCloudBackup } from './cloudBackup';
 import { buildReversalJournal } from '../domain/journal';
 import { requireDependencies, SyncDependencyError, validateIncomingJournal } from './validation';
@@ -1055,8 +1056,9 @@ export class SyncOrchestrator {
         break;
 
       case 'receipt.attach':
-        if (!payload.blob?.sha256) throw new Error('Invalid receipt attachment.');
-        this.db.getRawState().receiptBlobs.set(payload.blob.sha256, payload.blob);
+        validateReceiptBlob(payload.blob);
+        if (op.entityId !== payload.blob.sha256) throw new Error('Receipt identity does not match its contents.');
+        if (!this.db.getReceiptBlob(payload.blob.sha256)) this.db.getRawState().receiptBlobs.set(payload.blob.sha256, payload.blob);
         break;
 
       default:

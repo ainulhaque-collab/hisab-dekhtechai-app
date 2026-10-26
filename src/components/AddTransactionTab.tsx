@@ -13,10 +13,12 @@ import {
   buildTransferJournal,
   generateUUID
 } from '../domain/journal';
-import { SyncOperation, Category, PartyRole } from '../contracts/types';
+import { SyncOperation, Category, PartyRole, ReceiptBlob } from '../contracts/types';
 import { canonicalJson, computeSha256 } from '../sync/canonical';
 import { AccountPickerModal } from './AccountPickerModal';
 import { soundService } from '../services/soundService';
+import { resolveJournalTime } from '../domain/transactionTime';
+import { createReceiptBlob } from '../storage/receipts';
 import {
   TrendingDown,
   TrendingUp,
@@ -110,16 +112,14 @@ export const AddTransactionTab: React.FC<AddTransactionTabProps> = ({ onSuccess 
   const [categoryId, setCategoryId] = useState('');
   const [subCategoryId, setSubCategoryId] = useState('');
   const [partyId, setPartyId] = useState<string>('');
-  const [effectiveDate, setEffectiveDate] = useState(() => {
-    const d = new Date();
-    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(
-      d.getDate()
-    ).padStart(2, '0')}`;
-  });
+  const [effectiveDate, setEffectiveDate] = useState('');
+  const [effectiveTime, setEffectiveTime] = useState('');
   const [note, setNote] = useState('');
   const [feeStr, setFeeStr] = useState('');
   const [receiptName, setReceiptName] = useState<string | null>(null);
-  const [receiptBase64, setReceiptBase64] = useState<string | null>(null);
+  const [receiptBlob, setReceiptBlob] = useState<ReceiptBlob | null>(null);
+  const [isReceiptLoading, setIsReceiptLoading] = useState(false);
+  const receiptSelection = useRef(0);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
   const submissionInFlight = useRef(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -175,21 +175,20 @@ export const AddTransactionTab: React.FC<AddTransactionTabProps> = ({ onSuccess 
     setAmountStr(val);
   };
 
-  const handleReceiptUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+  const handleReceiptUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
-
-    if (file.size > 2 * 1024 * 1024) {
-      setErrorMsg(isEn ? 'Receipt image size must be under 2 MB' : 'রসিদের আকার ২ মেগাবাইটের কম হতে হবে');
-      return;
+    e.target.value = '';
+    const selection = ++receiptSelection.current;
+    setReceiptName(null); setReceiptBlob(null); setIsReceiptLoading(true);
+    try {
+      const blob = await createReceiptBlob(file);
+      if (selection === receiptSelection.current) { setReceiptName(blob.fileName); setReceiptBlob(blob); setErrorMsg(null); }
+    } catch {
+      if (selection === receiptSelection.current) setErrorMsg(isEn ? 'Choose a valid JPEG, PNG or WebP receipt up to 2 MB.' : 'সর্বোচ্চ ২ মেগাবাইটের সঠিক JPEG, PNG বা WebP রসিদ বেছে নিন।');
+    } finally {
+      if (selection === receiptSelection.current) setIsReceiptLoading(false);
     }
-
-    setReceiptName(file.name);
-    const reader = new FileReader();
-    reader.onload = () => {
-      setReceiptBase64(reader.result as string);
-    };
-    reader.readAsDataURL(file);
   };
 
   // Clean, single-field Category / Sub-Category creation
@@ -266,11 +265,12 @@ export const AddTransactionTab: React.FC<AddTransactionTabProps> = ({ onSuccess 
       }
     }
 
-    if (submissionInFlight.current) return;
+    if (submissionInFlight.current || isReceiptLoading) return;
     submissionInFlight.current = true;
     setIsSubmitting(true);
 
     try {
+      const timing = resolveJournalTime({ effectiveDate, effectiveTime });
       const opId = generateUUID();
       let balancedJournal;
       let opPayload: any;
@@ -286,11 +286,11 @@ export const AddTransactionTab: React.FC<AddTransactionTabProps> = ({ onSuccess 
           assetAccountId: accountId,
           expenseCategoryId: effectiveCategoryId,
           amountMinor: parsedPaisa.toString(),
-          effectiveDate,
+          ...timing,
           note: note.trim() || undefined,
           opId,
           partyId: effectivePartyId,
-          receiptBlobSha256: receiptBase64 ? 'receipt-sha256-mock' : null,
+          receiptBlobSha256: receiptBlob?.sha256 || null,
           receiptName,
         });
         opType = 'journal.post';
@@ -300,7 +300,7 @@ export const AddTransactionTab: React.FC<AddTransactionTabProps> = ({ onSuccess 
           assetAccountId: accountId,
           expenseCategoryId: effectiveCategoryId,
           amountMinor: parsedPaisa.toString(),
-          effectiveDate,
+          effectiveDate: timing.effectiveDate,
           note: note.trim() || undefined,
           partyId: effectivePartyId,
         };
@@ -310,11 +310,11 @@ export const AddTransactionTab: React.FC<AddTransactionTabProps> = ({ onSuccess 
           assetAccountId: accountId,
           revenueCategoryId: effectiveCategoryId,
           amountMinor: parsedPaisa.toString(),
-          effectiveDate,
+          ...timing,
           note: note.trim() || undefined,
           opId,
           partyId: effectivePartyId,
-          receiptBlobSha256: receiptBase64 ? 'receipt-sha256-mock' : null,
+          receiptBlobSha256: receiptBlob?.sha256 || null,
           receiptName,
         });
         opType = 'journal.post';
@@ -324,7 +324,7 @@ export const AddTransactionTab: React.FC<AddTransactionTabProps> = ({ onSuccess 
           assetAccountId: accountId,
           revenueCategoryId: effectiveCategoryId,
           amountMinor: parsedPaisa.toString(),
-          effectiveDate,
+          effectiveDate: timing.effectiveDate,
           note: note.trim() || undefined,
           partyId: effectivePartyId,
         };
@@ -346,10 +346,12 @@ export const AddTransactionTab: React.FC<AddTransactionTabProps> = ({ onSuccess 
           amountMinor: parsedPaisa.toString(),
           feeMinor: feePaisa.toString(),
           feeExpenseCategoryId: 'cat-transfer-fee',
-          effectiveDate,
+          ...timing,
           note: note.trim() || (isEn ? 'Account Transfer' : 'অ্যাকাউন্ট স্থানান্তর'),
           opId,
           partyId: effectivePartyId,
+          receiptBlobSha256: receiptBlob?.sha256 || null,
+          receiptName,
         });
         opType = 'journal.post';
         opPayload = {
@@ -359,7 +361,7 @@ export const AddTransactionTab: React.FC<AddTransactionTabProps> = ({ onSuccess 
           toAssetAccountId: toAccountId,
           amountMinor: parsedPaisa.toString(),
           feeMinor: feePaisa.toString(),
-          effectiveDate,
+          effectiveDate: timing.effectiveDate,
           note: note.trim() || (isEn ? 'Account Transfer' : 'অ্যাকাউন্ট স্থানান্তর'),
           partyId: effectivePartyId,
         };
@@ -382,7 +384,7 @@ export const AddTransactionTab: React.FC<AddTransactionTabProps> = ({ onSuccess 
         contentSha256,
       };
 
-      await db.commitJournalWithOutbox(balancedJournal, op);
+      await db.commitJournalWithOutbox(balancedJournal, op, receiptBlob);
       await db.waitForPendingWrites();
       soundService.playTransactionSuccess(type);
       refreshState();
@@ -395,7 +397,9 @@ export const AddTransactionTab: React.FC<AddTransactionTabProps> = ({ onSuccess 
       setFeeStr('');
       setPartyId('');
       setReceiptName(null);
-      setReceiptBase64(null);
+      setEffectiveDate('');
+      setEffectiveTime('');
+      setReceiptBlob(null);
 
       setTimeout(() => {
         setSuccessToast(false);
@@ -729,17 +733,29 @@ export const AddTransactionTab: React.FC<AddTransactionTabProps> = ({ onSuccess 
           {/* Date & Note */}
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
             <div>
-              <label className="block text-slate-700 font-semibold mb-1">
-                {isEn ? 'Date' : 'তারিখ'}
+              <label htmlFor="transaction-date" className="block text-slate-700 font-semibold mb-1">
+                {isEn ? 'Date (optional)' : 'তারিখ (ঐচ্ছিক)'}
               </label>
               <input
                 type="date"
+                id="transaction-date"
                 value={effectiveDate}
                 onChange={(e) => setEffectiveDate(e.target.value)}
                 className="w-full px-3 py-2 bg-slate-50 border border-slate-300 rounded-xl text-xs font-medium focus:bg-white focus:outline-none focus:ring-2 focus:ring-blue-600"
               />
             </div>
 
+            <div>
+              <label htmlFor="transaction-time" className="block text-slate-700 font-semibold mb-1">
+                {isEn ? 'Time (optional)' : 'সময় (ঐচ্ছিক)'}
+              </label>
+              <input id="transaction-time" type="time" value={effectiveTime}
+                onChange={event => setEffectiveTime(event.target.value)}
+                className="w-full px-3 py-2 bg-slate-50 border border-slate-300 rounded-xl text-xs font-medium focus:bg-white focus:outline-none focus:ring-2 focus:ring-blue-600" />
+            </div>
+            <p className="sm:col-span-2 text-[11px] leading-relaxed text-slate-500">
+              {isEn ? 'Leave blank to use the date and time when you save. Selected values are kept; an unselected time uses the save-time clock.' : 'খালি রাখলে সেভ করার সময়ের তারিখ ও সময় বসবে। বেছে দেওয়া তারিখ/সময় থাকবে; সময় না বাছলে সেভের সময় বসবে।'}
+            </p>
             <div>
               <label className="block text-slate-700 font-semibold mb-1">
                 {isEn ? 'Note (Optional)' : 'বিবরণ (ঐচ্ছিক)'}
@@ -756,6 +772,7 @@ export const AddTransactionTab: React.FC<AddTransactionTabProps> = ({ onSuccess 
 
           {/* Receipt Attachment */}
           <div>
+            {isReceiptLoading && <p role="status" className="mb-2 text-xs text-slate-500">{isEn ? 'Checking receipt…' : 'রসিদ যাচাই হচ্ছে…'}</p>}
             <label className="block text-slate-700 font-semibold mb-1">
               {isEn ? 'Receipt Photo (Optional)' : 'রসিদের ছবি (ঐচ্ছিক)'}
             </label>
@@ -767,7 +784,7 @@ export const AddTransactionTab: React.FC<AddTransactionTabProps> = ({ onSuccess 
                 </span>
                 <input
                   type="file"
-                  accept="image/*"
+                  accept="image/jpeg,image/png,image/webp"
                   onChange={handleReceiptUpload}
                   className="hidden"
                 />
@@ -779,7 +796,9 @@ export const AddTransactionTab: React.FC<AddTransactionTabProps> = ({ onSuccess 
                   type="button"
                   onClick={() => {
                     setReceiptName(null);
-                    setReceiptBase64(null);
+                    receiptSelection.current++;
+                    setReceiptBlob(null);
+                    setIsReceiptLoading(false);
                   }}
                   className="p-1 hover:bg-slate-200 rounded text-slate-600"
                 >
@@ -792,7 +811,7 @@ export const AddTransactionTab: React.FC<AddTransactionTabProps> = ({ onSuccess 
           {/* Submit Button */}
           <button
             type="submit"
-            disabled={isSubmitting}
+            disabled={isSubmitting || isReceiptLoading}
             className="w-full py-3 bg-slate-900 hover:bg-slate-800 active:scale-[0.99] text-white rounded-xl text-sm font-bold shadow-xs transition-all flex items-center justify-center gap-2 disabled:opacity-50"
           >
             <Check className="w-4 h-4" />
