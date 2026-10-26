@@ -1,8 +1,6 @@
 import { EntryDraft } from '../../src/ai/entryDraft';
-import { ReceiptBlob } from '../../src/contracts/types';
-
-export type ExtractionInput = { source: 'receipt'; receipt: ReceiptBlob; consentToProcess: boolean }
-  | { source: 'voice'; dataBase64: string; mimeType: string; consentToProcess: boolean };
+import { ExtractionInput } from '../../src/ai/media';
+export type { ExtractionInput } from '../../src/ai/media';
 
 /** This boundary permits another provider later without changing financial contracts. */
 export interface EntryExtractionProvider {

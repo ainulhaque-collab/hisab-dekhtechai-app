@@ -16,7 +16,7 @@ export function useDialog(open: boolean, panel: RefObject<HTMLElement | null>, o
       if (!top()) return;
       if (e.key === 'Escape') back(e);
       if (e.key === 'Tab') {
-        const nodes = Array.from(panel.current?.querySelectorAll<HTMLElement>('input:not(:disabled), button:not(:disabled), [tabindex="0"]') || []);
+        const nodes = Array.from(panel.current?.querySelectorAll<HTMLElement>('input:not(:disabled), textarea:not(:disabled), select:not(:disabled), button:not(:disabled), [tabindex="0"]') || []);
         if (!nodes.length) return;
         const index = nodes.indexOf(document.activeElement as HTMLElement);
         e.preventDefault(); nodes[(index + (e.shiftKey ? -1 : 1) + nodes.length) % nodes.length]?.focus();

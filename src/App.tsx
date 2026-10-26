@@ -138,7 +138,7 @@ function MainApp() {
           {activeTab === 'accounts' && <AccountsTab />}
 
           {activeTab === 'add' && (
-            <AddTransactionTab onSuccess={() => setActiveTab('home')} />
+            <AddTransactionTab key={currentWorkspace.id} onSuccess={() => setActiveTab('home')} />
           )}
 
           {activeTab === 'history' && (

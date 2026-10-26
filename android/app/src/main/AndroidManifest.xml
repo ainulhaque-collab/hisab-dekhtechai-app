@@ -4,6 +4,9 @@
     <!-- Network permissions for Google OAuth & Google Drive Sync -->
     <uses-permission android:name="android.permission.INTERNET" />
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
+    <!-- Only requested after the user taps Record in AI entry. -->
+    <uses-permission android:name="android.permission.RECORD_AUDIO" />
+    <uses-permission android:name="android.permission.MODIFY_AUDIO_SETTINGS" />
     
     <!-- Offline App Lock & Biometrics -->
     <uses-permission android:name="android.permission.USE_BIOMETRIC" />

@@ -1,0 +1,14 @@
+import dotenv from 'dotenv';
+import express from 'express';
+import { createAIRouter } from './ai/http';
+import { aiOptionsFromEnvironment } from './ai/runtime';
+
+dotenv.config({ path: ['.env.ai.local', '.env'], quiet: true });
+const options = aiOptionsFromEnvironment(process.env, true);
+const app = express();
+app.disable('x-powered-by');
+app.use('/api/ai', createAIRouter(options));
+// Loopback only; Vite proxies local requests. No public unauthenticated server.
+app.listen(3001, '127.0.0.1', () => {
+  console.log(`Hisab AI API listening on 127.0.0.1:3001; configured=${options.enabled}`);
+});

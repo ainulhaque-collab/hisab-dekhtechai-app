@@ -42,6 +42,7 @@ test('Gemini uses structured image/audio inputs and returns a source-bound revie
   assert.equal(result.provider, 'gemini'); assert.equal(result.sourceSha256, blob.sha256);
   assert.equal(result.draft.requiresConfirmation, true);
   assert.equal(requests[0].config.responseMimeType, 'application/json');
+  assert.equal(requests[0].config.httpOptions.retryOptions.attempts, 1);
   assert.equal(requests[0].contents[0].parts[1].inlineData.mimeType, 'image/png');
   await provider.extract({ source: 'voice', dataBase64: btoa('synthetic audio'), mimeType: 'audio/webm;codecs=opus', consentToProcess: true });
   assert.equal(requests[1].contents[0].parts[1].inlineData.mimeType, 'audio/webm');

@@ -19,6 +19,8 @@ import { AccountPickerModal } from './AccountPickerModal';
 import { soundService } from '../services/soundService';
 import { resolveJournalTime } from '../domain/transactionTime';
 import { createReceiptBlob } from '../storage/receipts';
+import { AIEntryModal } from './AIEntryModal';
+import { ReviewedEntry } from '../ai/review';
 import {
   TrendingDown,
   TrendingUp,
@@ -35,7 +37,8 @@ import {
   Users,
   Briefcase,
   ChevronDown,
-  Wallet
+  Wallet,
+  Sparkles
 } from 'lucide-react';
 
 interface AddTransactionTabProps {
@@ -73,9 +76,15 @@ export const AddTransactionTab: React.FC<AddTransactionTabProps> = ({ onSuccess 
   );
   const [showAccountPicker, setShowAccountPicker] = useState(false);
   const [showToAccountPicker, setShowToAccountPicker] = useState(false);
+  const [isAIForm, setIsAIForm] = useState(false);
 
   // Synchronize selected account when activeAccounts or currentWorkspace changes
   useEffect(() => {
+    if (isAIForm) {
+      if (accountId && !activeAccounts.some(account => account.id === accountId)) setAccountId('');
+      if (toAccountId && (!activeAccounts.some(account => account.id === toAccountId) || toAccountId === accountId)) setToAccountId('');
+      return;
+    }
     if (activeAccounts.length > 0) {
       if (!accountId || !activeAccounts.some((a) => a.id === accountId)) {
         setAccountId(activeAccounts[0].id);
@@ -92,7 +101,7 @@ export const AddTransactionTab: React.FC<AddTransactionTabProps> = ({ onSuccess 
       setAccountId('');
       setToAccountId('');
     }
-  }, [activeAccounts, currentWorkspace?.id]);
+  }, [activeAccounts, currentWorkspace?.id, isAIForm]);
 
   const getAccountBalance = (accId: string): string => {
     const summary = dashboardData?.accountSummaries?.find((s) => s.accountId === accId);
@@ -124,6 +133,16 @@ export const AddTransactionTab: React.FC<AddTransactionTabProps> = ({ onSuccess 
   const submissionInFlight = useRef(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [successToast, setSuccessToast] = useState(false);
+  const [showAIEntry, setShowAIEntry] = useState(false);
+
+  const applyAIEntry = (entry: ReviewedEntry, image: ReceiptBlob | null) => {
+    setIsAIForm(true);
+    setType(entry.type); setAmountStr(entry.amount); setNote(entry.note);
+    setEffectiveDate(entry.date); setEffectiveTime(entry.time);
+    setAccountId(''); setToAccountId(''); setPartyId(''); setFeeStr('');
+    setSubCategoryId(''); setReceiptBlob(image); setReceiptName(image?.fileName || null);
+    setErrorMsg(null); setShowAIEntry(false);
+  };
 
   // Simplified Category Modal: 'category' (top-level) or 'subcategory' (child of categoryId)
   const [categoryModalMode, setCategoryModalMode] = useState<'category' | 'subcategory' | null>(null);
@@ -400,6 +419,7 @@ export const AddTransactionTab: React.FC<AddTransactionTabProps> = ({ onSuccess 
       setEffectiveDate('');
       setEffectiveTime('');
       setReceiptBlob(null);
+      setIsAIForm(false);
 
       setTimeout(() => {
         setSuccessToast(false);
@@ -434,6 +454,13 @@ export const AddTransactionTab: React.FC<AddTransactionTabProps> = ({ onSuccess 
         <h1 className="text-base font-bold text-slate-900 mb-4 tracking-tight">
           {isEn ? 'New Transaction' : 'নতুন লেনদেন'}
         </h1>
+
+        <button type="button" disabled={isSubmitting || isReceiptLoading} onClick={() => setShowAIEntry(true)}
+          className="mb-4 flex min-h-11 w-full items-center justify-center gap-2 rounded-xl border border-blue-200 bg-blue-50 px-3 py-2.5 text-xs font-semibold text-blue-700 disabled:opacity-40">
+          <Sparkles className="h-4 w-4" />{isEn ? 'Fill from receipt or voice with AI' : 'রিসিপ্ট বা ভয়েস থেকে AI দিয়ে লিখুন'}
+        </button>
+
+        {showAIEntry && <AIEntryModal key={currentWorkspace?.id} onClose={() => setShowAIEntry(false)} onApply={applyAIEntry} />}
 
         {/* Transaction Type Segmented Switcher */}
         <div className="grid grid-cols-3 gap-1 p-1 bg-slate-100/90 rounded-xl mb-4 text-xs font-semibold">
@@ -1004,7 +1031,7 @@ export const AddTransactionTab: React.FC<AddTransactionTabProps> = ({ onSuccess 
         selectedAccountId={accountId}
         onSelectAccount={(id) => {
           setAccountId(id);
-          if (type === 'transfer' && id === toAccountId) {
+          if (!isAIForm && type === 'transfer' && id === toAccountId) {
             const nextTo = activeAccounts.find((a) => a.id !== id);
             if (nextTo) setToAccountId(nextTo.id);
           }
