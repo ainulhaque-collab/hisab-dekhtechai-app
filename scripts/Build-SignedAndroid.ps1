@@ -72,7 +72,10 @@ function Invoke-BuildStep([string]$executable, [string[]]$arguments) {
 Push-Location $workspaceRoot
 try {
     Invoke-BuildStep 'npm.cmd' @('run', 'lint')
-    Invoke-BuildStep 'npm.cmd' @('test')
+    if ($LowMemory) {
+        # The default parallel Node test runner can exhaust memory on small Windows PCs.
+        Invoke-BuildStep 'npx.cmd' @('tsx', '--test', '--test-concurrency=1', 'src/test/*.test.ts')
+    } else { Invoke-BuildStep 'npm.cmd' @('test') }
     Invoke-BuildStep 'npm.cmd' @('run', 'build')
     Invoke-BuildStep 'npx.cmd' @('cap', 'sync', 'android')
     Push-Location (Join-Path $workspaceRoot 'android')
