@@ -110,8 +110,10 @@ export function AIEntryModal({ onClose, onApply }: {
     locked.current = true; setBusy(true); setError('');
     let active: VoiceCapture | null = null;
     try {
+      if (!sameOwner()) throw new Error('AI_AUTH_REQUIRED');
       await requestAIMediaPermissions(['microphone']);
-      if (!mounted.current || !sameOwner()) return;
+      if (!mounted.current) return;
+      if (!sameOwner()) throw new Error('AI_OWNER_MISMATCH');
       setPermissionHint(false);
       active = new VoiceCapture(); capture.current = active;
       const blob = await active.start(() => { if (mounted.current) setRecording(true); });
@@ -125,9 +127,15 @@ export function AIEntryModal({ onClose, onApply }: {
     }
   };
   const openCamera = async () => {
-    if (locked.current) return;
+    if (locked.current || !allowed || unavailable) return;
     locked.current = true;
-    try { await requestAIMediaPermissions(['camera']); if (mounted.current && sameOwner()) { setPermissionHint(false); setError(''); cameraInput.current?.click(); } }
+    try {
+      if (!sameOwner()) throw new Error('AI_AUTH_REQUIRED');
+      await requestAIMediaPermissions(['camera']);
+      if (!mounted.current) return;
+      if (!sameOwner()) throw new Error('AI_OWNER_MISMATCH');
+      setPermissionHint(false); setError(''); cameraInput.current?.click();
+    }
     catch (failure) { if (mounted.current) { setPermissionHint(true); setError(aiErrorMessage(failure, en)); } }
     finally { locked.current = false; }
   };

@@ -4,3 +4,10 @@
 -keep class com.hisabdekhtechai.app.BackupFilesPlugin { *; }
 -keep class com.hisabdekhtechai.app.BiometricUnlockPlugin { *; }
 -keep class com.hisabdekhtechai.app.AIMediaAccessPlugin { *; }
+# PluginHandle stores runtime annotation instances used by permission aliases.
+# Keeping only application plugins left its annotation field/getter optimized to
+# null in the signed release (checkPermissions returned an empty map). Preserve
+# this small reflection boundary, including nested permission/default metadata.
+-keepattributes RuntimeVisibleAnnotations,AnnotationDefault
+-keep class com.getcapacitor.PluginHandle { *; }
+-keep @interface com.getcapacitor.annotation.** { *; }

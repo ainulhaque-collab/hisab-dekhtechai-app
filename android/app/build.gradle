@@ -22,7 +22,7 @@ android {
         targetSdk 36
         versionCode requestedVersion ? requestedVersion.toInteger() : 2
         versionName System.getenv('HISAB_ANDROID_VERSION_NAME') ?: "1.0.1-dev"
-        testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
+        testInstrumentationRunner "com.hisabdekhtechai.app.MediaBridgeProbe"
         vectorDrawables {
             useSupportLibrary true
         }
@@ -51,6 +51,8 @@ android {
             debuggable true
         }
     }
+    // Opt-in, read-only bridge instrumentation against the actual minified APK.
+    if (project.hasProperty('hisabMediaProbe')) testBuildType 'release'
 
     compileOptions {
         sourceCompatibility JavaVersion.VERSION_21
@@ -85,8 +87,10 @@ dependencies {
     implementation 'com.google.android.gms:play-services-auth:22.0.0'
     implementation project(':capacitor-android')
     testImplementation 'junit:junit:4.13.2'
-    androidTestImplementation 'androidx.test.ext:junit:1.1.5'
-    androidTestImplementation 'androidx.test.espresso:espresso-core:3.5.1'
+    if (!project.hasProperty('hisabMediaProbe')) {
+        androidTestImplementation 'androidx.test.ext:junit:1.1.5'
+        androidTestImplementation 'androidx.test.espresso:espresso-core:3.5.1'
+    }
 }
 
 // Include generated native plugin dependencies, including the existing SQLite driver.

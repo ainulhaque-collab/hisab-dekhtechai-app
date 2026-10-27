@@ -2,7 +2,8 @@
 param(
     [Parameter(Mandatory = $true)][ValidateRange(3, 2100000000)][int]$VersionCode,
     [Parameter(Mandatory = $true)][ValidatePattern('^[A-Za-z0-9][A-Za-z0-9.+-]{0,63}$')][string]$VersionName,
-    [switch]$LowMemory
+    [switch]$LowMemory,
+    [switch]$BridgeTestOnly
 )
 $ErrorActionPreference = 'Stop'
 if ([Security.Principal.WindowsIdentity]::GetCurrent().Name -match '\\CodexSandbox') {
@@ -27,7 +28,7 @@ foreach ($path in @($storePath, $credentialsPath, $publicPath)) {
 }
 if (Test-Path -LiteralPath $evidencePath) {
     $previousBuild = Get-Content -LiteralPath $evidencePath -Raw | ConvertFrom-Json
-    if ($VersionCode -le $previousBuild.versionCode) { throw 'Choose a versionCode greater than the last successful signed build.' }
+    if (!$BridgeTestOnly -and $VersionCode -le $previousBuild.versionCode) { throw 'Choose a versionCode greater than the last successful signed build.' }
 }
 $javaPath = if ($env:JAVA_HOME) { Join-Path $env:JAVA_HOME 'bin/java.exe' } else { (Get-Command java -ErrorAction SilentlyContinue).Source }
 if (!$javaPath -or !(Test-Path -LiteralPath $javaPath)) { throw 'JDK 21 is missing. Install JDK 21 and set JAVA_HOME before building an APK.' }
@@ -71,6 +72,20 @@ function Invoke-BuildStep([string]$executable, [string[]]$arguments) {
 }
 Push-Location $workspaceRoot
 try {
+    if ($BridgeTestOnly) {
+        Push-Location (Join-Path $workspaceRoot 'android')
+        try {
+            Invoke-BuildStep $gradleExecutable @(':app:assembleReleaseAndroidTest', '-PhisabMediaProbe', '--no-daemon', '--no-watch-fs', '--max-workers=1', '-Dorg.gradle.jvmargs=-Xmx1024m -XX:ActiveProcessorCount=2 -Dfile.encoding=UTF-8')
+        } finally { Pop-Location }
+        $probePath = Join-Path $workspaceRoot 'android/app/build/outputs/apk/androidTest/release/app-release-androidTest.apk'
+        $probeSignature = & $signer verify --print-certs $probePath
+        if ($LASTEXITCODE -ne 0) { throw 'Probe signature verification failed.' }
+        $publicInfo = Get-Content -LiteralPath $publicPath -Raw | ConvertFrom-Json
+        if (!($probeSignature -match [regex]::Escape(($publicInfo.certificateSha256 -replace ':', '').ToLowerInvariant()))) {
+            throw 'Probe signing identity must match the installed release.'
+        }
+        return
+    }
     Invoke-BuildStep 'npm.cmd' @('run', 'lint')
     if ($LowMemory) {
         # The default parallel Node test runner can exhaust memory on small Windows PCs.
