@@ -3,6 +3,7 @@ import { Settings, UserRound, BriefcaseBusiness, Cloud, Download, ChevronRight, 
 import { useApp } from '../context/AppContext';
 import { SecuritySettings } from './SecuritySettings';
 import { SoundSettings } from './SoundSettings';
+import { AIPrivacySettings } from './AIPrivacySettings';
 import { ModalShell, secondaryButton } from './ModalShell';
 
 interface SettingsModalProps {
@@ -41,7 +42,7 @@ export function SettingsModal({ isOpen, onClose, onOpenProfileModal, onOpenSyncM
         {row(<Download className="h-4 w-4" />, en ? 'Backup files & restore' : 'ব্যাকআপ ফাইল ও রিস্টোর', en ? 'Save a local copy, import a backup or restore a recovery point' : 'নিজের কাছে কপি রাখুন, ব্যাকআপ আমদানি বা রিকভারি পয়েন্ট থেকে ফিরিয়ে আনুন', () => navigate(onOpenSnapshotModal))}
         <p className="rounded-xl bg-blue-50 p-3 text-[11px] leading-relaxed text-blue-800">{en ? 'Drive sync and a downloaded backup are separate protections. A local recovery point stays on this device.' : 'ড্রাইভ সিঙ্ক ও ডাউনলোড করা ব্যাকআপ আলাদা সুরক্ষা। স্থানীয় রিকভারি পয়েন্ট শুধু এই ডিভাইসে থাকে।'}</p>
       </>}
-      {section === 'privacy' && <div className="space-y-4 rounded-2xl bg-slate-50 p-4 text-xs leading-relaxed text-slate-500"><h3 className="font-bold text-slate-800">{en ? 'Your records stay yours' : 'আপনার হিসাব আপনারই থাকে'}</h3><p>{en ? 'Financial records are stored locally. Google Drive sync uses your private app storage after you grant access. Workspace photos stay on this device.' : 'হিসাব প্রথমে ডিভাইসে সংরক্ষিত হয়। আপনার অনুমতির পর গুগল ড্রাইভের ব্যক্তিগত অ্যাপ স্টোরেজে সিঙ্ক হয়। খাতার ছবি এই ডিভাইসে থাকে।'}</p><p>{en ? 'Biometric authentication is managed by Android. Fingerprints and face images are never collected or backed up by this app.' : 'বায়োমেট্রিক যাচাই অ্যান্ড্রয়েড পরিচালনা করে। এই অ্যাপ আঙুলের ছাপ বা মুখের ছবি সংগ্রহ বা ব্যাকআপ করে না।'}</p><button className={secondaryButton} onClick={() => setSection('backup')}>{en ? 'Manage backups' : 'ব্যাকআপ পরিচালনা'}</button></div>}
+      {section === 'privacy' && <><AIPrivacySettings owner={db.getIdentity()?.ownerSubjectHash || ''} en={en} /><div className="space-y-4 rounded-2xl bg-slate-50 p-4 text-xs leading-relaxed text-slate-500"><h3 className="font-bold text-slate-800">{en ? 'Your records stay yours' : 'আপনার হিসাব আপনারই থাকে'}</h3><p>{en ? 'Financial records are stored locally. Google Drive sync uses your private app storage after you grant access. Workspace photos and receipts are included in your private sync and backups.' : 'হিসাব প্রথমে ডিভাইসে সংরক্ষিত হয়। আপনার অনুমতির পর গুগল ড্রাইভের ব্যক্তিগত অ্যাপ স্টোরেজে সিঙ্ক হয়। খাতার ছবি ও রিসিপ্ট ব্যক্তিগত সিঙ্ক এবং ব্যাকআপে থাকে।'}</p><p>{en ? 'Biometric authentication is managed by Android. Fingerprints and face images are never collected or backed up by this app.' : 'বায়োমেট্রিক যাচাই অ্যান্ড্রয়েড পরিচালনা করে। এই অ্যাপ আঙুলের ছাপ বা মুখের ছবি সংগ্রহ বা ব্যাকআপ করে না।'}</p><button className={secondaryButton} onClick={() => setSection('backup')}>{en ? 'Manage backups' : 'ব্যাকআপ পরিচালনা'}</button></div></>}
     </div>
   </ModalShell>;
 }

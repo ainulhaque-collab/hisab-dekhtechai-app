@@ -4,7 +4,9 @@
     <!-- Network permissions for Google OAuth & Google Drive Sync -->
     <uses-permission android:name="android.permission.INTERNET" />
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
-    <!-- Only requested after the user taps Record in AI entry. -->
+    <!-- Requested when enabling AI capture; media starts only on a user action. -->
+    <uses-permission android:name="android.permission.CAMERA" />
+    <uses-feature android:name="android.hardware.camera" android:required="false" />
     <uses-permission android:name="android.permission.RECORD_AUDIO" />
     <uses-permission android:name="android.permission.MODIFY_AUDIO_SETTINGS" />
     
@@ -13,6 +15,10 @@
 
     <!-- Optional Notification permission for Budget Alerts & Sync Status -->
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+
+    <queries>
+        <intent><action android:name="android.media.action.IMAGE_CAPTURE" /></intent>
+    </queries>
 
     <application
         android:allowBackup="false"

@@ -2,6 +2,7 @@
 .env*
 !.env.example
 .codex-remote-attachments/
+.codex-attachments/
 *.log
 .local-signing/
 .local-signing-sandbox-incomplete/

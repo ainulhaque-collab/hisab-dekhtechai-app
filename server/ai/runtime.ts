@@ -23,8 +23,14 @@ export function aiOptionsFromEnvironment(environment: Record<string, string | un
       perDay: positive(environment.AI_PER_DAY, DEFAULT_AI_LIMITS.perDay),
       globalPerDay: positive(environment.AI_GLOBAL_PER_DAY, DEFAULT_AI_LIMITS.globalPerDay) };
     options.provider = createEntryProvider(environment);
-    if (environment.AI_REDIS_REST_URL && environment.AI_REDIS_REST_TOKEN)
-      options.budget = new RedisAIBudget(environment.AI_REDIS_REST_URL, environment.AI_REDIS_REST_TOKEN, limits);
+    // Marketplace names are accepted as complete pairs; never mix URL/token sources.
+    const redis = [
+      [environment.AI_REDIS_REST_URL, environment.AI_REDIS_REST_TOKEN],
+      [environment.UPSTASH_REDIS_REST_URL, environment.UPSTASH_REDIS_REST_TOKEN],
+      [environment.KV_REST_API_URL, environment.KV_REST_API_TOKEN],
+    ].find(pair => pair[0] && pair[1]);
+    if (redis)
+      options.budget = new RedisAIBudget(redis[0]!, redis[1]!, limits);
     else if (allowLocalDevelopment && environment.NODE_ENV !== 'production' && environment.AI_LOCAL_DEVELOPMENT === 'true')
       options.budget = new DevelopmentAIBudget(limits);
     else return options;

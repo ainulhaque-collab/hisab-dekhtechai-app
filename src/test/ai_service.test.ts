@@ -126,6 +126,18 @@ test('Client and server round trip requires real identity and returns only a rev
   assert.throws(() => aiEndpoint('http://remote.example/', 'https://localhost'), /AI_NOT_CONFIGURED/);
 });
 
+test('Vercel Marketplace Redis credentials enable shared quotas only as complete pairs', () => {
+  const config = { AI_ENABLED: 'true', GEMINI_API_KEY: 'synthetic-key', GEMINI_MODEL: 'gemini-synthetic-model',
+    GOOGLE_OAUTH_CLIENT_IDS: clientId, AI_ALLOWED_ORIGINS: 'https://localhost' };
+  for (const names of [['UPSTASH_REDIS_REST_URL', 'UPSTASH_REDIS_REST_TOKEN'], ['KV_REST_API_URL', 'KV_REST_API_TOKEN']]) {
+    const configured = aiOptionsFromEnvironment({ ...config, [names[0]]: 'https://redis.example', [names[1]]: 'synthetic-token' });
+    assert.equal(configured.enabled, true);
+    assert.ok(configured.budget instanceof RedisAIBudget);
+    assert.equal(aiOptionsFromEnvironment({ ...config, [names[0]]: 'https://redis.example' }).enabled, false);
+  }
+  assert.equal(aiOptionsFromEnvironment({ ...config, AI_REDIS_REST_URL: 'https://other.example', UPSTASH_REDIS_REST_TOKEN: 'synthetic-token' }).enabled, false);
+});
+
 test('Stale Google identity after an AI response cannot fill the form', async () => {
   let currentOwner = owner;
   const identity = { isTestMode: () => false, getValidAccessToken: async () => 'synthetic', getProfile: () => ({ subjectHash: currentOwner }) };

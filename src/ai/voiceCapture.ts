@@ -1,6 +1,6 @@
 import { MAX_AUDIO_BYTES } from './media';
 
-/** One short, user-started recording. No permission prompt on app/modal load. */
+/** One short, user-started recording. Never starts a sensor on app/modal load. */
 export class VoiceCapture {
   private stream?: MediaStream;
   private recorder?: MediaRecorder;

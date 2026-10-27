@@ -8,7 +8,8 @@ export interface AIIdentity {
 }
 export interface ExtractionResult { draft: EntryDraft; provider: string; sourceSha256: string; requestId: string }
 
-export function aiEndpoint(base: string, pageOrigin: string): string {
+export function aiEndpoint(base: string, pageOrigin: string, native = false): string {
+  if (native && !base) throw new Error('AI_NOT_CONFIGURED');
   if (!base) return `${pageOrigin}/api/ai/extract`;
   const url = new URL(base);
   if (url.protocol !== 'https:' || url.username || url.password || url.search || url.hash || url.pathname !== '/') throw new Error('AI_NOT_CONFIGURED');
@@ -67,6 +68,8 @@ export function aiErrorMessage(error: unknown, isEn: boolean) {
   const code = error instanceof Error ? error.message : '';
   const messages: Record<string, [string, string]> = {
     AI_NOT_CONFIGURED: ['AI entry is not enabled yet. You can still enter transactions manually.', 'AI এন্ট্রি এখনও চালু হয়নি। সাধারণভাবে লেনদেন যোগ করতে পারবেন।'],
+    AI_MEDIA_PERMISSION_DENIED: ['Allow camera or microphone access in phone settings, or choose a gallery image.', 'ফোনের সেটিংসে ক্যামেরা বা মাইক্রোফোনের অনুমতি দিন, অথবা গ্যালারি থেকে ছবি বেছে নিন।'],
+    AI_IMAGE_INVALID: ['Choose a clear JPEG, PNG or WebP image up to 12 MB and 32 megapixels.', 'সর্বোচ্চ ১২ মেগাবাইট ও ৩২ মেগাপিক্সেলের পরিষ্কার JPEG, PNG বা WebP ছবি বেছে নিন।'],
     AI_AUTH_REQUIRED: ['Connect your Google account, then try again.', 'Google অ্যাকাউন্ট সংযুক্ত করে আবার চেষ্টা করুন।'],
     AI_OWNER_MISMATCH: ['The Google account changed. Close this draft and use the original account.', 'Google অ্যাকাউন্ট বদলেছে। খসড়াটি বন্ধ করে আগের অ্যাকাউন্ট ব্যবহার করুন।'],
     AI_LIMIT_REACHED: ['The AI usage limit has been reached. Try later or enter manually.', 'AI ব্যবহারের সীমা শেষ হয়েছে। পরে চেষ্টা করুন অথবা নিজে এন্ট্রি দিন।'],

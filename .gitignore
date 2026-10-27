@@ -16,6 +16,7 @@ android/app/src/main/assets/public/
 .qa-test-output.txt
 .qa-auto-output.txt
 .codex-remote-attachments/
+.codex-attachments/
 
 # Private Android signing identity. Never commit these or machine-bound passwords.
 .local-signing/

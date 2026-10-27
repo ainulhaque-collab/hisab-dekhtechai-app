@@ -20,7 +20,7 @@ import { soundService } from '../services/soundService';
 import { resolveJournalTime } from '../domain/transactionTime';
 import { createReceiptBlob } from '../storage/receipts';
 import { AIEntryModal } from './AIEntryModal';
-import { ReviewedEntry } from '../ai/review';
+import { EntryDraft } from '../ai/entryDraft';
 import {
   TrendingDown,
   TrendingUp,
@@ -134,12 +134,19 @@ export const AddTransactionTab: React.FC<AddTransactionTabProps> = ({ onSuccess 
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [successToast, setSuccessToast] = useState(false);
   const [showAIEntry, setShowAIEntry] = useState(false);
+  const [aiDraft, setAIDraft] = useState<EntryDraft | null>(null);
+  const [aiTypeMissing, setAITypeMissing] = useState(false);
+  const [aiCurrency, setAICurrency] = useState('BDT');
 
-  const applyAIEntry = (entry: ReviewedEntry, image: ReceiptBlob | null) => {
+  const applyAIEntry = (entry: EntryDraft, image: ReceiptBlob | null) => {
     setIsAIForm(true);
-    setType(entry.type); setAmountStr(entry.amount); setNote(entry.note);
-    setEffectiveDate(entry.date); setEffectiveTime(entry.time);
-    setAccountId(''); setToAccountId(''); setPartyId(''); setFeeStr('');
+    setAIDraft(entry); setAITypeMissing(entry.transactionType === 'unknown');
+    setAICurrency(entry.currency === 'unknown' ? '' : entry.currency);
+    if (entry.transactionType !== 'unknown') setType(entry.transactionType);
+    setAmountStr(entry.amountDecimal || ''); setNote([entry.merchant, entry.note].filter(Boolean).join(' · ').slice(0, 1000));
+    setEffectiveDate(entry.transactionDate || ''); setEffectiveTime(entry.transactionTime || '');
+    // Keep the user's current wallet. Model output has no authority to choose accounts.
+    setPartyId(''); setFeeStr('');
     setSubCategoryId(''); setReceiptBlob(image); setReceiptName(image?.fileName || null);
     setErrorMsg(null); setShowAIEntry(false);
   };
@@ -250,6 +257,11 @@ export const AddTransactionTab: React.FC<AddTransactionTabProps> = ({ onSuccess 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setErrorMsg(null);
+
+    if (isAIForm && (aiTypeMissing || aiCurrency !== 'BDT')) {
+      setErrorMsg(isEn ? 'Choose the transaction type and BDT currency in the form.' : 'ফর্মে লেনদেনের ধরন ও BDT মুদ্রা বেছে নিন।');
+      return;
+    }
 
     if (!currentWorkspace) {
       setErrorMsg(isEn ? 'No active workspace found' : 'কোনো সক্রিয় খাতা পাওয়া যায়নি');
@@ -420,6 +432,7 @@ export const AddTransactionTab: React.FC<AddTransactionTabProps> = ({ onSuccess 
       setEffectiveTime('');
       setReceiptBlob(null);
       setIsAIForm(false);
+      setAIDraft(null); setAITypeMissing(false); setAICurrency('BDT');
 
       setTimeout(() => {
         setSuccessToast(false);
@@ -466,7 +479,7 @@ export const AddTransactionTab: React.FC<AddTransactionTabProps> = ({ onSuccess 
         <div className="grid grid-cols-3 gap-1 p-1 bg-slate-100/90 rounded-xl mb-4 text-xs font-semibold">
           <button
             type="button"
-            onClick={() => setType('expense')}
+            onClick={() => { setType('expense'); setAITypeMissing(false); }}
             className={`py-2 rounded-lg flex items-center justify-center gap-1.5 transition-all ${
               type === 'expense'
                 ? 'bg-white text-rose-600 shadow-2xs'
@@ -479,7 +492,7 @@ export const AddTransactionTab: React.FC<AddTransactionTabProps> = ({ onSuccess 
 
           <button
             type="button"
-            onClick={() => setType('income')}
+            onClick={() => { setType('income'); setAITypeMissing(false); }}
             className={`py-2 rounded-lg flex items-center justify-center gap-1.5 transition-all ${
               type === 'income'
                 ? 'bg-white text-emerald-600 shadow-2xs'
@@ -492,7 +505,7 @@ export const AddTransactionTab: React.FC<AddTransactionTabProps> = ({ onSuccess 
 
           <button
             type="button"
-            onClick={() => setType('transfer')}
+            onClick={() => { setType('transfer'); setAITypeMissing(false); }}
             className={`py-2 rounded-lg flex items-center justify-center gap-1.5 transition-all ${
               type === 'transfer'
                 ? 'bg-white text-slate-900 shadow-2xs'
@@ -521,6 +534,13 @@ export const AddTransactionTab: React.FC<AddTransactionTabProps> = ({ onSuccess 
         )}
 
         <form onSubmit={handleSubmit} className="space-y-4 text-xs">
+          {aiDraft && <div className="space-y-2 rounded-xl bg-blue-50 p-3 text-blue-900">
+            <p>{isEn ? 'AI filled these details. Edit anything you need, then Save once.' : 'AI তথ্য বসিয়েছে। প্রয়োজন হলে ঠিক করে একবার Save করুন।'}</p>
+            {aiTypeMissing && <p role="alert" className="text-amber-900">{isEn ? 'Choose Expense, Income or Transfer above.' : 'উপরে খরচ, জমা বা স্থানান্তর বেছে নিন।'}</p>}
+            {aiDraft.currency === 'unknown' && <label className="block">{isEn ? 'Choose currency' : 'মুদ্রা বেছে নিন'}<AppSelect value={aiCurrency} onChange={event => setAICurrency(event.target.value)} className="mt-1 w-full rounded-lg border bg-white p-2"><option value="">{isEn ? 'Not identified' : 'বোঝা যায়নি'}</option><option value="BDT">BDT — ৳</option></AppSelect></label>}
+            {aiDraft.transcript && <details><summary className="cursor-pointer font-semibold">{isEn ? 'What AI heard' : 'AI যা শুনেছে'}</summary><p className="mt-2 whitespace-pre-wrap break-words">{aiDraft.transcript}</p></details>}
+            {aiDraft.warnings.length > 0 && <ul className="list-disc space-y-1 pl-4 text-amber-900">{aiDraft.warnings.map((warning, index) => <li key={index}>{warning}</li>)}</ul>}
+          </div>}
           {/* Amount Input */}
           <div>
             <div className="flex items-center justify-between mb-1">
