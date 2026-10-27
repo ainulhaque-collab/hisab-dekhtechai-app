@@ -69,6 +69,13 @@ export function aiErrorMessage(error: unknown, isEn: boolean) {
   const messages: Record<string, [string, string]> = {
     AI_NOT_CONFIGURED: ['AI entry is not enabled yet. You can still enter transactions manually.', 'AI এন্ট্রি এখনও চালু হয়নি। সাধারণভাবে লেনদেন যোগ করতে পারবেন।'],
     AI_MEDIA_PERMISSION_DENIED: ['Allow camera or microphone access in phone settings, or choose a gallery image.', 'ফোনের সেটিংসে ক্যামেরা বা মাইক্রোফোনের অনুমতি দিন, অথবা গ্যালারি থেকে ছবি বেছে নিন।'],
+    AI_MEDIA_PERMISSION_UNAVAILABLE: ['Camera or microphone permission could not be checked. Close and reopen this screen. If it repeats, update the app.', 'ক্যামেরা বা মাইক্রোফোনের অনুমতি যাচাই করা যাচ্ছে না। স্ক্রিনটি বন্ধ করে আবার খুলুন। আবার হলে অ্যাপ আপডেট করুন।'],
+    AI_MICROPHONE_NOT_FOUND: ['No microphone was found. Connect a microphone or choose a receipt image.', 'মাইক্রোফোন পাওয়া যায়নি। মাইক্রোফোন সংযোগ দিন অথবা রিসিপ্টের ছবি বেছে নিন।'],
+    AI_MICROPHONE_BUSY: ['Microphone access failed. Close any other recorder or call, check the phone microphone privacy switch, then try again.', 'মাইক্রোফোন ব্যবহার করা যাচ্ছে না। অন্য রেকর্ডিং বা কল বন্ধ করুন, ফোনের মাইক্রোফোন privacy switch পরীক্ষা করে আবার চেষ্টা করুন।'],
+    AI_RECORDING_CANCELLED: ['Recording stopped when this screen closed or the app moved to the background. Tap Speak to start again.', 'স্ক্রিন বন্ধ বা অ্যাপ পেছনে যাওয়ায় রেকর্ড বন্ধ হয়েছে। আবার শুরু করতে কথা বলার বাটন চাপুন।'],
+    AI_RECORDING_FAILED: ['Voice recording could not start. Check microphone access and try again.', 'ভয়েস রেকর্ড শুরু করা যায়নি। মাইক্রোফোনের অনুমতি দেখে আবার চেষ্টা করুন।'],
+    AI_RECORDING_UNAVAILABLE: ['This device could not start an audio recorder. You can use a receipt image instead.', 'এই ডিভাইসে অডিও রেকর্ডার চালু করা যায়নি। রিসিপ্টের ছবি ব্যবহার করতে পারবেন।'],
+    AI_AUDIO_INVALID: ['No usable voice was recorded. Speak briefly, then stop and try again.', 'ব্যবহারযোগ্য ভয়েস পাওয়া যায়নি। সংক্ষেপে কথা বলে রেকর্ড থামান ও আবার চেষ্টা করুন।'],
     AI_IMAGE_INVALID: ['Choose a clear JPEG, PNG or WebP image up to 12 MB and 32 megapixels.', 'সর্বোচ্চ ১২ মেগাবাইট ও ৩২ মেগাপিক্সেলের পরিষ্কার JPEG, PNG বা WebP ছবি বেছে নিন।'],
     AI_AUTH_REQUIRED: ['Connect your Google account, then try again.', 'Google অ্যাকাউন্ট সংযুক্ত করে আবার চেষ্টা করুন।'],
     AI_OWNER_MISMATCH: ['The Google account changed. Close this draft and use the original account.', 'Google অ্যাকাউন্ট বদলেছে। খসড়াটি বন্ধ করে আগের অ্যাকাউন্ট ব্যবহার করুন।'],

@@ -72,7 +72,8 @@ export function AIEntryModal({ onClose, onApply }: {
     locked.current = true; setBusy(true); setError('');
     try {
       if (!sameOwner()) throw new Error('AI_AUTH_REQUIRED');
-      try { await requestAIMediaPermissions(); } catch { if (mounted.current) setPermissionHint(true); }
+      try { await requestAIMediaPermissions(); if (mounted.current) setPermissionHint(false); }
+      catch (failure) { if (mounted.current) { setPermissionHint(true); setError(aiErrorMessage(failure, en)); } }
       if (!mounted.current || !sameOwner()) return;
       await (await aiConsentStore()).allow(ownerAtOpen.current);
       if (mounted.current && sameOwner()) setAllowed(true);
@@ -111,13 +112,13 @@ export function AIEntryModal({ onClose, onApply }: {
     try {
       await requestAIMediaPermissions(['microphone']);
       if (!mounted.current || !sameOwner()) return;
+      setPermissionHint(false);
       active = new VoiceCapture(); capture.current = active;
       const blob = await active.start(() => { if (mounted.current) setRecording(true); });
       if (mounted.current) setRecording(false);
       await send({ source: 'voice', mimeType: blob.type, dataBase64: encodeAudioBytes(new Uint8Array(await blob.arrayBuffer())), consentToProcess: true }, null);
     } catch (failure) {
-      if (mounted.current) setError(failure instanceof Error && failure.message.startsWith('AI_RECORDING')
-        ? (en ? 'Recording stopped. Allow microphone access and try again.' : 'রেকর্ড বন্ধ হয়েছে। মাইক্রোফোনের অনুমতি দিয়ে আবার চেষ্টা করুন।') : aiErrorMessage(failure, en));
+      if (mounted.current) setError(aiErrorMessage(failure, en));
     } finally {
       active?.cancel(); capture.current = null; locked.current = false;
       if (mounted.current) { setBusy(false); setRecording(false); }
@@ -126,8 +127,8 @@ export function AIEntryModal({ onClose, onApply }: {
   const openCamera = async () => {
     if (locked.current) return;
     locked.current = true;
-    try { await requestAIMediaPermissions(['camera']); if (mounted.current && sameOwner()) cameraInput.current?.click(); }
-    catch { if (mounted.current) setPermissionHint(true); }
+    try { await requestAIMediaPermissions(['camera']); if (mounted.current && sameOwner()) { setPermissionHint(false); setError(''); cameraInput.current?.click(); } }
+    catch (failure) { if (mounted.current) { setPermissionHint(true); setError(aiErrorMessage(failure, en)); } }
     finally { locked.current = false; }
   };
   return <ModalShell title={en ? 'Add with AI' : 'AI দিয়ে এন্ট্রি'} icon={<Sparkles className="h-5 w-5" />}

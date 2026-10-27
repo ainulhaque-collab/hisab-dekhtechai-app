@@ -3,3 +3,4 @@
 -keep class com.hisabdekhtechai.app.NativeGoogleDrivePlugin { *; }
 -keep class com.hisabdekhtechai.app.BackupFilesPlugin { *; }
 -keep class com.hisabdekhtechai.app.BiometricUnlockPlugin { *; }
+-keep class com.hisabdekhtechai.app.AIMediaAccessPlugin { *; }

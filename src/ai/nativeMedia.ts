@@ -1,16 +1,10 @@
 import { Capacitor, registerPlugin } from '@capacitor/core';
+import { ensureMediaPermissions, MediaPermission, MediaPermissionBridge } from './mediaPermissions';
 
-interface MediaPermissions {
-  checkPermissions(): Promise<{ camera: string; microphone: string }>;
-  requestPermissions(options: { permissions: string[] }): Promise<{ camera: string; microphone: string }>;
-}
-const media = registerPlugin<MediaPermissions>('AIMediaAccess');
+const media = registerPlugin<MediaPermissionBridge>('AIMediaAccess');
 
 /** Permission checks never start the camera or microphone. Gallery uses the system picker. */
-export async function requestAIMediaPermissions(permissions = ['camera', 'microphone']) {
+export async function requestAIMediaPermissions(permissions: MediaPermission[] = ['camera', 'microphone']) {
   if (!Capacitor.isNativePlatform()) return;
-  const current = await media.checkPermissions();
-  const missing = permissions.filter(key => current[key as keyof typeof current] !== 'granted');
-  const result = missing.length ? await media.requestPermissions({ permissions: missing }) : current;
-  if (permissions.some(key => result[key as keyof typeof result] !== 'granted')) throw new Error('AI_MEDIA_PERMISSION_DENIED');
+  await ensureMediaPermissions(media, permissions);
 }

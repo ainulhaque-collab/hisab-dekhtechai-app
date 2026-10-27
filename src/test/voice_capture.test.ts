@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { VoiceCapture } from '../ai/voiceCapture';
+import { aiErrorMessage } from '../ai/client';
 
 function recording() {
   let stops = 0;
@@ -37,4 +38,30 @@ test('Closing an active recording rejects it and does not leave the microphone r
   const capture = new VoiceCapture(async () => fake.stream, () => fake.recorder);
   const result = capture.start(() => capture.cancel());
   await assert.rejects(result, /AI_RECORDING_CANCELLED/); assert.ok(fake.stopped() >= 1);
+});
+
+test('OS microphone denial, missing hardware and busy capture are safe actionable recording failures', async () => {
+  for (const [name, code] of [['NotAllowedError', 'AI_MEDIA_PERMISSION_DENIED'], ['NotFoundError', 'AI_MICROPHONE_NOT_FOUND'],
+    ['NotReadableError', 'AI_MICROPHONE_BUSY'], ['SecurityError', 'AI_MEDIA_PERMISSION_DENIED']] as const) {
+    const capture = new VoiceCapture(async () => { throw new DOMException('private OS detail', name); });
+    await assert.rejects(capture.start(() => assert.fail('must not record')), error => {
+      assert.equal((error as Error).message, code);
+      assert.doesNotMatch(aiErrorMessage(error, true), /temporarily unavailable|private OS/); return true;
+    });
+  }
+});
+
+test('Recorder construction failure releases every acquired microphone track', async () => {
+  const fake = recording();
+  const capture = new VoiceCapture(async () => fake.stream, () => { throw new DOMException('private codec detail', 'NotSupportedError'); });
+  await assert.rejects(capture.start(() => assert.fail('must not start')), /AI_RECORDING_UNAVAILABLE/);
+  assert.ok(fake.stopped() >= 1);
+});
+
+test('Closing while an OS microphone prompt later rejects remains cancellation', async () => {
+  let deny!: (error: Error) => void;
+  const capture = new VoiceCapture(() => new Promise((_resolve, reject) => { deny = reject; }));
+  const result = capture.start(() => assert.fail('must not start'));
+  const rejected = assert.rejects(result, /AI_RECORDING_CANCELLED/);
+  capture.cancel(); deny(new DOMException('private prompt detail', 'NotAllowedError')); await rejected;
 });

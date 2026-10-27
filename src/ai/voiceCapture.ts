@@ -1,5 +1,16 @@
 import { MAX_AUDIO_BYTES } from './media';
 
+function captureFailure(error: unknown, fallback: string): Error {
+  const name = error instanceof Error ? error.name : '';
+  const code = error instanceof Error ? error.message : '';
+  if (['AI_RECORDING_CANCELLED', 'AI_RECORDING_FAILED', 'AI_AUDIO_INVALID'].includes(code)) return new Error(code);
+  if (['NotAllowedError', 'PermissionDeniedError', 'SecurityError'].includes(name)) return new Error('AI_MEDIA_PERMISSION_DENIED');
+  if (['NotFoundError', 'DevicesNotFoundError'].includes(name)) return new Error('AI_MICROPHONE_NOT_FOUND');
+  if (['NotReadableError', 'TrackStartError', 'AbortError'].includes(name)) return new Error('AI_MICROPHONE_BUSY');
+  if (name === 'NotSupportedError') return new Error('AI_RECORDING_UNAVAILABLE');
+  return new Error(fallback);
+}
+
 /** One short, user-started recording. Never starts a sensor on app/modal load. */
 export class VoiceCapture {
   private stream?: MediaStream;
@@ -14,7 +25,8 @@ export class VoiceCapture {
   async start(onStarted: () => void): Promise<Blob> {
     if (this.cancelled || this.started) throw new Error('AI_RECORDING_CANCELLED');
     this.started = true;
-    this.stream = await this.getStream();
+    try { this.stream = await this.getStream(); }
+    catch (failure) { throw this.cancelled ? new Error('AI_RECORDING_CANCELLED') : captureFailure(failure, 'AI_RECORDING_FAILED'); }
     if (this.cancelled) { this.release(); throw new Error('AI_RECORDING_CANCELLED'); }
     try {
       this.recorder = this.makeRecorder(this.stream);
@@ -38,7 +50,7 @@ export class VoiceCapture {
         this.timer = setTimeout(() => this.stop(), 45_000);
         onStarted();
       });
-    } catch (error) { this.release(); throw error; }
+    } catch (error) { this.release(); throw captureFailure(error, 'AI_RECORDING_FAILED'); }
   }
   stop() { if (this.recorder?.state === 'recording' || this.recorder?.state === 'paused') this.recorder.stop(); }
   cancel() {
