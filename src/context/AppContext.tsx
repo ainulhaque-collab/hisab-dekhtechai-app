@@ -30,6 +30,7 @@ import {
   PartyRole
 } from '../contracts/types';
 import { soundService, SoundPreferences } from '../services/soundService';
+import { migrateLegacyWorkspaceImages } from '../storage/workspaceMediaMigration';
 
 export interface DeviceProfile {
   id: string;
@@ -259,6 +260,8 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     setStorageReady(false);
     db.init().then(async () => {
       if (!simulation) { db.setDeviceIdentity(initialDevice.id, initialDevice.name); await db.persist(); }
+      if (!simulation) await migrateLegacyWorkspaceImages(db)
+        .catch(() => console.warn('Previous workspace photos remain safe locally; their sync copy will retry on reconnect.'));
       if (isMounted) {
         db.getDurabilityInfo().then((info) => {
           if (isMounted) setDurabilityInfo(info);

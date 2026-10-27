@@ -7,11 +7,20 @@ export type PaisaString = string; // Integer minor units represented as string e
 
 export type WorkspaceKind = 'personal' | 'business';
 
+/** Private, non-financial workspace media. A null image retains its removal revision. */
+export interface WorkspaceImage {
+  dataUrl: string | null;
+  sha256: string | null;
+  version: number;
+  revisionId: UUID;
+}
+
 export interface Workspace {
   id: UUID;
   ownerSubjectHash: string;
   name: string;
   description?: string;
+  image?: WorkspaceImage;
   kind: WorkspaceKind;
   currency: 'BDT';
   archivedAt?: string | null;

@@ -1,6 +1,7 @@
 import { canonicalJson, computeSha256, computeSha256Sync } from '../sync/canonical';
 import { validateTransactionTime } from '../domain/transactionTime';
 import { validateReceiptBlob } from './receipts';
+import { mergeWorkspaceImage, validateWorkspaceImage } from './workspaceImages';
 import { SYSTEM_ACCOUNTS } from '../contracts/ledger';
 
 export const MAX_BACKUP_BYTES = 40 * 1024 * 1024;
@@ -50,6 +51,7 @@ export function mergeBackup(current: Data, incoming: Data, replaceUntouchedStart
       const [id, value] = entry; seen.add(id);
       if (key !== 'preferences' && key !== 'syncDeviceHeads' && (!value || typeof value !== 'object')) throw new Error('BACKUP_INVALID');
       if (key === 'workspaces' && (!owned(value.ownerSubjectHash) || value.id !== id)) throw new Error('BACKUP_OWNER');
+      if (key === 'workspaces' && value.image !== undefined) validateWorkspaceImage(value.image);
       if (key === 'syncOperations' && (!owned(value.ownerHash) || value.operationId !== id)) throw new Error('BACKUP_OWNER');
       if (key === 'receiptBlobs') {
         validateReceiptBlob(value);
@@ -71,8 +73,13 @@ export function mergeBackup(current: Data, incoming: Data, replaceUntouchedStart
           merged.get(id).openingBalanceMinor !== value.openingBalanceMinor) throw new Error('BACKUP_CONFLICT');
       if (!replaceUntouchedStarters && key === 'accounts' && merged.has(id) &&
           (merged.get(id).classification || 'asset') !== (value.classification || 'asset')) throw new Error('BACKUP_CONFLICT');
+      const previousWorkspace = key === 'workspaces' ? merged.get(id) : undefined;
       if (!merged.has(id) || (replaceUntouchedStarters && ['workspaces', 'accounts', 'categories', 'parties'].includes(key))) merged.set(id, key === 'syncOutbox' && value.uploadedStatus === 'uploading'
         ? { ...value, uploadedStatus: 'pending', nextAttemptAt: null } : value);
+      if (key === 'workspaces') {
+        const image = mergeWorkspaceImage(previousWorkspace?.image, value.image);
+        if (image) merged.set(id, { ...merged.get(id), image });
+      }
     }
     result[key] = Array.from(merged);
   }
@@ -81,6 +88,7 @@ export function mergeBackup(current: Data, incoming: Data, replaceUntouchedStart
   const lines = new Map<string, any>(result.journalLines), ops = new Map<string, any>(result.syncOperations);
   for (const entity of ws.values()) {
     if (typeof entity.name !== 'string' || !['personal', 'business'].includes(entity.kind) || entity.currency !== 'BDT') throw new Error('BACKUP_INVALID');
+    if (entity.image !== undefined) validateWorkspaceImage(entity.image);
   }
   for (const [, account] of result.accounts) {
     if (typeof account.name !== 'string' || typeof account.openingBalanceMinor !== 'string' || !/^-?\d+$/.test(account.openingBalanceMinor)) throw new Error('BACKUP_INVALID');
@@ -120,6 +128,8 @@ export function mergeBackup(current: Data, incoming: Data, replaceUntouchedStart
   for (const op of ops.values()) {
     if (op.protocolVersion !== 1 || typeof op.deviceId !== 'string' || !op.deviceId ||
         !Number.isSafeInteger(op.seq) || op.seq < 1 || !op.payload || typeof op.payload !== 'object') throw new Error('BACKUP_INVALID');
+    const image = op.type === 'workspace.create' ? op.payload.workspace?.image : op.type === 'workspace.update' ? op.payload.image : undefined;
+    if (image !== undefined) validateWorkspaceImage(image);
   }
   if (!Array.isArray(incoming.appliedOperations || [])) throw new Error('BACKUP_INVALID');
   result.appliedOperations = [...new Set([...(current.appliedOperations || []), ...(incoming.appliedOperations || [])])];

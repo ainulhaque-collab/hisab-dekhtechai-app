@@ -36,7 +36,7 @@ export function SnapshotModal({ isOpen, onClose }: { isOpen: boolean; onClose: (
       </div>}
       <div className="space-y-3 rounded-2xl border border-blue-100 bg-blue-50/40 p-4">
         <h3 className="text-sm font-bold">{en ? 'A copy you can take with you' : 'আপনার কাছে রাখার কপি'}</h3>
-        <p className="text-xs leading-relaxed text-slate-500">{en ? 'Includes all workspaces, accounts, journals and pending sync records. Files are not encrypted; keep them private. Workspace photos and device security settings are stored separately.' : 'সব খাতা, অ্যাকাউন্ট, লেনদেন ও পেন্ডিং সিঙ্ক এতে থাকবে। ফাইল এনক্রিপ্ট করা নয়—নিজের কাছে নিরাপদে রাখুন। খাতার ছবি ও ডিভাইসের নিরাপত্তা সেটিংস আলাদা থাকে।'}</p>
+        <p className="text-xs leading-relaxed text-slate-500">{en ? 'Includes all workspaces, saved workspace photos, accounts, journals and pending sync records. Files are not encrypted; keep them private. Device security settings stay separate.' : 'সব খাতা, সংরক্ষিত খাতার ছবি, অ্যাকাউন্ট, লেনদেন ও পেন্ডিং সিঙ্ক এতে থাকবে। ফাইল এনক্রিপ্ট করা নয়—নিজের কাছে নিরাপদে রাখুন। ডিভাইসের নিরাপত্তা সেটিংস আলাদা থাকে।'}</p>
         <button type="button" disabled={busy} className={`${primaryButton} w-full`} onClick={() => run(async () => saveBackupFile(await db.exportBackupFile()),
           usesNativeBackupFiles() ? (en ? 'Backup file saved.' : 'ব্যাকআপ ফাইল সংরক্ষিত হয়েছে।') : (en ? 'Backup sent to your browser downloads. Check Downloads to find the file.' : 'ব্যাকআপ ব্রাউজারের ডাউনলোডে পাঠানো হয়েছে। Downloads-এ ফাইলটি দেখুন।'))}>
           <Download className="h-4 w-4" />{busy ? (en ? 'Working…' : 'কাজ হচ্ছে…') : (en ? 'Save backup file' : 'ব্যাকআপ ফাইল সেভ করুন')}

@@ -28,7 +28,8 @@ export async function optimizeWorkspaceImage(file: File): Promise<string> {
   } finally { URL.revokeObjectURL(url); }
 }
 
-/** Separate private durable asset store. Images never enter journal snapshots or Drive batches. */
+/** Legacy private device store, retained intact during migration to replicated
+ * workspace image metadata. New edits use the main database transaction/outbox. */
 export class WorkspaceMediaStore {
   private ready?: Promise<DurableStorageDriver>;
   constructor(private driver?: DurableStorageDriver) {}

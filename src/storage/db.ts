@@ -42,6 +42,7 @@ import { canonicalJson, computeSha256, computeSha256Sync } from '../sync/canonic
 import { isDeleteConfirmed } from '../domain/confirmation';
 import { resolveJournalTime, validateTransactionTime } from '../domain/transactionTime';
 import { validateReceiptBlob } from './receipts';
+import { createWorkspaceImage, validateWorkspaceImage } from './workspaceImages';
 import { decodeBackup, encodeBackup, mergeBackup } from './backup';
 import {
   createDurableStorageDriver,
@@ -724,15 +725,18 @@ export class LocalDatabase {
     return true;
   }
 
-  public editWorkspace(id: UUID, updates: Partial<Pick<Workspace, 'name' | 'kind' | 'description'>>): boolean {
+  public editWorkspace(id: UUID, updates: Partial<Pick<Workspace, 'name' | 'kind' | 'description'>> & { imageDataUrl?: string | null }): boolean {
     const ws = this.state.workspaces.get(id);
     if (!ws) return false;
     this.assertWorkspaceOwner(ws);
     if (updates.name !== undefined && !updates.name.trim()) throw new Error('Workspace name is required.');
+    if (updates.imageDataUrl !== undefined && !this.inTransaction) throw new Error('Save workspace photos inside a database transaction.');
+    const image = updates.imageDataUrl === undefined ? undefined : createWorkspaceImage(updates.imageDataUrl, generateUUID(), ws.image);
     if (updates.name !== undefined) ws.name = updates.name.trim();
     if (updates.kind) ws.kind = updates.kind;
     if (updates.description !== undefined) ws.description = updates.description.trim().slice(0, 500);
-    this.queueSyncOp('workspace.update', id, { id, name: ws.name, kind: ws.kind, description: ws.description });
+    if (image) ws.image = image;
+    this.queueSyncOp('workspace.update', id, { id, name: ws.name, kind: ws.kind, description: ws.description, ...(image ? { image } : {}) });
     this.autoPersist();
     return true;
   }
@@ -1882,6 +1886,7 @@ export class LocalDatabase {
       createdAt: new Date().toISOString(),
     };
     this.state.workspaces = new Map(data.workspaces || []);
+    for (const workspace of this.state.workspaces.values()) if (workspace.image !== undefined) validateWorkspaceImage(workspace.image);
     this.state.accounts = new Map(data.accounts || []);
     this.state.accountGroups = new Map(data.accountGroups || []);
     this.state.accountPermissions = new Map(data.accountPermissions || []);

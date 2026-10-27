@@ -26,23 +26,22 @@ export function WorkspaceManager({ onClose }: { onClose: () => void }) {
   const disabled = busy || imageLoading;
   async function mutate(work: () => void) {
     if (busy) return; setBusy(true); setError('');
+    let ownsTransaction = false;
     try {
-      await db.beginTransaction(); work(); await db.commitTransaction(); refreshState(); setEditing(null);
-    } catch (err) { await db.rollbackTransaction(); setError((err as Error).message); }
+      await db.beginTransaction(); ownsTransaction = true; work(); await db.commitTransaction(); ownsTransaction = false;
+      refreshState(); setEditing(null);
+    } catch (err) { if (ownsTransaction) await db.rollbackTransaction(); setError((err as Error).message); }
     finally { setBusy(false); }
   }
   async function openWorkspace(ws: Workspace) {
     setEditing(ws); setName(ws.name); setDescription(ws.description || ''); setConfirmation(''); setImage(null); setImageChanged(false); setError(''); setImageLoading(true);
-    try { setImage(await workspaceMedia.get(ws.id, ws.ownerSubjectHash)); }
+    try { setImage(ws.image !== undefined ? ws.image.dataUrl : await workspaceMedia.get(ws.id, ws.ownerSubjectHash)); }
     catch { setError(en ? 'The image could not be loaded. Your workspace is safe.' : 'ছবি লোড হয়নি। আপনার খাতা সুরক্ষিত আছে।'); }
     finally { setImageLoading(false); }
   }
   async function save() {
     if (!editing || disabled) return;
-    setError(''); setBusy(true);
-    try { if (imageChanged) await workspaceMedia.save(editing.id, editing.ownerSubjectHash, image); }
-    catch (err) { setError((err as Error).message); setBusy(false); return; }
-    setBusy(false); await mutate(() => { db.editWorkspace(editing.id, { name, description }); });
+    await mutate(() => { db.editWorkspace(editing.id, { name, description, ...(imageChanged ? { imageDataUrl: image } : {}) }); });
   }
   const kindName = (ws: Workspace) => ws.kind === 'business' ? (en ? 'Business' : 'ব্যবসা') : (en ? 'Personal' : 'ব্যক্তিগত');
   const blocker = editing ? db.workspaceDeleteBlocker(editing.id) : null;
@@ -93,7 +92,7 @@ export function WorkspaceManager({ onClose }: { onClose: () => void }) {
           {!blocker && <label className="block text-[11px] text-slate-500">{en ? 'Type DELETE to confirm permanent removal of this empty workspace.' : 'এই খালি খাতা মুছতে DELETE লিখুন।'}<input value={confirmation} onChange={e => setConfirmation(e.target.value)} autoComplete="off" className={fieldClass} /></label>}
           <button className="inline-flex min-h-10 items-center gap-2 rounded-xl bg-rose-600 px-3.5 py-2.5 text-xs font-semibold text-white disabled:opacity-30" disabled={disabled || !!blocker || confirmation !== DELETE_CONFIRMATION} onClick={() => mutate(() => db.safeDeleteWorkspace(editing.id, confirmation))}><Trash2 className="h-3.5 w-3.5" />{en ? 'Delete empty workspace' : 'খালি খাতা মুছুন'}</button>
         </div></details>
-        <p className="text-center text-[10px] leading-relaxed text-slate-400">{kindName(editing)} · BDT · {en ? 'Created' : 'তৈরি'} {new Date(editing.createdAt).toLocaleDateString(en ? 'en-GB' : 'bn-BD')}<br />{en ? 'Photos use a centered square crop and stay on this device.' : 'ছবি মাঝখান থেকে বর্গাকার ক্রপ হয় এবং এই ডিভাইসে থাকে।'}</p>
+        <p className="text-center text-[10px] leading-relaxed text-slate-400">{kindName(editing)} · BDT · {en ? 'Created' : 'তৈরি'} {new Date(editing.createdAt).toLocaleDateString(en ? 'en-GB' : 'bn-BD')}<br />{en ? 'Photos use a centered square crop, are included in backups, and sync through your connected Google Drive.' : 'ছবি মাঝখান থেকে বর্গাকার ক্রপ হয়, ব্যাকআপে থাকে এবং সংযুক্ত Google Drive দিয়ে সিঙ্ক হয়।'}</p>
       </>}
     </div>
   </ModalShell>;

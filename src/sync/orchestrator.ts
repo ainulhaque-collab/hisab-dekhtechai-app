@@ -21,6 +21,8 @@ import { canonicalJson, computeSha256 } from './canonical';
 import { generateUUID } from '../domain/journal';
 import { GoogleUserProfile, computeOwnerSubjectHash } from '../auth/googleAuth';
 import { workspaceMedia } from '../storage/workspaceMedia';
+import { migrateLegacyWorkspaceImages } from '../storage/workspaceMediaMigration';
+import { mergeWorkspaceImage, validateWorkspaceImage } from '../storage/workspaceImages';
 import { validateReceiptBlob } from '../storage/receipts';
 import { ensureCloudBackup, getCloudBackupReceipt, verifyCloudBackup } from './cloudBackup';
 import { buildReversalJournal } from '../domain/journal';
@@ -653,6 +655,8 @@ export class SyncOrchestrator {
     // Independent asset-store failure keeps originals intact; reconnect retries the claim.
     await workspaceMedia.claimOfflineAssets(Array.from(this.db.getRawState().workspaces.keys()), profile.subjectHash)
       .catch(() => console.warn('Workspace image ownership migration will retry on reconnect.'));
+    await migrateLegacyWorkspaceImages(this.db)
+      .catch(() => console.warn('Previous workspace photos remain on this device; copying them for sync will retry on reconnect.'));
     this.isAuthorized = true;
     this.needsBootstrapMetadata = true;
 
@@ -891,16 +895,28 @@ export class SyncOrchestrator {
         break;
       }
 
-      case 'workspace.create':
+      case 'workspace.create': {
+        if (!payload.workspace || payload.workspace.id !== op.entityId || payload.workspace.ownerSubjectHash !== op.ownerHash ||
+            op.authorSubjectHash && op.authorSubjectHash !== op.ownerHash) throw new Error('Invalid workspace owner or definition.');
+        const existing = this.db.getWorkspace(payload.workspace.id);
+        if (existing && existing.ownerSubjectHash !== op.ownerHash) throw new Error('Workspace owner mismatch.');
+        const image = mergeWorkspaceImage(existing?.image, payload.workspace.image);
         if (payload.workspace && payload.workspace.ownerSubjectHash === op.ownerHash &&
           !this.db.getWorkspace(payload.workspace.id)?.deletedAt) {
-          this.db.getRawState().workspaces.set(payload.workspace.id, payload.workspace);
+          this.db.getRawState().workspaces.set(payload.workspace.id, { ...payload.workspace, ...(image ? { image } : {}) });
         }
         break;
+      }
 
       case 'workspace.update':
+        if (payload.id !== op.entityId || op.authorSubjectHash && op.authorSubjectHash !== op.ownerHash)
+          throw new Error('Invalid workspace author or reference.');
+        if (payload.image !== undefined) validateWorkspaceImage(payload.image);
         if (payload.id && this.db.getRawState().workspaces.has(payload.id)) {
           const ws = this.db.getRawState().workspaces.get(payload.id)!;
+          if (ws.ownerSubjectHash !== op.ownerHash) throw new Error('Workspace owner mismatch.');
+          if (ws.deletedAt) break;
+          if (payload.image !== undefined) ws.image = mergeWorkspaceImage(ws.image, payload.image);
           if (payload.name) ws.name = payload.name;
           if (payload.kind) ws.kind = payload.kind;
           if (typeof payload.description === 'string') ws.description = payload.description.trim().slice(0, 500);

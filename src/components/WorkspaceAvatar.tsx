@@ -5,11 +5,18 @@ export function WorkspaceAvatar({ workspace }: { workspace?: Workspace | null })
   const [image, setImage] = useState<string | null>(null);
   useEffect(() => {
     let mounted = true;
+    let version = 0;
     setImage(null);
-    const load = () => { if (workspace) workspaceMedia.get(workspace.id, workspace.ownerSubjectHash).then(data => { if (mounted) setImage(data); }).catch(() => { if (mounted) setImage(null); }); };
+    const load = () => {
+      const request = ++version;
+      if (workspace?.image !== undefined) { setImage(workspace.image.dataUrl); return; }
+      if (workspace) workspaceMedia.get(workspace.id, workspace.ownerSubjectHash)
+        .then(data => { if (mounted && request === version) setImage(data); })
+        .catch(() => { if (mounted && request === version) setImage(null); });
+    };
     load(); window.addEventListener('hisab-workspace-media', load);
     return () => { mounted = false; window.removeEventListener('hisab-workspace-media', load); };
-  }, [workspace?.id, workspace?.ownerSubjectHash]);
+  }, [workspace?.id, workspace?.ownerSubjectHash, workspace?.image?.revisionId]);
   return image ? <img src={image} alt="" className="w-8 h-8 rounded-lg object-cover shrink-0" /> :
     <span aria-hidden="true" className="w-8 h-8 rounded-lg bg-blue-100 text-blue-800 flex items-center justify-center shrink-0">{workspace?.name.trim().slice(0, 1) || '◈'}</span>;
 }
