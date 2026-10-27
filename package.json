@@ -10,8 +10,9 @@
     "build": "vite build",
     "preview": "vite preview",
     "clean": "rm -rf dist server.js",
-    "lint": "tsc --noEmit",
-    "test": "tsx --test src/test/*.test.ts"
+    "lint": "tsc --noEmit && tsc --project api/tsconfig.json --noEmit",
+    "test": "tsx --test src/test/*.test.ts",
+    "test:api-runtime": "node scripts/Verify-AIRuntime.mjs"
   },
   "dependencies": {
     "@capacitor-community/sqlite": "^8.1.1",

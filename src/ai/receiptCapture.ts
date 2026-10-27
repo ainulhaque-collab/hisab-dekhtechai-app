@@ -1,5 +1,5 @@
 import { createReceiptBlob, MAX_RECEIPT_BYTES, receiptFromBytes } from '../storage/receipts';
-import { validateImageSignature } from '../storage/workspaceMedia';
+import { validateImageSignature } from '../storage/imageValidation';
 
 /** Keep the whole receipt; resize large camera photos before sending or storing them. */
 export async function prepareAIReceipt(file: File) {

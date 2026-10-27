@@ -1,7 +1,7 @@
 import { sha256 } from '@noble/hashes/sha2.js';
 import { bytesToHex } from '@noble/hashes/utils.js';
-import { ReceiptBlob } from '../contracts/types';
-import { validateImageSignature } from './workspaceMedia';
+import type { ReceiptBlob } from '../contracts/types.js';
+import { validateImageSignature } from './imageValidation.js';
 
 export const MAX_RECEIPT_BYTES = 2 * 1024 * 1024;
 

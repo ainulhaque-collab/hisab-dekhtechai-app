@@ -28,7 +28,7 @@ export interface Workspace {
   deletedAt?: string | null; // Retained tombstone prevents older clients resurrecting deleted empty workspaces.
 }
 
-import { AccountClassification } from './ledger';
+import type { AccountClassification } from './ledger.js';
 export type { AccountClassification };
 
 export type AccountKind = 'cash' | 'bank' | 'bkash' | 'nagad' | 'rocket' | 'other';

@@ -1,5 +1,5 @@
-import { parsePaisaString, paisaToDecimalString } from '../domain/money';
-import { resolveJournalTime } from '../domain/transactionTime';
+import { parsePaisaString, paisaToDecimalString } from '../domain/money.js';
+import { resolveJournalTime } from '../domain/transactionTime.js';
 
 export interface EntryDraft {
   transactionType: 'income' | 'expense' | 'transfer' | 'unknown';

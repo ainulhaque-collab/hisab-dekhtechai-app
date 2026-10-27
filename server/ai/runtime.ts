@@ -1,7 +1,7 @@
-import { DEFAULT_AI_LIMITS, DevelopmentAIBudget, RedisAIBudget } from './budget';
-import { createEntryProvider } from './modelSelection';
-import { googleIdentityVerifier } from './googleIdentity';
-import { AIHttpOptions } from './http';
+import { DEFAULT_AI_LIMITS, DevelopmentAIBudget, RedisAIBudget } from './budget.js';
+import { createEntryProvider } from './modelSelection.js';
+import { googleIdentityVerifier } from './googleIdentity.js';
+import type { AIHttpOptions } from './http.js';
 
 /** Server-only config, shared by local Express and the serverless adapter. */
 export function aiOptionsFromEnvironment(environment: Record<string, string | undefined>, allowLocalDevelopment = false): AIHttpOptions {

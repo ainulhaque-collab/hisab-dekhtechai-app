@@ -1,7 +1,7 @@
 import { sha256 } from '@noble/hashes/sha2.js';
 import { bytesToHex } from '@noble/hashes/utils.js';
-import { ReceiptBlob } from '../contracts/types';
-import { validateReceiptBlob } from '../storage/receipts';
+import type { ReceiptBlob } from '../contracts/types.js';
+import { validateReceiptBlob } from '../storage/receipts.js';
 
 export const MAX_AUDIO_BYTES = 2 * 1024 * 1024;
 export type ExtractionInput = { source: 'receipt'; receipt: ReceiptBlob; consentToProcess: boolean }

@@ -1,4 +1,4 @@
-import { AIServiceError } from './googleIdentity';
+import { AIServiceError } from './googleIdentity.js';
 
 export interface AIBudget {
   reserve(ownerHash: string, requestId: string): Promise<void>;

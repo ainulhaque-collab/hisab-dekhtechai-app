@@ -1,8 +1,8 @@
 import { Request, Response, Router, json } from 'express';
-import { validateExtractionMedia } from '../../src/ai/media';
-import { AIBudget } from './budget';
-import { AIServiceError } from './googleIdentity';
-import { EntryExtractionProvider, ExtractionInput } from './provider';
+import { validateExtractionMedia } from '../../src/ai/media.js';
+import type { AIBudget } from './budget.js';
+import { AIServiceError } from './googleIdentity.js';
+import type { EntryExtractionProvider, ExtractionInput } from './provider.js';
 
 export interface AIHttpOptions {
   enabled: boolean;

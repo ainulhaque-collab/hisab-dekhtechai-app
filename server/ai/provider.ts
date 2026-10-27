@@ -1,6 +1,6 @@
-import { EntryDraft } from '../../src/ai/entryDraft';
-import { ExtractionInput } from '../../src/ai/media';
-export type { ExtractionInput } from '../../src/ai/media';
+import type { EntryDraft } from '../../src/ai/entryDraft.js';
+import type { ExtractionInput } from '../../src/ai/media.js';
+export type { ExtractionInput } from '../../src/ai/media.js';
 
 /** This boundary permits another provider later without changing financial contracts. */
 export interface EntryExtractionProvider {

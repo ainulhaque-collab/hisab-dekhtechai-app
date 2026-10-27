@@ -1,7 +1,7 @@
 import { GoogleGenAI, GenerateContentParameters, Candidate, ThinkingLevel, GenerateContentResponsePromptFeedback } from '@google/genai';
-import { entryDraftSchema, validateEntryDraft } from '../../src/ai/entryDraft';
-import { validateExtractionMedia } from '../../src/ai/media';
-import { EntryExtractionProvider, ExtractionInput } from './provider';
+import { entryDraftSchema, validateEntryDraft } from '../../src/ai/entryDraft.js';
+import { validateExtractionMedia } from '../../src/ai/media.js';
+import type { EntryExtractionProvider, ExtractionInput } from './provider.js';
 
 type GenerationResult = { text?: string; candidates?: Candidate[]; promptFeedback?: GenerateContentResponsePromptFeedback };
 type Generator = (request: GenerateContentParameters) => Promise<GenerationResult>;

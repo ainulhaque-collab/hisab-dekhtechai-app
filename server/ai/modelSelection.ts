@@ -1,7 +1,7 @@
 import { GoogleGenAI, Model } from '@google/genai';
-import { EntryExtractionProvider, ExtractionInput } from './provider';
-import { GeminiEntryProvider } from './gemini';
-import { validateExtractionMedia } from '../../src/ai/media';
+import type { EntryExtractionProvider, ExtractionInput } from './provider.js';
+import { GeminiEntryProvider } from './gemini.js';
+import { validateExtractionMedia } from '../../src/ai/media.js';
 
 /** Reviewed production models, in reliability order. Google's catalog can also
  * advertise retired/unsupported models, and a newer version may be overloaded.
