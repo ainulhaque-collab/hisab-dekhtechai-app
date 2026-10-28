@@ -1,0 +1,9 @@
+{
+  "projectId": "hisab-dekhtechai-notifications",
+  "senderId": "706081957087",
+  "androidPackage": "com.hisabdekhtechai.app",
+  "androidAppId": "1:706081957087:android:6d89a6f1696eab6b77356a",
+  "webAppId": "1:706081957087:web:2966864dcc99f41b77356a",
+  "timeZone": "Asia/Dhaka",
+  "reminderHour": 19
+}

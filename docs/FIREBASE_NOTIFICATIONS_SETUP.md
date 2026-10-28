@@ -1,15 +1,49 @@
 # Firebase notification setup handoff
 
-28 October 2026: owner confirmed no Firebase project exists. No Firebase resource,
-account, billing plan, credential, token registration or push send was created by
-this document. Existing Google Drive financial storage and OAuth remain unchanged.
+28 October 2026: owner created `hisab-dekhtechai-notifications` and provided its
+Project ID. The project was verified in the signed-in Firebase console. Existing
+Google Drive financial storage, OAuth clients and Android signing are unchanged.
 
-## First owner step (no key needed)
+## Current verified setup
+
+- Sender/project number: `706081957087`; FCM HTTP v1 API shows Enabled.
+- Android registered: `com.hisabdekhtechai.app`, app ID
+  `1:706081957087:android:6d89a6f1696eab6b77356a`.
+- Web registered: app ID `1:706081957087:web:2966864dcc99f41b77356a`.
+  Firebase Hosting was not selected. No Analytics SDK is initialized by this setup.
+- The owner explicitly approved creating the Web Push VAPID key pair. Its public
+  key is saved locally; the private key was not displayed or exported.
+- Web public config is saved as `.local-firebase/web-config.json`; public VAPID
+  as `.local-firebase/web-push-public-key.txt`. Both are ignored by Git.
+- Android config download stalled in the automated browser. Owner handoff:
+  open the Android settings below in Chrome, click **Download google-services.json**,
+  and save to `.local-firebase/google-services.json`. No service-account JSON goes
+  in these client files. Registration is already complete; do not register again.
+- `node scripts/Check-FirebaseSetup.mjs` verifies exact project/app/package IDs,
+  rejects private credentials in client inputs and checks the VAPID public point.
+  It prints fixed statuses only, never key values. It does not enable Firebase,
+  send a notification, access a sensor or change the ledger. Client registration
+  alone is not an implemented push feature.
+
+Android settings:
+https://console.firebase.google.com/project/hisab-dekhtechai-notifications/settings/general/android:com.hisabdekhtechai.app
+
+Cloud Messaging settings:
+https://console.firebase.google.com/project/hisab-dekhtechai-notifications/settings/cloudmessaging
+
+The existing signed loan release `1.0.16-test` / code 17 was installed in place
+on the known TECNO phone and cold launch succeeded. First install time remained
+26 October 2026 19:17:09 and the app data directory was unchanged. This is upgrade
+metadata evidence, not a financial-record parity test. USB disconnected during
+the subsequent read-only native media probe, so it is not recorded as passed.
+Actual loan flow/old records and native media owner acceptance remain pending.
+
+## Initial project choice (completed by owner)
 
 Open https://console.firebase.google.com/ and create a notifications project,
 for example "Hisab DekhteChai Notifications". Use the no-cost Spark plan without
 linking a billing account; Analytics is optional and not needed for reminders.
-Send only its public Project ID from Project settings > General, never credentials.
+The public Project ID has been received. Never send private credentials in chat.
 
 FCM itself is listed as no-cost. A new Spark project has no payment-method
 requirement. An existing Google Cloud project can also have Firebase added, but
@@ -18,17 +52,21 @@ and shows Blaze. Do not enable billing or paid products just to follow this guid
 An independent Spark notifications project can keep the existing OAuth/Gemini
 project and its settings untouched.
 
-## Integration work after project creation
+## Remaining implementation and verification
 
-1. Register Android package `com.hisabdekhtechai.app` and a Web app. Preserve the
-   existing permanent signing identity and Google OAuth IDs. Do not replace
-   Google Drive sign-in with Firebase Authentication for this feature.
-2. Configure native/web notification permission, a Web service worker and VAPID,
+1. Finish Android client config intake and SDK wiring. Preserve the existing
+   permanent signing identity and Google OAuth IDs. Do not replace Google Drive
+   sign-in with Firebase Authentication for this feature.
+2. Configure native/web notification permission and a Web service worker,
    device registration/token rotation, sign-out revocation and owner isolation.
 3. Configure a trusted sender with least-privilege FCM credentials stored only on
    the server. Never commit service-account keys or expose them through VITE vars,
    the APK, Notion, chat or downloadable files. Private registration tokens stay
    server-side and owner-scoped.
+   Prefer keyless identity federation where practical. Any IAM access expansion
+   or private credential generation needs a concrete owner-reviewed setup step;
+   the broad default Firebase Admin account must not be used casually. No sender
+   account, IAM grant or private key was created during client registration.
 4. Schedule at 13:00 UTC (19:00 Asia/Dhaka). Store only needed reminder metadata
    and authenticated device registrations, not a second copy of the ledger.
    Deduplicate each loan/local-date notification; cancel on full repayment and
@@ -46,3 +84,6 @@ after verified sync. Do not label a sent reminder as a successful repayment.
 - Pricing: https://firebase.google.com/pricing
 - Project/billing relationship: https://firebase.google.com/docs/projects/learn-more
 - Trusted sender/secret tokens: https://firebase.google.com/docs/cloud-messaging/server-environment
+- Android config: https://firebase.google.com/docs/cloud-messaging/android/get-started
+- Web/VAPID setup: https://firebase.google.com/docs/cloud-messaging/web/get-started
+- HTTP v1 sender authentication: https://firebase.google.com/docs/cloud-messaging/send/v1-api

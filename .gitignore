@@ -29,3 +29,7 @@ android/local.properties
 *.p12
 *.pfx
 *.key
+
+# Firebase local setup inputs; service credentials must never enter Git.
+.local-firebase/
+android/app/google-services.json
