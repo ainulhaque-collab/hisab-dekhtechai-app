@@ -64,6 +64,13 @@ labels, year entry and clear/cancel. It never creates a native date input; saved
 values remain the same canonical YYYY-MM-DD string. The platform theme remains
 for separate native dialogs, with its narrower probe coverage documented.
 
+The `-e dom_calendar true` probe bundles the actual production AppDateInput into
+a separate network-blocked WebView. It checks Bengali/English selection,
+clear/cancel and the absence of native date inputs and automatic year-field focus.
+Images draw that synthetic WebView only, excluding system and other-app overlays.
+This isolates the component without reading the user's app DOM, storage or identity;
+owner acceptance of the real goal form remains a separate check.
+
 The allocation form initially selects the first wallet with available money.
 It shows actual balance, money already set aside across goals, and the remaining
 available amount. Zero/negative balance, fully reserved balance, invalid amounts

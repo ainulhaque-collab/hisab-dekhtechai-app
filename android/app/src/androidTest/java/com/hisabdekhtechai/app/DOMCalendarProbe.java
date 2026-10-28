@@ -4,6 +4,7 @@ import android.app.Activity;
 import android.app.Instrumentation;
 import android.content.Intent;
 import android.graphics.Bitmap;
+import android.graphics.Canvas;
 import android.graphics.Color;
 import android.os.Bundle;
 import android.view.ViewGroup;
@@ -35,17 +36,16 @@ public final class DOMCalendarProbe {
     private static void screenshot(Instrumentation probe, WebView web, File target) throws Exception {
         probe.waitForIdleSync();
         Thread.sleep(300);
-        int[] bounds = new int[4];
+        Bitmap[] captured = new Bitmap[1];
         probe.runOnMainSync(() -> {
-            int[] xy = new int[2]; web.getLocationOnScreen(xy);
-            bounds[0] = xy[0]; bounds[1] = xy[1]; bounds[2] = web.getWidth(); bounds[3] = web.getHeight();
+            Bitmap image = Bitmap.createBitmap(web.getWidth(), web.getHeight(), Bitmap.Config.ARGB_8888);
+            web.draw(new Canvas(image));
+            captured[0] = image;
         });
-        Bitmap screen = probe.getUiAutomation().takeScreenshot();
-        if (screen == null) throw new Exception("DOM_PROBE_IMAGE_UNAVAILABLE");
-        // Crop only the opaque synthetic WebView; the real app is fully covered.
-        Bitmap image = Bitmap.createBitmap(screen, bounds[0], bounds[1], bounds[2], bounds[3]);
+        // Draw this WebView only: system/PiP/other-app overlays never enter the image.
+        Bitmap image = captured[0];
         try (FileOutputStream stream = new FileOutputStream(target)) { image.compress(Bitmap.CompressFormat.PNG, 100, stream); }
-        finally { if (image != screen) image.recycle(); screen.recycle(); }
+        finally { image.recycle(); }
     }
     public static Bundle run(Instrumentation probe) throws Exception {
         Bundle result = new Bundle();
@@ -72,10 +72,12 @@ public final class DOMCalendarProbe {
                 web.loadDataWithBaseURL("https://localhost/__synthetic_calendar_probe", html, "text/html", "UTF-8", null);
             });
             WebView web = holder[0];
+            Bundle progress = new Bundle(); progress.putString("dom_probe_stage", "fixture_loaded"); probe.sendStatus(0, progress);
             expect(probe, web, "document.documentElement.dataset.calendarProbeReady==='true'");
             evaluate(probe, web, "document.getElementById('probe-date').click()");
             expect(probe, web, "!!document.querySelector('[data-app-calendar]')");
             expect(probe, web, "document.querySelectorAll('input[type=date]').length===0 && document.querySelectorAll('[data-calendar-date]').length===31 && document.activeElement.tagName!=='INPUT'");
+            progress.putString("dom_probe_stage", "calendar_open_and_focused"); probe.sendStatus(0, progress);
             screenshot(probe, web, new File(output, "calendar-en.png"));
             evaluate(probe, web, "document.querySelector('[data-calendar-next]').click()");
             expect(probe, web, "!!document.querySelector('[data-calendar-date=\"2026-11-15\"]')");
