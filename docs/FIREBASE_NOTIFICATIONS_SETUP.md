@@ -19,8 +19,8 @@ Google Drive financial storage, OAuth clients and Android signing are unchanged.
   it in Chrome and saved `.local-firebase/google-services.json`. Exact project,
   sender number, release package and Android app ID now validate successfully.
   Android, Web and VAPID public inputs all report `verified`. These are client
-  configs, not private sender credentials; SDK wiring and live delivery remain
-  unimplemented. Do not register the apps again.
+  configs, not private sender credentials. Android/Web SDK wiring is implemented;
+  actual device delivery still requires the acceptance test below. Do not register the apps again.
 - `node scripts/Check-FirebaseSetup.mjs` verifies exact project/app/package IDs,
   rejects private credentials in client inputs and checks the VAPID public point.
   It prints fixed statuses only, never key values. It does not enable Firebase,
@@ -132,9 +132,56 @@ billing-required, permission-denied and rejected-identity failures using fixed
 codes; no raw SDK headers, descriptions or credentials are logged. A billing
 requirement must be reported, never resolved by enabling billing automatically.
 
-After the live exchange passes, implement owner token registration/revocation,
-native/Web SDK permission UI, service worker, deduplication and reminder dispatch.
-IAM provisioning and a successful exchange alone do not establish push delivery.
+## Transaction push implementation (28 October)
+
+Settings → Notifications supports explicit enable, connection refresh, a test
+addressed only to this installation, and disable. English/Bangla labels are
+available. Permission is requested only after the user presses Enable; silent
+resume never prompts. The Web SDK is lazy loaded and its module service worker
+is bundled at `/push-sw.js`. No Analytics or Firebase Authentication is used.
+Android uses official Capacitor Push Notifications, a dedicated monochrome icon,
+private lockscreen visibility and one notification channel. Auto-init starts off.
+
+`scripts/Prepare-FirebasePush.mjs` validates local public client inputs and stages
+Android's ignored config before a signed build. The test branch alone has Preview
+`VITE_PUSH_ENABLED`, `VITE_FIREBASE_WEB_CONFIG`, `VITE_FIREBASE_VAPID_KEY`, and
+server-only `PUSH_ENABLED=true`. Public Firebase client config intentionally enters
+the bundle; Gemini credentials, Redis credentials and sender tokens never do.
+CI debug APKs retain their separate `.debug` package with live notifications off.
+
+`POST /api/notifications/push` authenticates the existing Google bearer token
+online, binds the verified owner hash, checks exact allowed origins and accepts
+only fixed register/unregister/test/transaction schemas. It cannot accept a
+custom message, recipient, topic or campaign. Device registration is capped at
+five per owner. Redis atomically claims each FCM token for one owner/installation,
+checks an installation secret for revocation, expires inactive registrations,
+deduplicates events and enforces owner/global daily limits. Its namespace is
+separate from AI quota and financial storage. Production is explicitly disabled.
+
+New local journals queue an opaque operation ID only after their durable commit.
+Imports, restores, duplicate saves and incoming Drive sync do not emit this hook.
+Delivery is best effort and cannot roll back or delay the Save operation. A
+bounded, separate device queue retries on foreground/network restoration for up
+to 24 hours; server event reservation provides at-most-once send attempts for
+48 hours. A provider error can lose an alert; financial records remain durable.
+The service stores no amount, account, workspace name, note or receipt in Redis
+or notification payloads. Sender credentials remain server-only; device tokens
+stay inside the client SDK and private registry and are never returned by the
+notification API. Sign-out attempts server revocation before Google
+logout and deletes the local FCM token; an incomplete disable is reported.
+
+Validation: 10 focused notification tests plus the existing 250 regressions pass;
+browser/API TypeScript checks and Web build pass. Synthetic browser UI checks
+cover both languages and signed-out guidance. FCM acceptance alone is not proof
+of delivery: on the signed APK and HTTPS Web preview, connect the same Gmail,
+enable notifications and press Send test to this device. Check the actual device
+notification. Then save a user-created test transaction on one device and check
+the other. Agent tests do not create financial records in the owner's dataset.
+
+Still pending: physical/Web receipt acceptance, loan reminder metadata/scheduled
+dispatch at 19:00 Asia/Dhaka, and reviewed owner-only announcement controls.
+Preview does not run a production Cron schedule. No production promotion, paid
+scheduler, broad broadcast or background money executor was added.
 
 FCM delivery does not execute financial transfers. Closed-app settlement needs
 its own secure executor and current-balance/sync design. Current loan automatic

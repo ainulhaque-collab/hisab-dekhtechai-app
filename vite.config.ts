@@ -6,13 +6,19 @@ import {defineConfig} from 'vite';
 export default defineConfig(() => {
   return {
     plugins: [react(), tailwindcss()],
+    build: {
+      rollupOptions: {
+        input: { main: path.resolve(import.meta.dirname, 'index.html'), push: path.resolve(import.meta.dirname, 'src/notifications/firebase-sw.ts') },
+        output: { entryFileNames: chunk => chunk.name === 'push' ? 'push-sw.js' : 'assets/[name]-[hash].js' },
+      },
+    },
     resolve: {
       alias: {
         '@': path.resolve(import.meta.dirname, '.'),
       },
     },
     server: {
-      proxy: { '/api/ai': { target: 'http://127.0.0.1:3001', changeOrigin: false } },
+      proxy: { '/api/ai': { target: 'http://127.0.0.1:3001', changeOrigin: false }, '/api/notifications': { target: 'http://127.0.0.1:3001', changeOrigin: false } },
       // HMR is disabled in AI Studio via DISABLE_HMR env var.
       // Do not modify—file watching is disabled to prevent flickering during agent edits.
       hmr: process.env.DISABLE_HMR !== 'true',

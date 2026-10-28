@@ -108,11 +108,18 @@ export class LocalDatabase {
   private snapshotBeforeTx: string | null = null;
   private driver: DurableStorageDriver | null = null;
   private changeListeners = new Set<() => void>();
+  private journalListeners = new Set<(operationId: string) => void>();
   private notifiedPending = new Set<string>();
 
   public subscribeToLocalChanges(listener: () => void): () => void {
     this.changeListeners.add(listener);
     return () => { this.changeListeners.delete(listener); };
+  }
+
+  /** Optional side effects for newly committed local journals only. */
+  public subscribeToCommittedJournals(listener: (operationId: string) => void): () => void {
+    this.journalListeners.add(listener);
+    return () => { this.journalListeners.delete(listener); };
   }
 
   public isTransactionInProgress(): boolean { return this.inTransaction; }
@@ -633,6 +640,9 @@ export class LocalDatabase {
       }
 
       await this.commitTransaction();
+      for (const listener of this.journalListeners) {
+        try { listener(op.operationId); } catch { /* A saved journal never depends on notification delivery. */ }
+      }
       return fullTx.id;
     } catch (err) {
       await this.rollbackTransaction();

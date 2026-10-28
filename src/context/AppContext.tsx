@@ -32,6 +32,7 @@ import {
 } from '../contracts/types';
 import { soundService, SoundPreferences } from '../services/soundService';
 import { migrateLegacyWorkspaceImages } from '../storage/workspaceMediaMigration';
+import { notificationService } from '../notifications/service';
 
 export interface DeviceProfile {
   id: string;
@@ -108,7 +109,7 @@ interface AppContextType {
     phone?: string;
     address?: string;
   }) => GoogleUserProfile;
-  signOut: () => void;
+  signOut: () => Promise<void>;
 }
 
 const AppContext = createContext<AppContextType | null>(null);
@@ -324,6 +325,15 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   }, [db, sync]);
 
   useEffect(() => { refreshRef.current(); }, [currentWorkspaceId]);
+
+  const notificationLanguage = useRef(language);
+  notificationLanguage.current = language;
+  useEffect(() => {
+    if (!storageReady || simulation) return;
+    const detach = notificationService.attach(auth, () => db.getIdentity()?.ownerSubjectHash || '', () => notificationLanguage.current);
+    const unsubscribe = db.subscribeToCommittedJournals(notificationService.committed);
+    return () => { unsubscribe(); detach(); };
+  }, [db, auth, storageReady, simulation, userProfile?.subjectHash]);
 
   useEffect(() => {
     if (!storageReady || simulation) return;
@@ -648,7 +658,8 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     return updated;
   };
 
-  const signOut = () => {
+  const signOut = async () => {
+    await notificationService.disable();
     auth.signOut();
     sync.setAuthorized(false);
     refreshState();

@@ -77,7 +77,17 @@ $variables = @{
     HISAB_ANDROID_VERSION_CODE = [string]$VersionCode
     HISAB_ANDROID_VERSION_NAME = $VersionName
 }
-if (!$BridgeTestOnly) { $variables.VITE_AI_API_BASE_URL = $nativeAIOrigin }
+if (!$BridgeTestOnly) {
+    $variables.VITE_AI_API_BASE_URL = $nativeAIOrigin
+    # Only validated public Firebase client configuration enters the APK.
+    # Capture silently: never print config/credentials in build logs.
+    Push-Location $workspaceRoot
+    try { $pushClientJson = & node.exe scripts/Prepare-FirebasePush.mjs --android }
+    finally { Pop-Location }
+    if ($LASTEXITCODE -ne 0) { throw 'Firebase client configuration is missing or invalid. No APK was built.' }
+    $pushClient = $pushClientJson | ConvertFrom-Json
+    foreach ($property in $pushClient.PSObject.Properties) { $variables[$property.Name] = [string]$property.Value }
+}
 $previousVariables = @{}
 foreach ($name in $variables.Keys) { $previousVariables[$name] = [Environment]::GetEnvironmentVariable($name, 'Process'); [Environment]::SetEnvironmentVariable($name, $variables[$name], 'Process') }
 function Invoke-BuildStep([string]$executable, [string[]]$arguments) {

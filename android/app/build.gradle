@@ -2,6 +2,12 @@ plugins {
     id 'com.android.application'
 }
 
+// Public client config is staged only after strict project/package validation.
+// CI debug builds keep their separate package and never register for live push.
+if (file('google-services.json').exists() && gradle.startParameter.taskNames.any { it.toLowerCase().contains('release') }) {
+    apply plugin: 'com.google.gms.google-services'
+}
+
 def signingFile = System.getenv('HISAB_ANDROID_KEYSTORE_FILE')
 def signingStorePassword = System.getenv('HISAB_ANDROID_STORE_PASSWORD')
 def signingAlias = System.getenv('HISAB_ANDROID_KEY_ALIAS')

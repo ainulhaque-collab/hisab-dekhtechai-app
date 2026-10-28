@@ -64,7 +64,7 @@ export async function checkFirebaseSetup() {
   // Configuration intake only; no imports of Firebase, network calls, credential
   // generation, permission prompts, resource provisioning or ledger writes.
   return { projectId: expected.projectId, web, android, webPushPublicKey,
-    trustedSender: 'not configured', pushDelivery: 'not implemented / not verified' };
+    trustedSender: 'keyless Preview plan applied; live exchange checked separately', pushDelivery: 'client/server integration implemented; physical delivery requires verification' };
 }
 
 if (process.argv[1] && pathToFileURL(resolve(process.argv[1])).href === import.meta.url) {
