@@ -15,10 +15,12 @@ Google Drive financial storage, OAuth clients and Android signing are unchanged.
   key is saved locally; the private key was not displayed or exported.
 - Web public config is saved as `.local-firebase/web-config.json`; public VAPID
   as `.local-firebase/web-push-public-key.txt`. Both are ignored by Git.
-- Android config download stalled in the automated browser. Owner handoff:
-  open the Android settings below in Chrome, click **Download google-services.json**,
-  and save to `.local-firebase/google-services.json`. No service-account JSON goes
-  in these client files. Registration is already complete; do not register again.
+- Android config download stalled in the automated browser. The owner downloaded
+  it in Chrome and saved `.local-firebase/google-services.json`. Exact project,
+  sender number, release package and Android app ID now validate successfully.
+  Android, Web and VAPID public inputs all report `verified`. These are client
+  configs, not private sender credentials; SDK wiring and live delivery remain
+  unimplemented. Do not register the apps again.
 - `node scripts/Check-FirebaseSetup.mjs` verifies exact project/app/package IDs,
   rejects private credentials in client inputs and checks the VAPID public point.
   It prints fixed statuses only, never key values. It does not enable Firebase,
@@ -54,7 +56,7 @@ project and its settings untouched.
 
 ## Remaining implementation and verification
 
-1. Finish Android client config intake and SDK wiring. Preserve the existing
+1. Wire the verified Android/Web client configs to the SDKs. Preserve the existing
    permanent signing identity and Google OAuth IDs. Do not replace Google Drive
    sign-in with Firebase Authentication for this feature.
 2. Configure native/web notification permission and a Web service worker,
@@ -74,6 +76,32 @@ project and its settings untouched.
 5. Test Android and Web background delivery with synthetic loans before enabling
    it for the owner. No public admin announcements are sent as a setup test.
 
+## Concrete trusted-sender proposal — not applied
+
+`config/firebase-sender-preview.plan.json` records a keyless Google Workload
+Identity Federation proposal. The proposed custom role has only
+`cloudmessaging.messages.create` in this independent notifications project.
+A dedicated sender account would be impersonated by the exact Vercel
+team/project **preview** subject; provider conditions also pin the immutable
+team/project IDs. No whole-pool or wildcard principal grant is proposed.
+
+This permits **all Preview deployments of this Vercel project**, not only the
+current branch alias. Other projects, development and production are excluded.
+Keep that boundary explicit in the owner's IAM approval. It grants no Drive,
+ledger, banking, Firebase Authentication or storage permission.
+
+The Vercel connector verifies the project/team IDs but does not expose issuer
+mode. Confirm that the configured issuer is the proposed team issuer before
+applying the plan; stop if it differs. The Google Cloud IAM UI timed out in the
+automated browser during read-only discovery. No IAM resource/grant was applied.
+Creating the proposed custom role, service account, pool/provider and its exact
+binding requires a separate owner-reviewed access change. No private JSON key
+is required by this proposal; no billing change is proposed.
+
+After authorized provisioning, implement request-context OIDC exchange, owner
+token registration/revocation, permission UI, service worker, deduplication and
+reminder dispatch. Approval of IAM alone is not evidence of live push delivery.
+
 FCM delivery does not execute financial transfers. Closed-app settlement needs
 its own secure executor and current-balance/sync design. Current loan automatic
 repayment is explicitly limited to the original device while the app is open
@@ -87,3 +115,6 @@ after verified sync. Do not label a sent reminder as a successful repayment.
 - Android config: https://firebase.google.com/docs/cloud-messaging/android/get-started
 - Web/VAPID setup: https://firebase.google.com/docs/cloud-messaging/web/get-started
 - HTTP v1 sender authentication: https://firebase.google.com/docs/cloud-messaging/send/v1-api
+- Vercel GCP OIDC: https://vercel.com/docs/oidc/gcp
+- Vercel claim boundaries: https://vercel.com/docs/oidc/reference
+- Google federation: https://docs.cloud.google.com/iam/docs/workload-identity-federation
