@@ -110,6 +110,9 @@ public final class PickerThemeProbe {
                         }
                         shown[0].getButton(AlertDialog.BUTTON_POSITIVE).performClick();
                     });
+                    // AlertDialog posts its button listener to the main Handler;
+                    // drain that message before reading the selected test value.
+                    probe.waitForIdleSync();
                     boolean callback = time ? selected[0] == 14 && selected[1] == 30
                         : selected[0] == 2026 && selected[1] == 11 && selected[2] == 15;
                     result.putBoolean(label + "_selection_callback", callback);
