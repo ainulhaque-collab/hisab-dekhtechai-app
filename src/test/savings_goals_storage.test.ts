@@ -10,8 +10,11 @@ import { SimulatedGoogleDriveTransport } from '../drive/transport';
 import { canonicalJson, computeSha256 } from '../sync/canonical';
 import { financialFingerprint } from '../sync/cloudBackup';
 import { computeOwnerSubjectHash } from '../auth/googleAuth';
+import { isSavingsOperation } from '../storage/savingsOperations';
 
 const workspaceId = 'ws-personal-default';
+
+const allSavingsOperations = (db: LocalDatabase) => Array.from(db.getRawState().syncOperations.values()).filter(isSavingsOperation);
 
 async function database() {
   const driver = new LocalStorageFallbackDriver();
@@ -373,4 +376,115 @@ test('A late offline allocation on an archived goal stays unfunded and can be re
   assert.equal(item.contributions[0].releasedMinor, '8000');
   assert.equal(db.getTransactions(workspaceId).length, 0);
   assert.equal(db.calculateAccountSummaries(workspaceId).find(value => value.accountId === account.id)?.currentBalanceMinor, '10000');
+});
+
+test('Archived goal deletion requires exact DELETE, preserves journals and survives restart/backup', async () => {
+  const { db, driver, key, account } = await fundedDatabase();
+  const goal = await db.saveSavingsGoal(workspaceId, { name: 'Mistaken synthetic goal', kind: 'general', targetMinor: '10000' });
+  for (const confirmation of ['', 'delete', 'Delete', ' DELETE', 'DELETE ']) {
+    const before = canonicalJson(db.toSerializable());
+    await assert.rejects(db.safeDeleteSavingsGoal(workspaceId, goal.id, confirmation), /SAVINGS_DELETE_CONFIRMATION/);
+    assert.equal(canonicalJson(db.toSerializable()), before);
+  }
+  await assert.rejects(db.safeDeleteSavingsGoal(workspaceId, goal.id, 'DELETE'), /SAVINGS_ARCHIVE_BEFORE_DELETE/);
+  await db.allocateSavingsGoal(workspaceId, goal.id, account.id, '2500');
+  const allocation = allocationId(db, goal.id);
+  await db.releaseSavingsAllocation(workspaceId, goal.id, allocation, '2500');
+  await db.setSavingsGoalArchived(workspaceId, goal.id, true);
+  const before = db.toSerializable();
+  const fingerprint = await financialFingerprint(before);
+  await db.safeDeleteSavingsGoal(workspaceId, goal.id, 'DELETE');
+  assert.equal(db.getSavingsProjection(workspaceId).goals[0].deleted, true);
+  assert.equal(db.getSavingsProjection(workspaceId).goals[0].contributions.length, 1);
+  assert.equal(canonicalJson(db.toSerializable().journalTransactions), canonicalJson(before.journalTransactions));
+  assert.equal(canonicalJson(db.toSerializable().journalLines), canonicalJson(before.journalLines));
+  assert.equal(db.calculateAccountSummaries(workspaceId).find(row => row.accountId === account.id)?.currentBalanceMinor, '10000');
+  assert.notEqual(await financialFingerprint(db.toSerializable()), fingerprint);
+  const deletion = allSavingsOperations(db).find(op => op.payload.savingsDeletion)!;
+  assert.equal(deletion.type, 'workspace.update');
+  assert.deepEqual(Object.keys(deletion.payload).sort(), ['id', 'savingsDeletion']);
+  assert.equal(deletion.payload.savingsEvent, undefined, 'Older savings validators must ignore this wire extension');
+  const restarted = new LocalDatabase(key, driver); await restarted.init();
+  assert.equal(restarted.getSavingsProjection(workspaceId).goals[0].deleted, true);
+  const { db: restored } = await database();
+  await restored.importBackupFile(await db.exportBackupFile());
+  assert.equal(restored.getSavingsProjection(workspaceId).goals.find(row => row.goal.id === goal.id)?.deleted, true);
+  await db.importBackupFile(await encodeBackup(before));
+  assert.equal(db.getSavingsProjection(workspaceId).goals.find(row => row.goal.id === goal.id)?.deleted, true, 'Importing an older backup into this dataset must retain its deletion');
+  await assert.rejects(db.setSavingsGoalArchived(workspaceId, goal.id, false), /SAVINGS_GOAL_DELETED/);
+  await assert.rejects(db.allocateSavingsGoal(workspaceId, goal.id, account.id, '1'), /SAVINGS_GOAL_DELETED/);
+  await assert.rejects(db.saveSavingsGoal(workspaceId, { id: goal.id, name: 'Resurrect', kind: 'general', targetMinor: '100' }), /SAVINGS_GOAL_DELETED/);
+});
+
+test('Deletion cannot hide a late outstanding reservation on an archived goal', async () => {
+  const { db, account } = await fundedDatabase();
+  const goal = await db.saveSavingsGoal(workspaceId, { name: 'Synthetic late reserve', kind: 'general', targetMinor: '10000' });
+  const { db: offline } = await replica(db);
+  await db.setSavingsGoalArchived(workspaceId, goal.id, true);
+  await offline.allocateSavingsGoal(workspaceId, goal.id, account.id, '2500');
+  await replay(db, savingsOperations(offline));
+  const before = canonicalJson(db.toSerializable());
+  await assert.rejects(db.safeDeleteSavingsGoal(workspaceId, goal.id, 'DELETE'), /SAVINGS_ALLOCATIONS_REMAIN/);
+  assert.equal(canonicalJson(db.toSerializable()), before);
+  const allocation = db.getSavingsProjection(workspaceId).goals[0].contributions[0];
+  await db.releaseSavingsAllocation(workspaceId, goal.id, allocation.allocationId, '2500');
+  await db.safeDeleteSavingsGoal(workspaceId, goal.id, 'DELETE');
+  assert.equal(db.getSavingsProjection(workspaceId).goals[0].deleted, true);
+});
+
+test('Deletion sync dominates stale restore/allocation and legacy applied-op hydration retains the tombstone', async () => {
+  const { db, account } = await fundedDatabase();
+  const goal = await db.saveSavingsGoal(workspaceId, { name: 'Synthetic sync delete', kind: 'general', targetMinor: '10000' });
+  await db.setSavingsGoalArchived(workspaceId, goal.id, true);
+  const { db: stale } = await replica(db);
+  await db.safeDeleteSavingsGoal(workspaceId, goal.id, 'DELETE');
+  await stale.setSavingsGoalArchived(workspaceId, goal.id, false);
+  await stale.allocateSavingsGoal(workspaceId, goal.id, account.id, '8000');
+  await replay(db, allSavingsOperations(stale));
+  await replay(stale, allSavingsOperations(db));
+  for (const instance of [db, stale]) {
+    assert.equal(instance.getSavingsProjection(workspaceId).goals[0].deleted, true);
+    assert.equal(instance.getSavingsProjection(workspaceId).goals[0].fundedMinor, '0');
+    assert.equal(instance.getSavingsProjection(workspaceId).accounts.find(row => row.accountId === account.id)?.availableMinor, '10000');
+    assert.equal(instance.getSavingsProjection(workspaceId).orphanAllocationCount, 0);
+    assert.equal(instance.getTransactions(workspaceId).length, 0);
+  }
+  const legacy = structuredClone(db.toSerializable());
+  legacy.appliedOps = allSavingsOperations(db).map(op => op.operationId);
+  const { db: hydrated } = await database();
+  await hydrated.loadFromSerializable(legacy);
+  assert.equal(hydrated.getSavingsProjection(workspaceId).goals[0].deleted, true);
+});
+
+test('Deletion rollback and malicious cross-workspace/mixed deletion payloads leave state untouched', async () => {
+  const { db, driver } = await fundedDatabase();
+  const goal = await db.saveSavingsGoal(workspaceId, { name: 'Synthetic guarded deletion', kind: 'general', targetMinor: '10000' });
+  await db.setSavingsGoalArchived(workspaceId, goal.id, true);
+  const before = canonicalJson(db.toSerializable());
+  driver.faultInjection = 'throw_on_commit';
+  await assert.rejects(db.safeDeleteSavingsGoal(workspaceId, goal.id, 'DELETE'));
+  assert.equal(canonicalJson(db.toSerializable()), before);
+  driver.faultInjection = 'none';
+  const { db: target } = await replica(db);
+  await db.safeDeleteSavingsGoal(workspaceId, goal.id, 'DELETE');
+  const deletion = allSavingsOperations(db).find(op => op.payload.savingsDeletion)!;
+  for (const mutate of [
+    (op: SyncOperation) => { op.entityId = 'ws-business-default'; op.payload.id = op.entityId; },
+    (op: SyncOperation) => { op.payload.savingsDeletion.version = 99; },
+    (op: SyncOperation) => { op.payload.savingsEvent = { version: 1, action: 'goal.delete', goalId: goal.id }; },
+    (op: SyncOperation) => { delete op.payload.savingsDeletion; op.payload.savingsEvent = { version: 1, action: 'goal.delete', goalId: goal.id }; },
+  ]) {
+    const malformed = structuredClone(deletion); malformed.operationId = generateUUID(); mutate(malformed);
+    malformed.contentSha256 = await computeSha256(canonicalJson(malformed.payload));
+    const targetBefore = canonicalJson(target.toSerializable());
+    await assert.rejects(replay(target, [malformed]));
+    assert.equal(canonicalJson(target.toSerializable()), targetBefore);
+  }
+  const forgedBackup = await decodeBackup(await db.exportBackupFile());
+  const [, op] = forgedBackup.syncOperations.find(([, value]: [string, SyncOperation]) => value.payload.savingsDeletion);
+  op.payload.savingsDeletion.extra = true;
+  op.contentSha256 = await computeSha256(canonicalJson(op.payload));
+  const targetBefore = canonicalJson(target.toSerializable());
+  await assert.rejects(target.importBackupFile(await encodeBackup(forgedBackup)));
+  assert.equal(canonicalJson(target.toSerializable()), targetBefore);
 });

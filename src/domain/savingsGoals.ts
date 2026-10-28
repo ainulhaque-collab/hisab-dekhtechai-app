@@ -18,6 +18,7 @@ export interface SavingsGoal {
 
 export type SavingsGoalEvent =
   | { version: 1; action: 'goal.set'; goal: SavingsGoal }
+  | { version: 1; action: 'goal.delete'; goalId: string }
   | { version: 1; action: 'allocation.add'; goalId: string; allocationId: string; accountId: string; amountMinor: string; note?: string }
   | { version: 1; action: 'allocation.release'; goalId: string; allocationId: string; amountMinor: string };
 
@@ -41,6 +42,8 @@ export interface SavingsContributionProjection {
 
 export interface ProjectedSavingsGoal {
   goal: SavingsGoal;
+  /** Durable tombstone; metadata/history remain available for sync validation. */
+  deleted?: true;
   requestedMinor: string;
   fundedMinor: string;
   shortfallMinor: string;
@@ -162,7 +165,19 @@ export function validateSavingsGoalEvent(value: unknown): SavingsGoalEvent {
     const item = object(value, ['version', 'action', 'goalId', 'allocationId', 'amountMinor']);
     return { version: 1, action: 'allocation.release', goalId: id(item.goalId), allocationId: id(item.allocationId), amountMinor: amount(item.amountMinor) };
   }
+  if (envelope.action === 'goal.delete') {
+    const item = object(value, ['version', 'action', 'goalId']);
+    return { version: 1, action: 'goal.delete', goalId: id(item.goalId) };
+  }
   return invalid();
+}
+
+/** Separate wire extension so older savings clients retain, rather than reject,
+ * deletion operations whose action they do not yet understand. */
+export function validateSavingsDeletion(value: unknown): Extract<SavingsGoalEvent, { action: 'goal.delete' }> {
+  const item = object(value, ['version', 'goalId']);
+  if (item.version !== 1) return invalid();
+  return { version: 1, action: 'goal.delete', goalId: id(item.goalId) };
 }
 
 function record(value: unknown): SavingsEventRecord {
@@ -222,6 +237,7 @@ export function projectSavingsGoals(records: SavingsEventRecord[], workspaceId: 
   const goals = new Map<string, SavingsEventRecord & { event: Extract<SavingsGoalEvent, { action: 'goal.set' }> }>();
   const adds = new Map<string, SavingsEventRecord & { event: Extract<SavingsGoalEvent, { action: 'allocation.add' }> }>();
   const releases = new Map<string, { goalId: string; total: bigint; count: number }>();
+  const deletions = new Set<string>();
   for (const item of unique.values()) {
     const event = item.event;
     if (event.action === 'goal.set') {
@@ -231,6 +247,8 @@ export function projectSavingsGoals(records: SavingsEventRecord[], workspaceId: 
         (event.goal.revision === prior.event.goal.revision && compareText(item.operationId, prior.operationId) > 0)) {
         goals.set(event.goal.id, item as typeof prior & { event: typeof event });
       }
+    } else if (event.action === 'goal.delete') {
+      deletions.add(event.goalId);
     } else if (event.action === 'allocation.add') {
       const prior = adds.get(event.allocationId);
       if (prior && JSON.stringify(prior.event) !== JSON.stringify(event)) return conflict();
@@ -251,7 +269,7 @@ export function projectSavingsGoals(records: SavingsEventRecord[], workspaceId: 
   for (const item of goals.values()) {
     if (item.event.goal.workspaceId !== workspaceId) continue;
     const goal = item.event.goal;
-    projected.set(goal.id, { goal, requestedMinor: '0', fundedMinor: '0', shortfallMinor: '0', remainingMinor: goal.targetMinor, progressPercent: 0,
+    projected.set(goal.id, { goal, ...(deletions.has(goal.id) ? { deleted: true as const } : {}), requestedMinor: '0', fundedMinor: '0', shortfallMinor: '0', remainingMinor: goal.targetMinor, progressPercent: 0,
       recommendedMonthlyMinor: monthlyRecommendation(BigInt(goal.targetMinor), goal.deadline, today),
       emergencyCoverageMonths: goal.kind === 'emergency' ? '0.00' : null, contributions: [] });
   }
@@ -270,7 +288,7 @@ export function projectSavingsGoals(records: SavingsEventRecord[], workspaceId: 
     const requested = amount - released;
     const reserved = allocated.get(event.accountId) || 0n;
     const available = maximum(0n, accountBalances.get(event.accountId) || 0n) - reserved;
-    const funded = projection.goal.archived ? 0n : minimum(requested, available);
+    const funded = projection.deleted || projection.goal.archived ? 0n : minimum(requested, available);
     allocated.set(event.accountId, reserved + funded);
     const contribution: SavingsContributionProjection = {
       allocationId: event.allocationId, accountId: event.accountId, amountMinor: amount.toString(), releasedMinor: released.toString(),

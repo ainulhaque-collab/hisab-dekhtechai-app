@@ -1720,7 +1720,9 @@ export class LocalDatabase {
     try {
       this.savingsWorkspace(workspaceId);
       const event = validateSavingsGoalEvent(build(this.getSavingsProjection(workspaceId)));
-      this.queueSyncOp('workspace.update', workspaceId, { id: workspaceId, savingsEvent: event });
+      this.queueSyncOp('workspace.update', workspaceId, event.action === 'goal.delete'
+        ? { id: workspaceId, savingsDeletion: { version: 1, goalId: event.goalId } }
+        : { id: workspaceId, savingsEvent: event });
       validateSavingsOperations(this.state.syncOperations.values(), this.state.workspaces, this.state.accounts);
       await this.commitTransaction();
       return event;
@@ -1732,7 +1734,9 @@ export class LocalDatabase {
     deadline?: string; monthlyContributionMinor?: string; essentialMonthlyMinor?: string; coverageMonths?: number;
   }): Promise<SavingsGoal> {
     const event = await this.commitSavingsEvent(workspaceId, projection => {
-      const existing = input.id ? projection.goals.find(item => item.goal.id === input.id)?.goal : undefined;
+      const existingItem = input.id ? projection.goals.find(item => item.goal.id === input.id) : undefined;
+      if (existingItem?.deleted) throw new Error('SAVINGS_GOAL_DELETED');
+      const existing = existingItem?.goal;
       if (input.id && !existing) throw new Error('SAVINGS_GOAL_NOT_FOUND');
       if (existing?.archived) throw new Error('SAVINGS_GOAL_ARCHIVED');
       return { version: 1, action: 'goal.set', goal: {
@@ -1752,6 +1756,7 @@ export class LocalDatabase {
     await this.commitSavingsEvent(workspaceId, projection => {
       const item = projection.goals.find(item => item.goal.id === goalId);
       if (!item) throw new Error('SAVINGS_GOAL_NOT_FOUND');
+      if (item.deleted) throw new Error('SAVINGS_GOAL_DELETED');
       if (archived && BigInt(item.requestedMinor) > 0n) throw new Error('SAVINGS_ALLOCATIONS_REMAIN');
       return { version: 1, action: 'goal.set', goal: { ...item.goal, archived, revision: item.goal.revision + 1 } };
     });
@@ -1762,6 +1767,7 @@ export class LocalDatabase {
       if (projection.orphanAllocationCount || projection.orphanReleaseCount) throw new Error('SAVINGS_SYNC_INCOMPLETE');
       const item = projection.goals.find(item => item.goal.id === goalId);
       if (!item) throw new Error('SAVINGS_GOAL_NOT_FOUND');
+      if (item.deleted) throw new Error('SAVINGS_GOAL_DELETED');
       if (item.goal.archived) throw new Error('SAVINGS_GOAL_ARCHIVED');
       const account = this.state.accounts.get(accountId);
       if (!account || account.workspaceId !== workspaceId || account.archivedAt || (account.classification || 'asset') !== 'asset')
@@ -1785,6 +1791,18 @@ export class LocalDatabase {
       validateSavingsGoalEvent(event);
       if (BigInt(amountMinor) > BigInt(contribution.requestedMinor)) throw new Error('SAVINGS_RELEASE_EXCEEDS_ALLOCATION');
       return event;
+    });
+  }
+
+  public async safeDeleteSavingsGoal(workspaceId: UUID, goalId: UUID, confirmation: string): Promise<void> {
+    if (!isDeleteConfirmed(confirmation)) throw new Error('SAVINGS_DELETE_CONFIRMATION');
+    await this.commitSavingsEvent(workspaceId, projection => {
+      const item = projection.goals.find(item => item.goal.id === goalId);
+      if (!item) throw new Error('SAVINGS_GOAL_NOT_FOUND');
+      if (item.deleted) throw new Error('SAVINGS_GOAL_DELETED');
+      if (!item.goal.archived) throw new Error('SAVINGS_ARCHIVE_BEFORE_DELETE');
+      if (BigInt(item.requestedMinor) > 0n) throw new Error('SAVINGS_ALLOCATIONS_REMAIN');
+      return { version: 1, action: 'goal.delete', goalId };
     });
   }
 

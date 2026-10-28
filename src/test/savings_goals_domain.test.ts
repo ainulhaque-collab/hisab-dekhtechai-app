@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { projectSavingsGoals, validateSavingsGoalEvent, type SavingsEventRecord, type SavingsGoal, type SavingsGoalEvent } from '../domain/savingsGoals';
+import { projectSavingsGoals, validateSavingsDeletion, validateSavingsGoalEvent, type SavingsEventRecord, type SavingsGoal, type SavingsGoalEvent } from '../domain/savingsGoals';
 
 const today = '2026-10-27';
 const goal = (changes: Partial<SavingsGoal> = {}): SavingsGoal => ({
@@ -17,6 +17,26 @@ const release = (operationId: string, allocationId: string, amountMinor: string,
   operationId, createdAtUtc: '2026-10-27T12:00:00.000Z', event: { version: 1, action: 'allocation.release', goalId, allocationId, amountMinor },
 });
 const project = (records: SavingsEventRecord[], balances: Record<string, string> = { cash: '100000' }) => projectSavingsGoals(records, 'personal', balances, today);
+
+test('Savings: deletion dominates stale edits/restores and late allocations in every replay order', () => {
+  const deletion: SavingsEventRecord = { operationId: 'delete-car', createdAtUtc: '2026-10-27T12:00:00Z', event: { version: 1, action: 'goal.delete', goalId: 'car' } };
+  const records = [set(), deletion, set(goal({ name: 'Stale restored car', revision: 999 }), 'stale-restore'), add('late', '70000')];
+  const expected = project(records);
+  assert.equal(expected.goals[0].deleted, true);
+  assert.equal(expected.goals[0].fundedMinor, '0');
+  assert.equal(expected.goals[0].requestedMinor, '70000');
+  assert.equal(expected.accounts[0].availableMinor, '100000');
+  assert.equal(expected.orphanAllocationCount, 0);
+  for (let i = 0; i < records.length; i++) assert.deepEqual(project([...records.slice(i), ...records.slice(0, i)].reverse()), expected);
+});
+
+test('Savings: deletion before metadata is retained and wire deletion schema rejects extra fields', () => {
+  const deletion: SavingsEventRecord = { operationId: 'delete-car', createdAtUtc: '2026-10-27T12:00:00Z', event: { version: 1, action: 'goal.delete', goalId: 'car' } };
+  assert.equal(project([deletion]).goals.length, 0);
+  assert.equal(project([deletion, set()]).goals[0].deleted, true);
+  assert.deepEqual(validateSavingsDeletion({ version: 1, goalId: 'car' }), deletion.event);
+  for (const invalid of [{ version: 2, goalId: 'car' }, { version: 1, goalId: 'car', archived: true }, { version: 1, goalId: '' }]) assert.throws(() => validateSavingsDeletion(invalid));
+});
 
 test('Savings: offline allocations compete deterministically across goals without exceeding the account balance', () => {
   const records = [set(), set(goal({ id: 'holiday' })), add('b', '80000', { goalId: 'holiday' }), add('a', '80000')];

@@ -50,7 +50,7 @@ export const DashboardTab: React.FC<DashboardTabProps> = ({
     if (!currentWorkspace || !dashboardData) return null;
     try { return db.getSavingsProjection(currentWorkspace.id); } catch { return null; }
   }, [db, currentWorkspace?.id, dashboardData]);
-  const activeGoals = savings?.goals.filter(item => !item.goal.archived) || [];
+  const activeGoals = savings?.goals.filter(item => !item.deleted && !item.goal.archived) || [];
   const savedMinor = activeGoals.reduce((total, item) => total + BigInt(item.fundedMinor), 0n);
   const shortfall = activeGoals.some(item => BigInt(item.shortfallMinor) > 0n);
 

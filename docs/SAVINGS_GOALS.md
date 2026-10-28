@@ -71,6 +71,24 @@ Images draw that synthetic WebView only, excluding system and other-app overlays
 This isolates the component without reading the user's app DOM, storage or identity;
 owner acceptance of the real goal form remains a separate check.
 
+## Deleting an archived goal
+
+Archived goals with no outstanding reservation can be deleted by typing exactly
+`DELETE`. Both the form and storage method enforce that confirmation; Cancel
+does not write anything. Deleted goals disappear from active/archive lists and
+Home totals. Their previous wallet/journal history is retained unchanged.
+
+Deletion is a durable, irreversible tombstone carried in its own isolated
+`workspace.update` payload `{id, savingsDeletion: {version: 1, goalId}}`. This
+keeps schema 5/protocol 1 and the original savingsEvent wire format unchanged.
+Older savings apps retain this extra metadata without rejecting sync/backup;
+they will only hide the goal after upgrading. Updated clients always let a
+deletion dominate stale edits, restores and late offline allocations. Such
+allocations remain in history but fund zero and cannot reserve wallet money.
+Local deletion requires any currently known reservation to be released first.
+Sync/hydration/backup validate owner, workspace, checksum and immutable conflicts;
+the deletion/outbox commit is atomic and invalidates the cloud backup fingerprint.
+
 The allocation form initially selects the first wallet with available money.
 It shows actual balance, money already set aside across goals, and the remaining
 available amount. Zero/negative balance, fully reserved balance, invalid amounts

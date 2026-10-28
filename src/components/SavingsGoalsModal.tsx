@@ -1,5 +1,5 @@
 import React, { useEffect, useId, useRef, useState } from 'react';
-import { AlertCircle, Archive, ArrowDownLeft, Plus, ShieldCheck, Target, Wallet } from 'lucide-react';
+import { AlertCircle, Archive, ArrowDownLeft, Plus, ShieldCheck, Target, Trash2, Wallet } from 'lucide-react';
 import { useApp } from '../context/AppContext';
 import { formatAccountTitle, formatBDT, fromBengaliDigits, paisaToDecimalString, parsePaisaString, toBengaliDigits } from '../domain/money';
 import type { SavingsGoal, SavingsProjection } from '../domain/savingsGoals';
@@ -29,7 +29,10 @@ function errorMessage(error: unknown, en: boolean): string {
   if (code === 'SAVINGS_ACCOUNT_REQUIRED') return en ? 'Choose an active wallet to reserve money from.' : 'টাকা আলাদা রাখার জন্য একটি সক্রিয় ওয়ালেট বেছে নিন।';
   if (code === 'SAVINGS_INSUFFICIENT_AVAILABLE') return en ? 'This wallet does not have enough unreserved money. Check its available balance and try a smaller amount.' : 'এই ওয়ালেটে পর্যাপ্ত অব্যবহৃত টাকা নেই। উপলব্ধ ব্যালান্স দেখে কম টাকা দিন।';
   if (code === 'SAVINGS_ACCOUNT_UNAVAILABLE') return en ? 'This wallet is no longer available for new reservations. Choose another active wallet.' : 'এই ওয়ালেটে নতুন বরাদ্দ রাখা যাচ্ছে না। অন্য সক্রিয় ওয়ালেট বেছে নিন।';
-  if (code === 'SAVINGS_ALLOCATIONS_REMAIN') return en ? 'Release the money reserved for this goal before archiving it.' : 'আর্কাইভ করার আগে এই লক্ষ্যের জন্য আলাদা রাখা টাকা ছাড়ুন।';
+  if (code === 'SAVINGS_ALLOCATIONS_REMAIN') return en ? 'Release this goal’s remaining reservations first.' : 'আগে এই লক্ষ্যের জন্য বাকি আলাদা রাখা টাকা ছাড়ুন।';
+  if (code === 'SAVINGS_DELETE_CONFIRMATION') return en ? 'Type exactly DELETE to delete this goal.' : 'লক্ষ্যটি মুছতে হুবহু DELETE লিখুন।';
+  if (code === 'SAVINGS_ARCHIVE_BEFORE_DELETE') return en ? 'Archive the goal before deleting it.' : 'মুছে দেওয়ার আগে লক্ষ্যটি আর্কাইভ করুন।';
+  if (code === 'SAVINGS_GOAL_DELETED') return en ? 'This goal was already deleted. Its transaction history is kept.' : 'লক্ষ্যটি ইতিমধ্যে মুছে দেওয়া হয়েছে। লেনদেনের ইতিহাস রাখা আছে।';
   if (code === 'SAVINGS_GOAL_ARCHIVED' || code === 'SAVINGS_GOAL_NOT_FOUND') return en ? 'This goal has changed or was archived. Check the latest goal list before continuing.' : 'লক্ষ্যটি বদলেছে বা আর্কাইভ হয়েছে। চালিয়ে যাওয়ার আগে সর্বশেষ তালিকা দেখুন।';
   if (code === 'SAVINGS_RELEASE_EXCEEDS_ALLOCATION') return en ? 'Some of this money was already released on another device. Check the updated history and try again.' : 'এই টাকার কিছু অংশ অন্য ডিভাইসে ইতিমধ্যে ছাড়া হয়েছে। হালনাগাদ ইতিহাস দেখে আবার চেষ্টা করুন।';
   if (code === 'SAVINGS_SYNC_INCOMPLETE') return en ? 'Wait for the related savings records to finish syncing before reserving more money.' : 'আরও টাকা আলাদা রাখার আগে সংশ্লিষ্ট সঞ্চয়ের তথ্য সিঙ্ক হয়ে আসা পর্যন্ত অপেক্ষা করুন।';
@@ -65,8 +68,12 @@ export function SavingsGoalsModal({ onClose }: { onClose: () => void }) {
   const [accountId, setAccountId] = useState('');
   const [amount, setAmount] = useState('');
   const [note, setNote] = useState('');
+  const [deleteGoalId, setDeleteGoalId] = useState<string | null>(null);
+  const [deleteText, setDeleteText] = useState('');
+  const deleteInput = useRef<HTMLInputElement>(null);
   const allocationHintId = useId();
   useEffect(() => { mounted.current = true; return () => { mounted.current = false; }; }, []);
+  useEffect(() => { if (deleteGoalId) deleteInput.current?.focus(); }, [deleteGoalId]);
 
   const sameContext = () => !!opened.current.workspaceId && opened.current.db === latest.current.db
     && opened.current.workspaceId === latest.current.workspaceId
@@ -75,7 +82,7 @@ export function SavingsGoalsModal({ onClose }: { onClose: () => void }) {
   const stale = !sameContext();
   let projection: SavingsProjection | null = null;
   try { if (!stale) projection = db.getSavingsProjection(opened.current.workspaceId!); } catch { /* Show a safe read failure below. */ }
-  const rows = projection?.goals.filter(row => row.goal.archived === archived) || [];
+  const rows = projection?.goals.filter(row => !row.deleted && row.goal.archived === archived) || [];
   const availableAccounts = accounts.filter(account => account.workspaceId === opened.current.workspaceId && !account.archivedAt && (!account.classification || account.classification === 'asset'));
   const accountName = (id: string) => {
     const account = db.getAccount(id);
@@ -108,7 +115,7 @@ export function SavingsGoalsModal({ onClose }: { onClose: () => void }) {
     return Number.isNaN(date.getTime()) ? value : date.toLocaleDateString(en ? 'en-GB' : 'bn-BD');
   };
 
-  async function commit(operation: () => Promise<unknown>, after?: () => void) {
+  async function commit(operation: () => Promise<unknown>, after?: () => void, successNotice?: string) {
     if (locked.current) return;
     if (!sameContext()) { setError(errorMessage(new Error('SAVINGS_CONTEXT_CHANGED'), en)); return; }
     locked.current = true;
@@ -123,7 +130,7 @@ export function SavingsGoalsModal({ onClose }: { onClose: () => void }) {
         return;
       }
       after?.();
-      setNotice(en ? 'Saved. Your wallet balance and income/expense totals are unchanged.' : 'সেভ হয়েছে। ওয়ালেটের ব্যালান্স ও আয়-ব্যয়ের মোট পরিমাণ বদলায়নি।');
+      setNotice(successNotice || (en ? 'Saved. Your wallet balance and income/expense totals are unchanged.' : 'সেভ হয়েছে। ওয়ালেটের ব্যালান্স ও আয়-ব্যয়ের মোট পরিমাণ বদলায়নি।'));
     } catch (failure) {
       if (mounted.current) { redraw(value => value + 1); setError(errorMessage(failure, en)); }
     } finally {
@@ -133,6 +140,7 @@ export function SavingsGoalsModal({ onClose }: { onClose: () => void }) {
   }
 
   function edit(goal: SavingsGoal) {
+    setDeleteGoalId(null); setDeleteText('');
     setAllocateTo(null); setError(''); setNotice('');
     setForm({ id: goal.id, name: goal.name, kind: goal.kind, target: paisaToDecimalString(goal.targetMinor), deadline: goal.deadline || '',
       monthly: goal.monthlyContributionMinor ? paisaToDecimalString(goal.monthlyContributionMinor) : '',
@@ -190,9 +198,9 @@ export function SavingsGoalsModal({ onClose }: { onClose: () => void }) {
         <div className="flex rounded-xl bg-slate-100 p-1" role="group" aria-label={en ? 'Goal status' : 'লক্ষ্যের অবস্থা'}>
           {[false, true].map(value => <button key={String(value)} type="button" disabled={busy} aria-pressed={archived === value}
             className={`min-h-10 rounded-lg px-3 text-xs font-semibold ${archived === value ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-500'}`}
-            onClick={() => { setArchived(value); setForm(null); setAllocateTo(null); setError(''); }}>{value ? en ? 'Archived' : 'আর্কাইভ' : en ? 'Active' : 'চলমান'}</button>)}
+            onClick={() => { setArchived(value); setForm(null); setAllocateTo(null); setDeleteGoalId(null); setDeleteText(''); setError(''); }}>{value ? en ? 'Archived' : 'আর্কাইভ' : en ? 'Active' : 'চলমান'}</button>)}
         </div>
-        <button type="button" disabled={disabled} className={primaryButton} onClick={() => { setArchived(false); setAllocateTo(null); setForm(blankGoal()); setError(''); setNotice(''); }}><Plus className="h-4 w-4" />{en ? 'New goal' : 'নতুন লক্ষ্য'}</button>
+        <button type="button" disabled={disabled} className={primaryButton} onClick={() => { setArchived(false); setAllocateTo(null); setDeleteGoalId(null); setDeleteText(''); setForm(blankGoal()); setError(''); setNotice(''); }}><Plus className="h-4 w-4" />{en ? 'New goal' : 'নতুন লক্ষ্য'}</button>
       </div>
 
       {form && !stale && <form onSubmit={saveGoal} className="space-y-3 rounded-2xl border border-blue-100 bg-blue-50/40 p-4">
@@ -226,7 +234,24 @@ export function SavingsGoalsModal({ onClose }: { onClose: () => void }) {
           <button type="button" disabled={allocationDisabled || availableAccounts.length === 0} className={primaryButton} onClick={() => { setForm(null); setAllocateTo(row.goal.id); setAccountId(availableAccounts.find(account => BigInt(available(account.id)) > 0n)?.id || availableAccounts[0]?.id || ''); setAmount(''); setNote(''); setError(''); setNotice(''); }}><Plus className="h-3.5 w-3.5" />{en ? 'Set money aside' : 'টাকা আলাদা রাখুন'}</button>
           <button type="button" disabled={disabled} className={secondaryButton} onClick={() => edit(row.goal)}>{en ? 'Edit' : 'সম্পাদনা'}</button>
           <button type="button" disabled={disabled || BigInt(row.requestedMinor) > 0n} title={BigInt(row.requestedMinor) > 0n ? en ? 'Release all reservations first' : 'আগে সব বরাদ্দ ছাড়ুন' : undefined} className={secondaryButton} onClick={() => void commit(() => db.setSavingsGoalArchived(opened.current.workspaceId!, row.goal.id, true), () => { if (form?.id === row.goal.id) setForm(null); if (allocateTo === row.goal.id) setAllocateTo(null); })}><Archive className="h-3.5 w-3.5" />{en ? 'Archive' : 'আর্কাইভ'}</button>
-        </div> : <button type="button" disabled={disabled} className={secondaryButton} onClick={() => void commit(() => db.setSavingsGoalArchived(opened.current.workspaceId!, row.goal.id, false))}>{en ? 'Restore goal' : 'ফিরিয়ে আনুন'}</button>}
+        </div> : <div className="flex flex-wrap gap-2">
+          <button type="button" disabled={disabled} className={secondaryButton} onClick={() => void commit(() => db.setSavingsGoalArchived(opened.current.workspaceId!, row.goal.id, false), () => { setDeleteGoalId(null); setDeleteText(''); })}>{en ? 'Restore goal' : 'ফিরিয়ে আনুন'}</button>
+          <button type="button" disabled={disabled || BigInt(row.requestedMinor) > 0n} title={BigInt(row.requestedMinor) > 0n ? en ? 'Release all reservations first' : 'আগে সব বরাদ্দ ছাড়ুন' : undefined}
+            className="inline-flex min-h-11 items-center justify-center gap-2 rounded-xl border border-rose-200 bg-white px-4 py-2.5 text-xs font-semibold text-rose-700 hover:bg-rose-50 disabled:cursor-not-allowed disabled:opacity-40 focus-visible:outline-2 focus-visible:outline-rose-600"
+            onClick={() => { setDeleteGoalId(row.goal.id); setDeleteText(''); setError(''); setNotice(''); }}><Trash2 className="h-3.5 w-3.5" />{en ? 'Delete goal' : 'লক্ষ্য মুছুন'}</button>
+        </div>}
+        {deleteGoalId === row.goal.id && <form className="space-y-3 rounded-xl border border-rose-200 bg-rose-50 p-3" onSubmit={event => {
+          event.preventDefault();
+          if (disabled || deleteText !== 'DELETE' || BigInt(row.requestedMinor) > 0n) return;
+          void commit(() => db.safeDeleteSavingsGoal(opened.current.workspaceId!, row.goal.id, deleteText), () => { setDeleteGoalId(null); setDeleteText(''); }, en ? 'Goal deleted. Your wallet balances and transaction history are unchanged.' : 'লক্ষ্যটি মুছে দেওয়া হয়েছে। ওয়ালেটের ব্যালান্স ও লেনদেনের ইতিহাস বদলায়নি।');
+        }}>
+          <p className="break-words text-sm font-bold text-rose-900">{en ? `Delete “${row.goal.name}”?` : `“${row.goal.name}” মুছে দেবেন?`}</p>
+          <p className="text-xs leading-relaxed text-rose-900">{en ? 'This removes the goal from your lists. Wallet money and transaction history stay the same. This goal cannot be restored from Archived afterwards.' : 'লক্ষ্যটি তালিকা থেকে মুছে যাবে। ওয়ালেটের টাকা ও লেনদেনের ইতিহাস বদলাবে না। এরপর আর্কাইভ থেকে এই লক্ষ্যটি ফিরিয়ে আনা যাবে না।'}</p>
+          {BigInt(row.requestedMinor) > 0n && <p role="status" className="text-xs font-semibold text-rose-900">{errorMessage(new Error('SAVINGS_ALLOCATIONS_REMAIN'), en)}</p>}
+          <label className="block text-xs font-semibold text-rose-900">{en ? 'Type DELETE to confirm' : 'নিশ্চিত করতে DELETE লিখুন'}<input ref={deleteInput} className={fieldClass} aria-label={en ? 'Type DELETE to confirm' : 'নিশ্চিত করতে DELETE লিখুন'} autoComplete="off" autoCapitalize="off" spellCheck={false} disabled={disabled} value={deleteText} onChange={event => setDeleteText(event.target.value)} /></label>
+          <div className="flex gap-2"><button type="submit" disabled={disabled || deleteText !== 'DELETE' || BigInt(row.requestedMinor) > 0n} className="min-h-11 flex-1 rounded-xl bg-rose-700 px-4 py-2.5 text-xs font-semibold text-white disabled:cursor-not-allowed disabled:opacity-40 focus-visible:outline-2 focus-visible:outline-rose-600">{busy ? en ? 'Deleting…' : 'মুছে দেওয়া হচ্ছে…' : en ? 'Delete permanently' : 'স্থায়ীভাবে মুছুন'}</button>
+            <button type="button" disabled={busy} className={secondaryButton} onClick={() => { setDeleteGoalId(null); setDeleteText(''); setError(''); }}>{en ? 'Cancel' : 'বাতিল'}</button></div>
+        </form>}
         {!row.goal.archived && availableAccounts.length === 0 && <p className="text-xs text-amber-800">{en ? 'Create or restore an asset wallet to set money aside.' : 'টাকা আলাদা রাখতে একটি সম্পদ ওয়ালেট তৈরি করুন বা ফিরিয়ে আনুন।'}</p>}
 
         {allocateTo === row.goal.id && <form className="space-y-3 rounded-xl bg-slate-50 p-3" onSubmit={allocate}>
