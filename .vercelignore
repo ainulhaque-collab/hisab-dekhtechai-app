@@ -7,6 +7,7 @@
 .local-signing/
 .local-signing-sandbox-incomplete/
 .local-tools/
+.local-firebase/
 .gradle/
 android/
 docs/

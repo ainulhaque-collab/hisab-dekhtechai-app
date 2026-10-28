@@ -5,7 +5,7 @@ import { resolve } from 'node:path';
 export async function verifyFirebaseSenderBuild(environment = process.env, exchange) {
   if (environment.PUSH_VERIFY_IDENTITY_ON_BUILD !== 'true') return 'PUSH_IDENTITY_CHECK_SKIPPED';
   if (environment.VERCEL_ENV !== 'preview') throw new Error('PUSH_PREVIEW_ONLY');
-  const getToken = exchange || (await import('../server/notifications/keylessIdentity.mjs')).getFirebaseSenderAccessToken;
+  const getToken = exchange || (await import('./keylessIdentity.mjs')).getFirebaseSenderAccessToken;
   const token = await getToken({ environment: environment.VERCEL_ENV });
   if (typeof token !== 'string' || !token.length) throw new Error('PUSH_IDENTITY_UNAVAILABLE');
   // Only a fixed success code escapes this function, never the short-lived token.

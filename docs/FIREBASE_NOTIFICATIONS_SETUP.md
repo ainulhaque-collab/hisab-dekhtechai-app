@@ -117,7 +117,9 @@ then requests a 600-second impersonated token scoped only to Firebase messaging.
 It rejects production/local execution and never returns SDK errors with headers
 or credentials. There is no public token/diagnostic route.
 
-`scripts/Verify-FirebaseSender.mjs` runs after the Web build. It skips by default.
+`server/notifications/verifyBuild.mjs` runs after the Web build. It skips by default.
+Keep it under `server/`: Vercel intentionally excludes the local `scripts/`
+folder, signing helpers and `.local-firebase/` inputs from deployment.
 Only the existing test branch has Preview-only
 `PUSH_VERIFY_IDENTITY_ON_BUILD=true`; an opted-in non-preview build fails closed.
 Success logs only `PUSH_KEYLESS_IDENTITY_VERIFIED`, never a token. This probe

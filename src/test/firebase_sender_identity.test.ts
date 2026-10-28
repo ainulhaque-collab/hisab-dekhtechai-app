@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { assertPreviewSenderClaims, firebaseSenderCredentialOptions, getFirebaseSenderAccessToken } from '../../server/notifications/keylessIdentity.mjs';
-import { verifyFirebaseSenderBuild } from '../../scripts/Verify-FirebaseSender.mjs';
+import { verifyFirebaseSenderBuild } from '../../server/notifications/verifyBuild.mjs';
 
 const now = 1_800_000_000;
 const claims = { iss: 'https://oidc.vercel.com/ainulhaque-collab', aud: 'https://vercel.com/ainulhaque-collab',
