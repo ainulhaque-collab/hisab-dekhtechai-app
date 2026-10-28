@@ -4,6 +4,7 @@ import { useApp } from '../context/AppContext';
 import { formatAccountTitle, formatBDT, fromBengaliDigits, paisaToDecimalString, parsePaisaString, toBengaliDigits } from '../domain/money';
 import type { SavingsGoal, SavingsProjection } from '../domain/savingsGoals';
 import { AppSelect } from './AppSelect';
+import { AppDateInput } from './AppDateInput';
 import { fieldClass, ModalShell, primaryButton, secondaryButton } from './ModalShell';
 
 type GoalForm = {
@@ -204,7 +205,7 @@ export function SavingsGoalsModal({ onClose }: { onClose: () => void }) {
             <label className="block text-xs font-medium">{en ? 'Months to cover (1–24)' : 'কত মাসের খরচ (১–২৪)'}<input className={fieldClass} inputMode="numeric" required value={form.months} onChange={event => patch({ months: event.target.value })} /></label>
             <p className="text-xs font-semibold text-blue-800">{en ? 'Target: ' : 'লক্ষ্য: '}{emergencyTarget ? money(emergencyTarget) : '—'}</p>
           </> : <label className="block text-xs font-medium">{en ? 'Target amount (BDT)' : 'লক্ষ্যের পরিমাণ (টাকা)'}<input className={fieldClass} inputMode="decimal" required value={form.target} onChange={event => patch({ target: event.target.value })} placeholder="100000" /></label>}
-          <label className="block text-xs font-medium">{en ? 'Target date · optional' : 'লক্ষ্যের তারিখ · ঐচ্ছিক'}<input className={fieldClass} type="date" value={form.deadline} onChange={event => patch({ deadline: event.target.value })} /></label>
+          <label className="block text-xs font-medium">{en ? 'Target date · optional' : 'লক্ষ্যের তারিখ · ঐচ্ছিক'}<AppDateInput className={fieldClass} label={en ? 'Target date · optional' : 'লক্ষ্যের তারিখ · ঐচ্ছিক'} language={language} disabled={disabled} value={form.deadline} onChange={deadline => patch({ deadline })} /></label>
           <label className="block text-xs font-medium">{en ? 'Planned monthly savings (BDT) · optional' : 'মাসিক সঞ্চয়ের পরিকল্পনা (টাকা) · ঐচ্ছিক'}<input className={fieldClass} inputMode="decimal" value={form.monthly} onChange={event => patch({ monthly: event.target.value })} /></label>
           <p className="text-xs leading-relaxed text-slate-500">{en ? 'The monthly plan is a reminder only. Money is reserved when you add it from a wallet.' : 'মাসিক পরিকল্পনা শুধু মনে রাখার জন্য। ওয়ালেট থেকে যোগ করলেই টাকা আলাদা রাখা হবে।'}</p>
           <div className="flex gap-2"><button type="submit" disabled={disabled} className={`${primaryButton} flex-1`}>{busy ? en ? 'Saving…' : 'সেভ হচ্ছে…' : en ? 'Save goal' : 'লক্ষ্য সেভ করুন'}</button><button type="button" disabled={busy} className={secondaryButton} onClick={() => setForm(null)}>{en ? 'Cancel' : 'বাতিল'}</button></div>

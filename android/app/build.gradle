@@ -52,7 +52,10 @@ android {
         }
     }
     // Opt-in, read-only bridge instrumentation against the actual minified APK.
-    if (project.hasProperty('hisabMediaProbe')) testBuildType 'release'
+    if (project.hasProperty('hisabMediaProbe')) {
+        testBuildType 'release'
+        sourceSets.getByName('androidTest').assets.srcDir(file('../../build/calendar-native-probe'))
+    }
 
     compileOptions {
         sourceCompatibility JavaVersion.VERSION_21

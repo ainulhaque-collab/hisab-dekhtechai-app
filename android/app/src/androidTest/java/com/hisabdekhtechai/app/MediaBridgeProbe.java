@@ -16,9 +16,11 @@ import org.json.JSONTokener;
 /** Read-only release probe. No DOM, ledger, identity, network calls or sensor access. */
 public class MediaBridgeProbe extends Instrumentation {
     private boolean pickerTheme;
+    private boolean domCalendar;
     @Override public void onCreate(Bundle arguments) {
         super.onCreate(arguments);
         pickerTheme = arguments != null && "true".equals(arguments.getString("picker_theme"));
+        domCalendar = arguments != null && "true".equals(arguments.getString("dom_calendar"));
         start();
     }
     private WebView findWebView(View view) {
@@ -42,6 +44,11 @@ public class MediaBridgeProbe extends Instrumentation {
     @Override public void onStart() {
         Bundle result = new Bundle();
         try {
+            if (domCalendar) {
+                result = DOMCalendarProbe.run(this);
+                finish("PASS".equals(result.getString("dom_calendar_probe_status")) ? Activity.RESULT_OK : Activity.RESULT_CANCELED, result);
+                return;
+            }
             if (pickerTheme) {
                 result = PickerThemeProbe.run(this);
                 finish("PASS".equals(result.getString("picker_probe_status")) ? Activity.RESULT_OK : Activity.RESULT_CANCELED, result);

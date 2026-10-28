@@ -22,7 +22,8 @@ export function useDialog(open: boolean, panel: RefObject<HTMLElement | null>, o
         e.preventDefault(); nodes[(index + (e.shiftKey ? -1 : 1) + nodes.length) % nodes.length]?.focus();
       }
     };
-    const initialFocus = panel.current?.querySelector<HTMLElement>('[aria-selected="true"]') ||
+    const initialFocus = panel.current?.querySelector<HTMLElement>('[data-dialog-initial-focus]') ||
+      panel.current?.querySelector<HTMLElement>('[aria-selected="true"]') ||
       panel.current?.querySelector<HTMLElement>('input:not(:disabled)') || panel.current?.querySelector<HTMLElement>('button:not(:disabled)');
     initialFocus?.focus();
     window.addEventListener('hisab-back', back);

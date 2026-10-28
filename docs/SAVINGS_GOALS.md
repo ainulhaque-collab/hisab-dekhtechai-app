@@ -55,13 +55,14 @@ calendar months; they are a plan, not automatic transfers or investment returns.
 
 ## Picker and reservation feedback
 
-Android date/time inputs resolve platform picker themes independently of the JS
-alert theme. Both now use an explicit light dialog palette so system night mode
-cannot place light text on a white calendar/clock. The signed-app instrumentation
-probe accepts `-e picker_theme true`: it renders only synthetic native date/time
-dialogs under day and night configurations, checks text contrast and selection
-callbacks, and saves dialog-only images without inspecting the app's WebView or
-financial records.
+The owner reported that Android WebView's actual goal deadline popup stayed blank
+after an explicit light platform picker theme was added. The native-only
+`-e picker_theme true` probe passed, but does not cover that WebView popup and
+must not be used as its acceptance evidence. Goal deadlines now use AppDateInput,
+a DOM calendar with fixed readable colors, month navigation, Bengali/English
+labels, year entry and clear/cancel. It never creates a native date input; saved
+values remain the same canonical YYYY-MM-DD string. The platform theme remains
+for separate native dialogs, with its narrower probe coverage documented.
 
 The allocation form initially selects the first wallet with available money.
 It shows actual balance, money already set aside across goals, and the remaining

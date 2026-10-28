@@ -73,6 +73,7 @@ function Invoke-BuildStep([string]$executable, [string[]]$arguments) {
 Push-Location $workspaceRoot
 try {
     if ($BridgeTestOnly) {
+        Invoke-BuildStep 'node.exe' @('scripts/Build-CalendarProbe.mjs')
         Push-Location (Join-Path $workspaceRoot 'android')
         try {
             Invoke-BuildStep $gradleExecutable @(':app:assembleReleaseAndroidTest', '-PhisabMediaProbe', '--no-daemon', '--no-watch-fs', '--max-workers=1', '-Dorg.gradle.jvmargs=-Xmx1024m -XX:ActiveProcessorCount=2 -Dfile.encoding=UTF-8')
