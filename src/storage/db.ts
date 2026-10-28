@@ -44,6 +44,8 @@ import { resolveJournalTime, validateTransactionTime } from '../domain/transacti
 import { validateReceiptBlob } from './receipts';
 import { createWorkspaceImage, validateWorkspaceImage } from './workspaceImages';
 import { decodeBackup, encodeBackup, mergeBackup } from './backup';
+import { projectSavingsGoals, validateSavingsGoalEvent, type SavingsGoal, type SavingsGoalEvent, type SavingsProjection } from '../domain/savingsGoals';
+import { isSavingsOperation, savingsRecords, validateSavingsOperations } from './savingsOperations';
 import {
   createDurableStorageDriver,
   DurableStorageDriver,
@@ -750,6 +752,8 @@ export class LocalDatabase {
     const ws = this.state.workspaces.get(id);
     if (!ws || ws.deletedAt) return 'Workspace not found.';
     this.assertWorkspaceOwner(ws);
+    if (Array.from(this.state.syncOperations.values()).some(op => op.entityId === id && isSavingsOperation(op)))
+      return 'This workspace contains savings history. Archive it to keep that history.';
     const starter = { localIdentity: null, workspaces: new Map(), accounts: new Map(), categories: new Map(), parties: new Map() };
     populateStarterEntities(starter);
     const protectedCollections = [this.state.accountGroups, this.state.accountPermissions, this.state.journalTransactions,
@@ -894,6 +898,7 @@ export class LocalDatabase {
     }
 
     const hasReferences = BigInt(acc.openingBalanceMinor) !== 0n ||
+      Array.from(this.state.syncOperations.values()).some(op => isSavingsOperation(op) && op.payload.savingsEvent?.accountId === id) ||
       Array.from(this.state.accountPermissions.values()).some(g => g.accountIds.includes(id)) ||
       Array.from(this.state.recurringRules.values()).some(r => JSON.stringify(r).includes(id)) ||
       this.getPendingOutbox().some(op => op.entityId === id || JSON.stringify(op.payload).includes(id));
@@ -1689,6 +1694,100 @@ export class LocalDatabase {
     }
   }
 
+  // Savings are earmarks over real account balances, never journal postings.
+  private savingsWorkspace(workspaceId: UUID, requireActive = true): Workspace {
+    const ws = this.state.workspaces.get(workspaceId);
+    if (!ws || ws.deletedAt || requireActive && ws.archivedAt) throw new Error('SAVINGS_WORKSPACE_UNAVAILABLE');
+    if (ws.ownerSubjectHash !== (this.getIdentity()?.ownerSubjectHash || 'local-owner')) throw new Error('SAVINGS_OWNER_MISMATCH');
+    return ws;
+  }
+
+  public getSavingsProjection(workspaceId: UUID, today?: string): SavingsProjection {
+    this.savingsWorkspace(workspaceId, false);
+    const balances: Record<string, string> = {};
+    for (const summary of this.calculateAccountSummaries(workspaceId)) {
+      const account = this.state.accounts.get(summary.accountId);
+      if (account && (account.classification || 'asset') === 'asset') balances[summary.accountId] = summary.currentBalanceMinor;
+    }
+    const now = new Date();
+    const day = today || `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
+    return projectSavingsGoals(savingsRecords(this.state.syncOperations.values(), workspaceId), workspaceId, balances, day);
+  }
+
+  private async commitSavingsEvent(workspaceId: UUID,
+    build: (projection: SavingsProjection) => SavingsGoalEvent): Promise<SavingsGoalEvent> {
+    await this.beginTransaction();
+    try {
+      this.savingsWorkspace(workspaceId);
+      const event = validateSavingsGoalEvent(build(this.getSavingsProjection(workspaceId)));
+      this.queueSyncOp('workspace.update', workspaceId, { id: workspaceId, savingsEvent: event });
+      validateSavingsOperations(this.state.syncOperations.values(), this.state.workspaces, this.state.accounts);
+      await this.commitTransaction();
+      return event;
+    } catch (error) { await this.rollbackTransaction(); throw error; }
+  }
+
+  public async saveSavingsGoal(workspaceId: UUID, input: {
+    id?: UUID; name: string; kind: 'general' | 'emergency'; targetMinor: string;
+    deadline?: string; monthlyContributionMinor?: string; essentialMonthlyMinor?: string; coverageMonths?: number;
+  }): Promise<SavingsGoal> {
+    const event = await this.commitSavingsEvent(workspaceId, projection => {
+      const existing = input.id ? projection.goals.find(item => item.goal.id === input.id)?.goal : undefined;
+      if (input.id && !existing) throw new Error('SAVINGS_GOAL_NOT_FOUND');
+      if (existing?.archived) throw new Error('SAVINGS_GOAL_ARCHIVED');
+      return { version: 1, action: 'goal.set', goal: {
+        id: existing?.id || generateUUID(), workspaceId, name: input.name.trim(), kind: input.kind,
+        targetMinor: input.targetMinor, ...(input.deadline ? { deadline: input.deadline } : {}),
+        ...(input.monthlyContributionMinor ? { monthlyContributionMinor: input.monthlyContributionMinor } : {}),
+        ...(input.essentialMonthlyMinor ? { essentialMonthlyMinor: input.essentialMonthlyMinor } : {}),
+        ...(input.coverageMonths !== undefined ? { coverageMonths: input.coverageMonths } : {}),
+        revision: (existing?.revision || 0) + 1, archived: false,
+      } };
+    });
+    if (event.action !== 'goal.set') throw new Error('SAVINGS_EVENT_INVALID');
+    return event.goal;
+  }
+
+  public async setSavingsGoalArchived(workspaceId: UUID, goalId: UUID, archived: boolean): Promise<void> {
+    await this.commitSavingsEvent(workspaceId, projection => {
+      const item = projection.goals.find(item => item.goal.id === goalId);
+      if (!item) throw new Error('SAVINGS_GOAL_NOT_FOUND');
+      if (archived && BigInt(item.requestedMinor) > 0n) throw new Error('SAVINGS_ALLOCATIONS_REMAIN');
+      return { version: 1, action: 'goal.set', goal: { ...item.goal, archived, revision: item.goal.revision + 1 } };
+    });
+  }
+
+  public async allocateSavingsGoal(workspaceId: UUID, goalId: UUID, accountId: UUID, amountMinor: string, note?: string): Promise<void> {
+    await this.commitSavingsEvent(workspaceId, projection => {
+      if (projection.orphanAllocationCount || projection.orphanReleaseCount) throw new Error('SAVINGS_SYNC_INCOMPLETE');
+      const item = projection.goals.find(item => item.goal.id === goalId);
+      if (!item) throw new Error('SAVINGS_GOAL_NOT_FOUND');
+      if (item.goal.archived) throw new Error('SAVINGS_GOAL_ARCHIVED');
+      const account = this.state.accounts.get(accountId);
+      if (!account || account.workspaceId !== workspaceId || account.archivedAt || (account.classification || 'asset') !== 'asset')
+        throw new Error('SAVINGS_ACCOUNT_UNAVAILABLE');
+      const event: SavingsGoalEvent = { version: 1, action: 'allocation.add', goalId, allocationId: generateUUID(),
+        accountId, amountMinor, ...(note?.trim() ? { note: note.trim() } : {}) };
+      validateSavingsGoalEvent(event);
+      const available = projection.accounts.find(item => item.accountId === accountId)?.availableMinor || '0';
+      if (BigInt(amountMinor) > BigInt(available)) throw new Error('SAVINGS_INSUFFICIENT_AVAILABLE');
+      return event;
+    });
+  }
+
+  public async releaseSavingsAllocation(workspaceId: UUID, goalId: UUID, allocationId: UUID, amountMinor: string): Promise<void> {
+    await this.commitSavingsEvent(workspaceId, projection => {
+      const item = projection.goals.find(item => item.goal.id === goalId);
+      if (!item) throw new Error('SAVINGS_GOAL_NOT_FOUND');
+      const contribution = item.contributions.find(value => value.allocationId === allocationId);
+      if (!contribution) throw new Error('SAVINGS_EVENT_INVALID');
+      const event: SavingsGoalEvent = { version: 1, action: 'allocation.release', goalId, allocationId, amountMinor };
+      validateSavingsGoalEvent(event);
+      if (BigInt(amountMinor) > BigInt(contribution.requestedMinor)) throw new Error('SAVINGS_RELEASE_EXCEEDS_ALLOCATION');
+      return event;
+    });
+  }
+
   public getBudgets(workspaceId: UUID): Budget[] {
     return Array.from(this.state.budgets.values()).filter((b) => b.workspaceId === workspaceId);
   }
@@ -1906,6 +2005,7 @@ export class LocalDatabase {
     this.state.localSnapshots = new Map(data.localSnapshots || []);
     this.state.schemaMigrations = [...(data.schemaMigrations || [])];
     this.state.preferences = new Map(data.preferences || []);
+    validateSavingsOperations(this.state.syncOperations.values(), this.state.workspaces, this.state.accounts);
 
   }
 

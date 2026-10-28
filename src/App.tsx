@@ -21,6 +21,7 @@ import { PartiesModal } from './components/PartiesModal';
 import { ProfileModal } from './components/ProfileModal';
 import { TeamSharingModal } from './components/TeamSharingModal';
 import { AboutModal } from './components/AboutModal';
+import { SavingsGoalsModal } from './components/SavingsGoalsModal';
 import { PinLockScreen } from './components/PinLockScreen';
 import { pinLock } from './security/pinLock';
 import { JournalTransaction } from './contracts/types';
@@ -100,6 +101,7 @@ function MainApp() {
   const [isProfileModalOpen, setIsProfileModalOpen] = useState(false);
   const [isTeamSharingModalOpen, setIsTeamSharingModalOpen] = useState(false);
   const [isAboutModalOpen, setIsAboutModalOpen] = useState(false);
+  const [isSavingsGoalsOpen, setIsSavingsGoalsOpen] = useState(false);
 
   if (!isUnlocked) {
     return <PinLockScreen onUnlocked={() => setIsUnlocked(true)} />;
@@ -132,6 +134,7 @@ function MainApp() {
               onSelectTransaction={handleSelectTransactionFromDashboard}
               onOpenSyncModal={() => setIsSyncModalOpen(true)}
               onOpenPartiesModal={() => setIsPartiesModalOpen(true)}
+              onOpenSavingsGoals={() => setIsSavingsGoalsOpen(true)}
             />
           )}
 
@@ -212,6 +215,7 @@ function MainApp() {
         isOpen={isAboutModalOpen}
         onClose={() => setIsAboutModalOpen(false)}
       />
+      {isSavingsGoalsOpen && <SavingsGoalsModal onClose={() => setIsSavingsGoalsOpen(false)} />}
     </div>
   );
 }

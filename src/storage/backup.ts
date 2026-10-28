@@ -3,6 +3,7 @@ import { validateTransactionTime } from '../domain/transactionTime';
 import { validateReceiptBlob } from './receipts';
 import { mergeWorkspaceImage, validateWorkspaceImage } from './workspaceImages';
 import { SYSTEM_ACCOUNTS } from '../contracts/ledger';
+import { validateSavingsOperations } from './savingsOperations';
 
 export const MAX_BACKUP_BYTES = 40 * 1024 * 1024;
 const MAPS = ['workspaces', 'accounts', 'accountGroups', 'accountPermissions', 'categories', 'parties',
@@ -131,6 +132,7 @@ export function mergeBackup(current: Data, incoming: Data, replaceUntouchedStart
     const image = op.type === 'workspace.create' ? op.payload.workspace?.image : op.type === 'workspace.update' ? op.payload.image : undefined;
     if (image !== undefined) validateWorkspaceImage(image);
   }
+  validateSavingsOperations(ops.values(), ws, accounts);
   if (!Array.isArray(incoming.appliedOperations || [])) throw new Error('BACKUP_INVALID');
   result.appliedOperations = [...new Set([...(current.appliedOperations || []), ...(incoming.appliedOperations || [])])];
   result.schemaVersion = 5;

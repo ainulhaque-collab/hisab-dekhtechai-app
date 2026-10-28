@@ -8,6 +8,7 @@
  */
 
 import { LocalDatabase } from '../storage/db';
+import { isSavingsOperation, validateSavingsOperations } from '../storage/savingsOperations';
 import { DriveTransport } from '../drive/transport';
 import {
   SyncBatch,
@@ -650,6 +651,7 @@ export class SyncOrchestrator {
     // 3. Establish verified identity on database
     this.db.setIdentity(profile.subjectHash, profile.displayName);
     rawState.preferences.set('sync-bootstrap-owner-v1', profile.subjectHash);
+    validateSavingsOperations(this.db.getRawState().syncOperations.values(), this.db.getRawState().workspaces, this.db.getRawState().accounts);
     await this.db.commitTransaction();
     } catch (error) { await this.db.rollbackTransaction(); throw error; }
     // Independent asset-store failure keeps originals intact; reconnect retries the claim.
@@ -720,6 +722,19 @@ export class SyncOrchestrator {
       );
     }
 
+    // Old clients may have applied/retained the extension. A replay is allowed
+    // only for the same immutable operation, never a replacement using its ID.
+    const batchIds = new Map<string, SyncOperation>();
+    for (const op of batch.operations) {
+      if (!op || typeof op.operationId !== 'string') throw new Error('Invalid synchronization operation.');
+      const existing = batchIds.get(op.operationId) || this.db.getRawState().syncOperations.get(op.operationId);
+      if (existing && (isSavingsOperation(existing) || isSavingsOperation(op))) {
+        const { contentSha256: _oldHash, ...oldFields } = existing;
+        const { contentSha256: _newHash, ...newFields } = op;
+        if (canonicalJson(oldFields) !== canonicalJson(newFields)) throw new Error('SAVINGS_EVENT_CONFLICT');
+      }
+      batchIds.set(op.operationId, op);
+    }
     if (batch.operations.every(op => this.db.getRawState().appliedOperations.has(op.operationId))) return;
     await this.db.beginTransaction();
     try {
@@ -763,6 +778,7 @@ export class SyncOrchestrator {
     operations = deferred;
     }
 
+    validateSavingsOperations(this.db.getRawState().syncOperations.values(), this.db.getRawState().workspaces, this.db.getRawState().accounts);
     await this.db.commitTransaction();
     } catch (error) { await this.db.rollbackTransaction(); throw error; }
   }

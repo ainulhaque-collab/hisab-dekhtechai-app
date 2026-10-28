@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useMemo, useState } from 'react';
 import { useApp } from '../context/AppContext';
 import { formatBDT, formatAccountTitle } from '../domain/money';
 import { getT } from '../locales/i18n';
@@ -17,7 +17,8 @@ import {
   Receipt,
   Building,
   Smartphone,
-  Banknote
+  Banknote,
+  Target
 } from 'lucide-react';
 import { JournalTransaction } from '../contracts/types';
 import { Users, UserPlus } from 'lucide-react';
@@ -29,6 +30,7 @@ interface DashboardTabProps {
   onSelectTransaction: (tx: JournalTransaction) => void;
   onOpenSyncModal: () => void;
   onOpenPartiesModal?: () => void;
+  onOpenSavingsGoals?: () => void;
 }
 
 export const DashboardTab: React.FC<DashboardTabProps> = ({
@@ -37,12 +39,20 @@ export const DashboardTab: React.FC<DashboardTabProps> = ({
   onSelectTransaction,
   onOpenSyncModal,
   onOpenPartiesModal,
+  onOpenSavingsGoals,
 }) => {
-  const { dashboardData, currentWorkspace, parties, language, syncStatus, isOnline, triggerManualSync } =
+  const { db, dashboardData, currentWorkspace, parties, language, syncStatus, isOnline, triggerManualSync } =
     useApp();
   const [showBalance, setShowBalance] = useState(true);
   const [isSyncing, setIsSyncing] = useState(false);
   const t = getT(language);
+  const savings = useMemo(() => {
+    if (!currentWorkspace || !dashboardData) return null;
+    try { return db.getSavingsProjection(currentWorkspace.id); } catch { return null; }
+  }, [db, currentWorkspace?.id, dashboardData]);
+  const activeGoals = savings?.goals.filter(item => !item.goal.archived) || [];
+  const savedMinor = activeGoals.reduce((total, item) => total + BigInt(item.fundedMinor), 0n);
+  const shortfall = activeGoals.some(item => BigInt(item.shortfallMinor) > 0n);
 
   if (!dashboardData) {
     return (
@@ -183,6 +193,17 @@ export const DashboardTab: React.FC<DashboardTabProps> = ({
       </div>
 
       <DashboardCharts key={currentWorkspace?.id} data={dashboardData} language={language} visible={showBalance} />
+
+      {onOpenSavingsGoals && <button type="button" onClick={onOpenSavingsGoals}
+        className="flex w-full items-center gap-3 rounded-2xl border border-slate-200/80 bg-white p-4 text-left shadow-xs transition hover:border-blue-300">
+        <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-blue-50 text-blue-700"><Target className="h-5 w-5" /></span>
+        <span className="min-w-0 flex-1"><span className="block text-sm font-semibold">{language === 'en' ? 'Savings goals' : 'সঞ্চয়ের লক্ষ্য'}</span>
+          <span className={`mt-1 block text-xs ${shortfall ? 'text-amber-700' : 'text-slate-500'}`}>
+            {!savings ? (language === 'en' ? 'Open to check your savings goals' : 'লক্ষ্যের অবস্থা দেখতে খুলুন') : shortfall ? (language === 'en' ? 'Wallet balance changed · review allocations' : 'ওয়ালেটের ব্যালান্স বদলেছে · বরাদ্দ দেখুন') : activeGoals.length
+              ? `${showBalance ? formatBDT(savedMinor, { locale: language }) : '••••'} · ${activeGoals.length.toLocaleString(language === 'en' ? 'en-GB' : 'bn-BD')} ${language === 'en' ? 'active goals' : 'সক্রিয় লক্ষ্য'}`
+              : (language === 'en' ? 'Plan a purchase or build an emergency fund' : 'কেনাকাটার লক্ষ্য বা জরুরি তহবিল তৈরি করুন')}
+          </span></span><ChevronRight className="h-4 w-4 shrink-0 text-slate-400" />
+      </button>}
 
       {/* Business Workspace: Members Strip */}
       {currentWorkspace?.kind === 'business' && (
