@@ -1,5 +1,6 @@
 {
-  "status": "PROPOSED_NOT_APPLIED_OWNER_IAM_APPROVAL_REQUIRED",
+  "status": "APPLIED",
+  "ownerApprovalDate": "2026-10-28",
   "projectId": "hisab-dekhtechai-notifications",
   "projectNumber": "706081957087",
   "customRole": {
@@ -11,7 +12,7 @@
   "provider": {
     "id": "vercel-preview",
     "issuerUri": "https://oidc.vercel.com/ainulhaque-collab",
-    "issuerModeVerification": "REQUIRED_BEFORE_APPLY: connector omits issuer mode",
+    "issuerModeVerification": "VERIFIED_TEAM_ISSUER_IN_VERCEL_SECURITY_UI",
     "allowedAudiences": ["https://vercel.com/ainulhaque-collab"],
     "attributeMapping": {"google.subject": "assertion.sub"},
     "attributeCondition": "assertion.owner_id == 'team_GtyIJ90B2vhl4tLHJkuyyamQ' && assertion.project_id == 'prj_3zLhTBZiE6SUBr05SjmxA57sq4bC' && assertion.environment == 'preview' && assertion.sub == 'owner:ainulhaque-collab:project:hisab-dekhtechai-app:environment:preview'"

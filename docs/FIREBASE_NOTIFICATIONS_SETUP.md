@@ -65,10 +65,10 @@ project and its settings untouched.
    the server. Never commit service-account keys or expose them through VITE vars,
    the APK, Notion, chat or downloadable files. Private registration tokens stay
    server-side and owner-scoped.
-   Prefer keyless identity federation where practical. Any IAM access expansion
-   or private credential generation needs a concrete owner-reviewed setup step;
-   the broad default Firebase Admin account must not be used casually. No sender
-   account, IAM grant or private key was created during client registration.
+   The owner approved the exact keyless sender proposal and its scoped IAM
+   resources are now applied (details below). No static private key was created.
+   Any further access expansion needs its own concrete review; do not reuse the
+   broad default Firebase Admin account.
 4. Schedule at 13:00 UTC (19:00 Asia/Dhaka). Store only needed reminder metadata
    and authenticated device registrations, not a second copy of the ledger.
    Deduplicate each loan/local-date notification; cancel on full repayment and
@@ -76,31 +76,63 @@ project and its settings untouched.
 5. Test Android and Web background delivery with synthetic loans before enabling
    it for the owner. No public admin announcements are sent as a setup test.
 
-## Concrete trusted-sender proposal — not applied
+## Applied trusted-sender boundary
 
-`config/firebase-sender-preview.plan.json` records a keyless Google Workload
-Identity Federation proposal. The proposed custom role has only
-`cloudmessaging.messages.create` in this independent notifications project.
-A dedicated sender account would be impersonated by the exact Vercel
-team/project **preview** subject; provider conditions also pin the immutable
-team/project IDs. No whole-pool or wildcard principal grant is proposed.
+On 28 October 2026 the owner approved the exact proposal in
+`config/firebase-sender-preview.plan.json`. These resources were applied and
+verified in the Google Cloud UI:
+
+- Custom role `hisabNotificationSender`: **only** `cloudmessaging.messages.create`;
+  enabled, General Availability.
+- Dedicated service account
+  `hisab-preview-push@hisab-dekhtechai-notifications.iam.gserviceaccount.com`,
+  unique ID `108365362847283654794`; custom role assigned; no keys.
+- Pool `hisab-vercel-preview` / OIDC provider `vercel-preview`, enabled.
+- Team issuer `https://oidc.vercel.com/ainulhaque-collab` and audience
+  `https://vercel.com/ainulhaque-collab`, verified in Vercel Security UI first.
+- `google.subject = assertion.sub`; provider CEL pins exact immutable Vercel
+  team/project IDs, `preview` environment and the approved subject.
+- Account-level `roles/iam.workloadIdentityUser` binding for the exact subject
+  principal recorded in the plan; no whole-pool/wildcard grant. Existing inherited
+  owner/Firebase-agent access was not modified.
+
+Proof: `build/firebase-setup/sender-role-created.png`,
+`sender-account-no-keys.png`, `preview-provider-condition.png`,
+`preview-sender-binding-applied.png`, `sender-provisioning-progress.json`.
 
 This permits **all Preview deployments of this Vercel project**, not only the
 current branch alias. Other projects, development and production are excluded.
 Keep that boundary explicit in the owner's IAM approval. It grants no Drive,
 ledger, banking, Firebase Authentication or storage permission.
 
-The Vercel connector verifies the project/team IDs but does not expose issuer
-mode. Confirm that the configured issuer is the proposed team issuer before
-applying the plan; stop if it differs. The Google Cloud IAM UI timed out in the
-automated browser during read-only discovery. No IAM resource/grant was applied.
-Creating the proposed custom role, service account, pool/provider and its exact
-binding requires a separate owner-reviewed access change. No private JSON key
-is required by this proposal; no billing change is proposed.
+The connector omitted issuer mode, so it was verified directly in the Vercel
+Security UI without changing that setting. No private JSON key or billing
+change was made. Workload Identity setup enabled its prerequisite APIs through
+Google's own console flow.
 
-After authorized provisioning, implement request-context OIDC exchange, owner
-token registration/revocation, permission UI, service worker, deduplication and
-reminder dispatch. Approval of IAM alone is not evidence of live push delivery.
+`server/notifications/keylessIdentity.mjs` uses official `@vercel/oidc` and
+`google-auth-library` SDKs. It obtains a fresh request/build-context subject token,
+checks its exact boundary and expiry before Google STS verifies its signature,
+then requests a 600-second impersonated token scoped only to Firebase messaging.
+It rejects production/local execution and never returns SDK errors with headers
+or credentials. There is no public token/diagnostic route.
+
+`scripts/Verify-FirebaseSender.mjs` runs after the Web build. It skips by default.
+Only the existing test branch has Preview-only
+`PUSH_VERIFY_IDENTITY_ON_BUILD=true`; an opted-in non-preview build fails closed.
+Success logs only `PUSH_KEYLESS_IDENTITY_VERIFIED`, never a token. This probe
+exchanges credentials but sends no notification and reads no financial records.
+Local validation: 250 tests, browser/API types and Web build PASS; default skip
+verified. Actual exchange results are recorded separately in deployment build
+logs and the canonical Notion tracker. Only the fixed success code establishes
+that live credential exchange passed. Diagnostics distinguish API-disabled,
+billing-required, permission-denied and rejected-identity failures using fixed
+codes; no raw SDK headers, descriptions or credentials are logged. A billing
+requirement must be reported, never resolved by enabling billing automatically.
+
+After the live exchange passes, implement owner token registration/revocation,
+native/Web SDK permission UI, service worker, deduplication and reminder dispatch.
+IAM provisioning and a successful exchange alone do not establish push delivery.
 
 FCM delivery does not execute financial transfers. Closed-app settlement needs
 its own secure executor and current-balance/sync design. Current loan automatic
