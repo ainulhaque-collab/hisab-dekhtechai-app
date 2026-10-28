@@ -87,7 +87,9 @@ current debt, spendable funds and goal status inside its transaction. Unrelated
 goals stay reserved. Stale/no sync, wrong owner/device and missing references do
 not auto-pay. This is eventual offline accounting, not a global bank balance lock.
 
-20 focused loan tests and 238 total tests pass; browser/API type checks and Web
+20 focused loan tests and 238 total tests passed before the final automation-stop
+control. The additional stop/concurrency/restore test passes; final build checks
+are recorded with the APK delivery. Browser/API type checks and Web
 build pass. A 390px Bengali synthetic UI test created a 2,000 BDT loan, repaid
 1,000 BDT, retained the other goal and verified zero pending links/four balanced
 journals. Evidence: build/loans-integrated-final-tests.log and
@@ -97,6 +99,14 @@ Closed-app Android/Web push and closed-app settlement are NOT enabled by this
 foreground worker. Firebase delivery is a separate dependency and does not gain
 financial write authority. The app states the limitation rather than reporting
 unsent notifications or unsaved payments as successful.
+
+Automation can be stopped from any owner device and re-enabled only on the
+executor. A new stop beats stale enables regardless of timestamp or revision;
+re-enabling must acknowledge every observed stop. The automatic payment's own
+transaction rechecks the active setting, due clock and fresh sync receipt, so a
+proposal calculated before a successful stop cannot debit afterward. Stopping
+does not reverse payments already committed. Stops on another offline device
+reach the executor through sync; they are not an instantaneous remote bank lock.
 
 ## Safety contract and remaining release checks
 

@@ -46,7 +46,7 @@ import { createWorkspaceImage, validateWorkspaceImage } from './workspaceImages'
 import { decodeBackup, encodeBackup, mergeBackup } from './backup';
 import { projectSavingsGoals, validateSavingsGoalEvent, type SavingsGoal, type SavingsGoalEvent, type SavingsProjection } from '../domain/savingsGoals';
 import { isSavingsOperation, savingsRecords, validateSavingsOperations } from './savingsOperations';
-import { issueSavingsLoan, repaySavingsLoan, readSavingsLoans, isLoanLedgerAccount, isLoanJournal, type NewSavingsLoan } from './loanBook';
+import { issueSavingsLoan, repaySavingsLoan, setLoanAutoRepayment, readSavingsLoans, isLoanLedgerAccount, isLoanJournal, type NewSavingsLoan } from './loanBook';
 import {
   createDurableStorageDriver,
   DurableStorageDriver,
@@ -1822,7 +1822,8 @@ export class LocalDatabase {
   }
 
   public issueSavingsLoan(input: NewSavingsLoan, now = new Date()) { return issueSavingsLoan(this, input, now); }
-  public repaySavingsLoan(loanId: string, requestId: string, amountMinor?: string, now = new Date()) { return repaySavingsLoan(this, loanId, requestId, amountMinor, now); }
+  public repaySavingsLoan(loanId: string, requestId: string, amountMinor?: string, now = new Date(), automatic = false) { return repaySavingsLoan(this, loanId, requestId, amountMinor, now, automatic); }
+  public setLoanAutoRepayment(loanId: string, enabled: boolean) { return setLoanAutoRepayment(this, loanId, enabled); }
 
   public getBudgets(workspaceId: UUID): Budget[] {
     return Array.from(this.state.budgets.values()).filter((b) => b.workspaceId === workspaceId);

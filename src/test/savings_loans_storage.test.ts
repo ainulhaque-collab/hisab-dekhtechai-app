@@ -10,6 +10,7 @@ import { SyncOrchestrator } from '../sync/orchestrator';
 import { SimulatedGoogleDriveTransport } from '../drive/transport';
 import type { SyncOperation } from '../contracts/types';
 import { runForegroundLoanRepayments } from '../services/loanAutoRepayment';
+import { planLoanAutoRepayment } from '../domain/savingsLoans';
 
 const issued = new Date('2026-10-28T06:00:00Z');
 async function empty() {
@@ -241,4 +242,34 @@ test('Loan automation: new money permits another same-day partial payment withou
   assert.equal(new Set(row.payments.map(p => p.id)).size, 2);
   assert.equal(cash(db, borrowerWs.id, borrower.id), '10000');
   assert.equal((await runForegroundLoanRepayments(db, now)).paid, 0);
+});
+
+test('Loan automation: any owner replica can stop; unseen stops beat stale enables and are rechecked inside payment commit', async () => {
+  const { db, intent, sourceWs } = await setup(), { db: replica } = await empty();
+  await db.issueSavingsLoan({ ...intent, autoRepay: true }, issued);
+  await replica.loadFromSerializable(structuredClone(db.toSerializable()));
+  replica.setDeviceIdentity(generateUUID(), 'Synthetic secondary');
+  for (let i = 0; i < 4; i++) await db.setLoanAutoRepayment(intent.id, true);
+  const row = db.getSavingsLoans(sourceWs.id, '2026-10-28')[0];
+  const proposed = planLoanAutoRepayment(row.issue.terms, row.payments, '2026-10-28', '50000');
+  assert.equal(proposed.status, 'proposal');
+  await replica.setLoanAutoRepayment(intent.id, false);
+  await assert.rejects(replica.setLoanAutoRepayment(intent.id, true), /LOAN_EXECUTOR_REQUIRED/);
+  await replay(db, [...replica.getRawState().syncOperations.values()]);
+  assert.equal(db.getSavingsLoans(sourceWs.id, '2026-10-28')[0].autoRepayEnabled, false, 'Lower numeric revision must still cancel an unseen enable');
+  const now = new Date('2026-10-28T13:00:00Z');
+  db.getRawState().preferences.set('last-verified-sync-v1', { ownerHash: 'synthetic-owner', at: now.toISOString() });
+  assert.equal((await runForegroundLoanRepayments(db, now)).paid, 0);
+  if (proposed.status !== 'proposal') throw new Error('Expected proposal');
+  await assert.rejects(db.repaySavingsLoan(intent.id, proposed.payment.id, proposed.amountMinor, now, true), /LOAN_AUTOMATION_DISABLED/);
+  assert.equal(db.getRawState().journalTransactions.size, 2);
+  await db.setLoanAutoRepayment(intent.id, true);
+  assert.equal(db.getSavingsLoans(sourceWs.id, '2026-10-28')[0].autoRepayEnabled, true);
+  await replica.setLoanAutoRepayment(intent.id, false);
+  await replay(db, [...replica.getRawState().syncOperations.values()]);
+  assert.equal(db.getSavingsLoans(sourceWs.id, '2026-10-28')[0].autoRepayEnabled, false, 'New unseen stop cancels an acknowledged earlier stop');
+  const restored = await empty();
+  await restored.db.importBackupFile(await db.exportBackupFile());
+  assert.equal(restored.db.getSavingsLoans(sourceWs.id, '2026-10-28')[0].autoRepayEnabled, false);
+  assert.equal(db.getRawState().journalTransactions.size, 2);
 });

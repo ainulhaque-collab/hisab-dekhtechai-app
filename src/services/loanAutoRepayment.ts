@@ -18,7 +18,7 @@ export async function runForegroundLoanRepayments(db: LocalDatabase, now = new D
     const day = loanToday(now);
     for (const row of db.getSavingsLoans(undefined, day)) {
       const t = row.issue.terms;
-      if (!row.issue.autoRepay || row.issue.executorDeviceId !== db.getDeviceId() || row.pendingReferences || t.dueDate > day ||
+      if (!row.autoRepayEnabled || row.issue.executorDeviceId !== db.getDeviceId() || row.pendingReferences || t.dueDate > day ||
         t.dueDate === day && Number(time) < 19 || row.balance.status === 'paid') continue;
       if (db.getIdentity()?.ownerSubjectHash !== owner || db.isTransactionInProgress()) break;
       try {
@@ -27,7 +27,7 @@ export async function runForegroundLoanRepayments(db: LocalDatabase, now = new D
         const available = projection.accounts.find(a => a.accountId === t.borrowerAccountId)?.availableMinor || '0';
         const proposed = planLoanAutoRepayment(t, row.payments, day, available);
         if (proposed.status !== 'proposal') continue;
-        await db.repaySavingsLoan(t.id, proposed.payment.id, proposed.amountMinor, now);
+        await db.repaySavingsLoan(t.id, proposed.payment.id, proposed.amountMinor, now, true);
         result.paid++;
       } catch { result.failed++; }
     }

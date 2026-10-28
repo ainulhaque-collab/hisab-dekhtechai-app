@@ -7,8 +7,9 @@ import { savingsRecords } from './savingsOperations';
 
 type Issue = { version: 1; action: 'issue'; terms: SavingsLoanTerms; purpose: string; executorDeviceId: string; autoRepay: boolean; releases: string[] };
 type Repay = { version: 1; action: 'repay'; loanId: string; payment: SavingsLoanPayment; principalMinor: string; interestMinor: string };
-type LoanEvent = Issue | Repay;
-export interface SavingsLoanRow { issue: Issue; payments: SavingsLoanPayment[]; balance: SavingsLoanProjection; pendingReferences: number }
+type Automation = { version: 1; action: 'automation.set'; loanId: string; enabled: boolean; revision: number; acknowledgedStops: string[] };
+type LoanEvent = Issue | Repay | Automation;
+export interface SavingsLoanRow { issue: Issue; payments: SavingsLoanPayment[]; balance: SavingsLoanProjection; pendingReferences: number; autoRepayEnabled: boolean; autoRevision: number; automationStopIds: string[] }
 export interface NewSavingsLoan { id: string; goalId: string; sourceWorkspaceId: string; sourceAccountId: string;
   borrowerWorkspaceId: string; borrowerAccountId: string; principalMinor: string; dueDate: string;
   monthlyRateBps: number; repaymentOrder: SavingsLoanTerms['repaymentOrder']; purpose: string; autoRepay?: boolean }
@@ -46,7 +47,7 @@ export const isLoanOperation = (op: SyncOperation) => !!op?.payload && Object.ha
 
 function event(op: SyncOperation): LoanEvent {
   const p = object(op.payload, ['id', 'loanEvent']);
-  const item = object(p.loanEvent, ['version', 'action', 'terms', 'purpose', 'executorDeviceId', 'autoRepay', 'releases', 'loanId', 'payment', 'principalMinor', 'interestMinor']);
+  const item = object(p.loanEvent, ['version', 'action', 'terms', 'purpose', 'executorDeviceId', 'autoRepay', 'releases', 'loanId', 'payment', 'principalMinor', 'interestMinor', 'enabled', 'revision', 'acknowledgedStops']);
   if (item.version !== 1 || op.protocolVersion !== 1 || !Number.isSafeInteger(op.seq) || op.seq < 1 ||
     typeof op.createdAtUtc !== 'string' || !Number.isFinite(Date.parse(op.createdAtUtc)) ||
     op.type !== 'workspace.update' || p.id !== op.entityId ||
@@ -71,6 +72,14 @@ function event(op: SyncOperation): LoanEvent {
       BigInt(item.principalMinor) + BigInt(item.interestMinor) !== BigInt(p.amountMinor) || p.loanId !== item.loanId) return fail();
     return { version: 1, action: 'repay', loanId: identifier(item.loanId), payment: { id: identifier(p.id), loanId: identifier(p.loanId),
       effectiveDate: p.effectiveDate, amountMinor: p.amountMinor }, principalMinor: item.principalMinor, interestMinor: item.interestMinor };
+  }
+  if (item.action === 'automation.set') {
+    object(item, ['version', 'action', 'loanId', 'enabled', 'revision', 'acknowledgedStops']);
+    if (typeof item.enabled !== 'boolean' || !Number.isSafeInteger(item.revision) || item.revision < 1 ||
+      !Array.isArray(item.acknowledgedStops) || item.acknowledgedStops.length > 10_000 ||
+      new Set(item.acknowledgedStops).size !== item.acknowledgedStops.length || !item.enabled && item.acknowledgedStops.length) return fail();
+    return { version: 1, action: 'automation.set', loanId: identifier(item.loanId), enabled: item.enabled,
+      revision: item.revision, acknowledgedStops: item.acknowledgedStops.map(identifier) };
   }
   return fail();
 }
@@ -101,6 +110,7 @@ export function readSavingsLoans(state: Pick<DatabaseState, 'syncOperations' | '
   asOfDate = loanToday()): SavingsLoanRow[] {
   const definitions = new Map<string, { issue: Issue; op: SyncOperation }>();
   const repayments = new Map<string, { repayment: Repay; op: SyncOperation }>();
+  const automation: { setting: Automation; op: SyncOperation }[] = [];
   const released = new Set<string>();
   for (const op of state.syncOperations.values()) {
     if (!isLoanOperation(op)) continue;
@@ -112,16 +122,27 @@ export function readSavingsLoans(state: Pick<DatabaseState, 'syncOperations' | '
       if (previous) continue;
       definitions.set(e.terms.id, { issue: e, op });
       for (const ref of e.releases) { if (released.has(ref)) return fail('LOAN_EVENT_CONFLICT'); released.add(ref); }
-    } else {
+    } else if (e.action === 'repay') {
       const previous = repayments.get(e.payment.id);
       if (previous && canonicalJson(previous.repayment) !== canonicalJson(e)) return fail('LOAN_EVENT_CONFLICT');
       repayments.set(e.payment.id, { repayment: e, op });
-    }
+    } else automation.push({ setting: e, op });
   }
   const rows: SavingsLoanRow[] = [];
   for (const { issue, op } of definitions.values()) {
     const t = issue.terms;
     let pending = 0;
+    let autoRevision = 0;
+    const settings = automation.filter(a => a.setting.loanId === t.id);
+    const automationStopIds = settings.filter(a => !a.setting.enabled).map(a => a.op.operationId).sort();
+    for (const { setting, op: settingOp } of settings) {
+      if (settingOp.ownerHash !== t.ownerHash || settingOp.entityId !== t.sourceWorkspaceId || setting.enabled && settingOp.deviceId !== issue.executorDeviceId) return fail('LOAN_OWNER_MISMATCH');
+      autoRevision = Math.max(autoRevision, setting.revision);
+    }
+    // A previously unseen stop wins over any stale enable, regardless of clock
+    // or numeric revision. Re-enabling explicitly acknowledges every known stop.
+    const autoRepayEnabled = issue.autoRepay && !automationStopIds.length || settings.some(({ setting }) =>
+      setting.enabled && automationStopIds.every(id => setting.acknowledgedStops.includes(id)));
     for (const [wsId, accountId] of [[t.sourceWorkspaceId, t.sourceAccountId], [t.borrowerWorkspaceId, t.borrowerAccountId]]) {
       const ws = state.workspaces.get(wsId), account = state.accounts.get(accountId);
       if (!ws || !account) { pending++; continue; }
@@ -168,7 +189,7 @@ export function readSavingsLoans(state: Pick<DatabaseState, 'syncOperations' | '
       const shape = (tx: JournalTransaction) => tx.lines.map(l => [l.accountId, (BigInt(l.debitMinor) - BigInt(l.creditMinor)).toString(), l.categoryId || null]);
       if (actual.workspaceId !== expected.workspaceId || actual.effectiveDate !== expected.day || actual.transactionType !== expected.type || actual.isDeleted || actual.isReplacedBy || canonicalJson(shape(actual)) !== canonicalJson(expected.entries)) return fail('LOAN_LEDGER_CONFLICT');
     }
-    rows.push({ issue, payments: payments.map(p => p.payment), balance: projectSavingsLoan(t, payments.map(p => p.payment), asOfDate < t.issuedDate ? t.issuedDate : asOfDate), pendingReferences: pending });
+    rows.push({ issue, payments: payments.map(p => p.payment), balance: projectSavingsLoan(t, payments.map(p => p.payment), asOfDate < t.issuedDate ? t.issuedDate : asOfDate), pendingReferences: pending, autoRepayEnabled, autoRevision, automationStopIds });
   }
   return rows;
 }
@@ -254,7 +275,7 @@ export async function issueSavingsLoan(db: LocalDatabase, input: NewSavingsLoan,
   } catch (error) { await db.rollbackTransaction(); throw error; }
 }
 
-export async function repaySavingsLoan(db: LocalDatabase, loanId: string, requestId: string, amountMinor?: string, now = new Date()): Promise<string> {
+export async function repaySavingsLoan(db: LocalDatabase, loanId: string, requestId: string, amountMinor?: string, now = new Date(), automatic = false): Promise<string> {
   identifier(requestId);
   await db.beginTransaction();
   try {
@@ -269,6 +290,13 @@ export async function repaySavingsLoan(db: LocalDatabase, loanId: string, reques
       await db.rollbackTransaction(); return requestId;
     }
     if (row.pendingReferences) return fail('LOAN_SYNC_INCOMPLETE');
+    if (automatic) {
+      const receipt = db.getRawState().preferences.get('last-verified-sync-v1'), age = now.getTime() - Date.parse(receipt?.at);
+      const hour = Number(new Intl.DateTimeFormat('en-GB', { timeZone: 'Asia/Dhaka', hour: '2-digit', hourCycle: 'h23' }).format(now));
+      if (!row.autoRepayEnabled) return fail('LOAN_AUTOMATION_DISABLED');
+      if (day < t.dueDate || day === t.dueDate && hour < 19) return fail('LOAN_NOT_DUE');
+      if (receipt?.ownerHash !== t.ownerHash || !Number.isFinite(age) || age < -5000 || age > 120_000) return fail('LOAN_SYNC_REQUIRED');
+    }
     wallet(db, t.sourceWorkspaceId, t.sourceAccountId); wallet(db, t.borrowerWorkspaceId, t.borrowerAccountId);
     const goal = db.getSavingsProjection(t.sourceWorkspaceId).goals.find(g => g.goal.id === t.goalId);
     if (!goal || goal.deleted || goal.goal.archived) return fail('LOAN_GOAL_UNAVAILABLE');
@@ -298,5 +326,21 @@ export async function repaySavingsLoan(db: LocalDatabase, loanId: string, reques
     if (readSavingsLoans(db.getRawState(), day).find(r => r.issue.terms.id === loanId)?.pendingReferences !== 0) return fail('LOAN_SYNC_INCOMPLETE');
     await db.commitTransaction();
     return requestId;
+  } catch (error) { await db.rollbackTransaction(); throw error; }
+}
+
+/** Any owner device may stop automation. Only the executor can re-enable it,
+ * explicitly acknowledging every observed stop; unseen stops always win. */
+export async function setLoanAutoRepayment(db: LocalDatabase, loanId: string, enabled: boolean): Promise<void> {
+  await db.beginTransaction();
+  try {
+    const row = readSavingsLoans(db.getRawState()).find(r => r.issue.terms.id === loanId);
+    if (!row) return fail('LOAN_NOT_FOUND');
+    ownWorkspace(db, row.issue.terms.sourceWorkspaceId);
+    if (typeof enabled !== 'boolean' || enabled && row.issue.executorDeviceId !== db.getDeviceId()) return fail('LOAN_EXECUTOR_REQUIRED');
+    queueEvent(db, { version: 1, action: 'automation.set', loanId, enabled, revision: row.autoRevision + 1,
+      acknowledgedStops: enabled ? row.automationStopIds : [] }, row.issue.terms.sourceWorkspaceId);
+    readSavingsLoans(db.getRawState());
+    await db.commitTransaction();
   } catch (error) { await db.rollbackTransaction(); throw error; }
 }
