@@ -4,7 +4,8 @@ import { getMessaging } from 'firebase/messaging/sw';
 import { firebaseWebConfig } from './config';
 declare const self: ServiceWorkerGlobalScope;
 
-// This worker is bundled locally; no runtime importScripts/CDN dependencies.
+// This worker is bundled into one classic IIFE; no module-worker, shared chunks,
+// runtime importScripts or CDN dependencies are required by the browser.
 // Install a click handler before Firebase so foreground-created notifications
 // also return to this origin. Never follow a URL from untrusted push data.
 self.addEventListener('notificationclick', event => {

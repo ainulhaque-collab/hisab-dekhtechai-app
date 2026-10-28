@@ -9,7 +9,7 @@
   "scripts": {
     "dev": "vite --port=3000 --host=0.0.0.0",
     "dev:api": "tsx watch server/dev.ts",
-    "build": "vite build && node server/notifications/verifyBuild.mjs",
+    "build": "vite build && node server/notifications/buildWebWorker.mjs && node server/notifications/verifyBuild.mjs",
     "preview": "vite preview",
     "clean": "rm -rf dist server.js",
     "lint": "tsc --noEmit && tsc --project api/tsconfig.json --noEmit",
@@ -46,6 +46,7 @@
     "@types/react": "^19.3.0",
     "@types/react-dom": "^19.3.0",
     "autoprefixer": "^10.4.21",
+    "esbuild": "0.28.2",
     "tailwindcss": "^4.3.3",
     "tsx": "^4.21.0",
     "typescript": "^7.0.2"

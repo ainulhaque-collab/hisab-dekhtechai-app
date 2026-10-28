@@ -65,7 +65,7 @@ export async function createPushPlatform(received: () => void, opened: () => voi
       if (permission !== 'granted') throw new Error('PUSH_PERMISSION_DENIED');
       const vapidKey = import.meta.env.VITE_FIREBASE_VAPID_KEY;
       if (typeof vapidKey !== 'string' || !/^[A-Za-z0-9_-]{87}$/.test(vapidKey)) throw new Error('PUSH_NOT_CONFIGURED');
-      worker = await navigator.serviceWorker.register('/push-sw.js', { type: 'module', scope: '/' });
+      worker = await navigator.serviceWorker.register('/push-sw.js', { scope: '/' });
       worker = await navigator.serviceWorker.ready;
       return messagingSDK.getToken(messaging, { vapidKey, serviceWorkerRegistration: worker });
     },

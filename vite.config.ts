@@ -6,12 +6,6 @@ import {defineConfig} from 'vite';
 export default defineConfig(() => {
   return {
     plugins: [react(), tailwindcss()],
-    build: {
-      rollupOptions: {
-        input: { main: path.resolve(import.meta.dirname, 'index.html'), push: path.resolve(import.meta.dirname, 'src/notifications/firebase-sw.ts') },
-        output: { entryFileNames: chunk => chunk.name === 'push' ? 'push-sw.js' : 'assets/[name]-[hash].js' },
-      },
-    },
     resolve: {
       alias: {
         '@': path.resolve(import.meta.dirname, '.'),

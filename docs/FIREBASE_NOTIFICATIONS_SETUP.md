@@ -132,8 +132,9 @@ requirement must be reported, never resolved by enabling billing automatically.
 Settings → Notifications supports explicit enable, connection refresh, a test
 addressed only to this installation, and disable. English/Bangla labels are
 available. Permission is requested only after the user presses Enable; silent
-resume never prompts. The Web SDK is lazy loaded and its module service worker
-is bundled at `/push-sw.js`. No Analytics or Firebase Authentication is used.
+resume never prompts. The Web SDK is lazy loaded and its service worker is
+bundled into one classic IIFE at `/push-sw.js`, without module-worker/shared
+chunk dependencies. No Analytics or Firebase Authentication is used.
 Android uses official Capacitor Push Notifications, a dedicated monochrome icon,
 private lockscreen visibility and one notification channel. Auto-init starts off.
 
@@ -165,7 +166,7 @@ stay inside the client SDK and private registry and are never returned by the
 notification API. Sign-out attempts server revocation before Google
 logout and deletes the local FCM token; an incomplete disable is reported.
 
-Validation: 10 focused notification tests plus the existing 250 regressions pass;
+Validation: 11 focused notification tests plus the existing 250 regressions pass;
 browser/API TypeScript checks and Web build pass. Synthetic browser UI checks
 cover both languages and signed-out guidance. FCM acceptance alone is not proof
 of delivery: on the signed APK and HTTPS Web preview, connect the same Gmail,
