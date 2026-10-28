@@ -51,7 +51,13 @@ export class NotificationService {
   private exclusive(action: () => Promise<void>) {
     const job = this.serialized.catch(() => {}).then(async () => {
       this.update({ busy: true, error: '', accepted: false });
-      try { await action(); } catch (error) { this.update({ error: error instanceof Error && /^PUSH_/.test(error.message) ? error.message : 'PUSH_UNAVAILABLE' }); }
+      try { await action(); } catch (error) {
+        // Only fixed support codes, never raw SDK descriptions or token details.
+        const code = error && typeof error === 'object' && 'code' in error ? String(error.code) : '';
+        const sdkCode = code.startsWith('messaging/') ? 'PUSH_WEB_REGISTRATION_FAILED'
+          : code.startsWith('installations/') ? 'PUSH_WEB_INSTALLATION_FAILED' : 'PUSH_UNAVAILABLE';
+        this.update({ error: error instanceof Error && /^PUSH_[A-Z_]+$/.test(error.message) ? error.message : sdkCode });
+      }
       finally { this.update({ busy: false }); }
     });
     this.serialized = job; return job;
