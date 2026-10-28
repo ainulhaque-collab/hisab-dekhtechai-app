@@ -236,6 +236,27 @@ test('Invalid amounts, foreign workspace accounts and unavailable goals reject a
   assert.equal(canonicalJson(db.toSerializable()), foreignBefore);
 });
 
+test('Goal targets and monthly plans never supply wallet money; reservations reject above the shared available balance', async () => {
+  const { db, account } = await fundedDatabase();
+  const empty = db.createAccount(workspaceId, 'Synthetic empty wallet', 'cash', '0');
+  await db.waitForPendingWrites();
+  const first = await db.saveSavingsGoal(workspaceId, { name: 'First plan', kind: 'general', targetMinor: '100000', monthlyContributionMinor: '50000' });
+  const second = await db.saveSavingsGoal(workspaceId, { name: 'Second plan', kind: 'general', targetMinor: '100000' });
+  let before = canonicalJson(db.toSerializable());
+  await assert.rejects(db.allocateSavingsGoal(workspaceId, first.id, empty.id, '1'), /SAVINGS_INSUFFICIENT_AVAILABLE/);
+  assert.equal(canonicalJson(db.toSerializable()), before);
+  await db.allocateSavingsGoal(workspaceId, first.id, account.id, '8000');
+  assert.equal(db.getSavingsProjection(workspaceId).accounts.find(row => row.accountId === account.id)?.availableMinor, '2000');
+  before = canonicalJson(db.toSerializable());
+  await assert.rejects(db.allocateSavingsGoal(workspaceId, second.id, account.id, '2001'), /SAVINGS_INSUFFICIENT_AVAILABLE/);
+  assert.equal(canonicalJson(db.toSerializable()), before);
+  await db.allocateSavingsGoal(workspaceId, second.id, account.id, '2000');
+  before = canonicalJson(db.toSerializable());
+  await assert.rejects(db.allocateSavingsGoal(workspaceId, second.id, account.id, '1'), /SAVINGS_INSUFFICIENT_AVAILABLE/);
+  assert.equal(canonicalJson(db.toSerializable()), before);
+  assert.equal(db.getTransactions(workspaceId).length, 0);
+});
+
 test('Uploaded savings references protect empty account and goal-only workspace deletion', async () => {
   const { db } = await database();
   const account = db.createAccount(workspaceId, 'Synthetic empty wallet', 'cash', '0');

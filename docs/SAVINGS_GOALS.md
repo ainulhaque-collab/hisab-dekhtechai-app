@@ -52,3 +52,20 @@ reservation/release and emergency target math at a 390-pixel phone width.
 Actual Android/Web goal sync and owner visual acceptance remain separate checks.
 Monthly calculations divide remaining target across the current through deadline
 calendar months; they are a plan, not automatic transfers or investment returns.
+
+## Picker and reservation feedback
+
+Android date/time inputs resolve platform picker themes independently of the JS
+alert theme. Both now use an explicit light dialog palette so system night mode
+cannot place light text on a white calendar/clock. The signed-app instrumentation
+probe accepts `-e picker_theme true`: it renders only synthetic native date/time
+dialogs under day and night configurations, checks text contrast and selection
+callbacks, and saves dialog-only images without inspecting the app's WebView or
+financial records.
+
+The allocation form initially selects the first wallet with available money.
+It shows actual balance, money already set aside across goals, and the remaining
+available amount. Zero/negative balance, fully reserved balance, invalid amounts
+and over-limit amounts explain the reason before Save and disable reservation.
+The storage transaction still enforces the current available balance after sync;
+a target or monthly plan never creates wallet money.

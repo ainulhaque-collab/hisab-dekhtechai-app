@@ -15,7 +15,12 @@ import org.json.JSONTokener;
 
 /** Read-only release probe. No DOM, ledger, identity, network calls or sensor access. */
 public class MediaBridgeProbe extends Instrumentation {
-    @Override public void onCreate(Bundle arguments) { super.onCreate(arguments); start(); }
+    private boolean pickerTheme;
+    @Override public void onCreate(Bundle arguments) {
+        super.onCreate(arguments);
+        pickerTheme = arguments != null && "true".equals(arguments.getString("picker_theme"));
+        start();
+    }
     private WebView findWebView(View view) {
         if (view instanceof WebView) return (WebView) view;
         if (view instanceof ViewGroup) {
@@ -37,6 +42,11 @@ public class MediaBridgeProbe extends Instrumentation {
     @Override public void onStart() {
         Bundle result = new Bundle();
         try {
+            if (pickerTheme) {
+                result = PickerThemeProbe.run(this);
+                finish("PASS".equals(result.getString("picker_probe_status")) ? Activity.RESULT_OK : Activity.RESULT_CANCELED, result);
+                return;
+            }
             Intent intent = new Intent().setClassName(getTargetContext().getPackageName(), "com.hisabdekhtechai.app.MainActivity")
                 .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
             Activity activity = startActivitySync(intent);

@@ -1,4 +1,4 @@
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useEffect, useId, useRef, useState } from 'react';
 import { AlertCircle, Archive, ArrowDownLeft, Plus, ShieldCheck, Target, Wallet } from 'lucide-react';
 import { useApp } from '../context/AppContext';
 import { formatAccountTitle, formatBDT, fromBengaliDigits, paisaToDecimalString, parsePaisaString, toBengaliDigits } from '../domain/money';
@@ -64,6 +64,7 @@ export function SavingsGoalsModal({ onClose }: { onClose: () => void }) {
   const [accountId, setAccountId] = useState('');
   const [amount, setAmount] = useState('');
   const [note, setNote] = useState('');
+  const allocationHintId = useId();
   useEffect(() => { mounted.current = true; return () => { mounted.current = false; }; }, []);
 
   const sameContext = () => !!opened.current.workspaceId && opened.current.db === latest.current.db
@@ -83,6 +84,22 @@ export function SavingsGoalsModal({ onClose }: { onClose: () => void }) {
   const disabled = busy || stale || !projection;
   const syncIncomplete = !!projection && (projection.orphanAllocationCount > 0 || projection.orphanReleaseCount > 0);
   const allocationDisabled = disabled || syncIncomplete;
+  const selectedWallet = projection?.accounts.find(account => account.accountId === accountId);
+  const walletAvailable = selectedWallet?.availableMinor || '0';
+  let allocationAmount: string | null = null;
+  try { if (amount.trim()) allocationAmount = positiveAmount(amount); } catch { /* Keep incomplete input editable. */ }
+  let allocationIssue = '';
+  if (!availableAccounts.some(account => account.id === accountId)) {
+    allocationIssue = errorMessage(new Error('SAVINGS_ACCOUNT_REQUIRED'), en);
+  } else if (BigInt(walletAvailable) === 0n) {
+    allocationIssue = BigInt(selectedWallet?.balanceMinor || '0') <= 0n
+      ? en ? 'This wallet has a zero or negative balance. Choose a wallet with money, or record money actually received before setting it aside.' : 'এই ওয়ালেটের ব্যালান্স শূন্য বা ঋণাত্মক। টাকা আছে এমন ওয়ালেট বেছে নিন, অথবা বাস্তবে পাওয়া টাকা আগে হিসাবে যোগ করুন।'
+      : en ? 'All money in this wallet is already set aside. Release an existing reservation or choose another wallet.' : 'এই ওয়ালেটের সব টাকা ইতিমধ্যে লক্ষ্যে আলাদা রাখা আছে। আগের বরাদ্দ ছাড়ুন অথবা অন্য ওয়ালেট বেছে নিন।';
+  } else if (amount.trim() && !allocationAmount) {
+    allocationIssue = errorMessage(new Error('SAVINGS_INVALID_AMOUNT'), en);
+  } else if (allocationAmount && BigInt(allocationAmount) > BigInt(walletAvailable)) {
+    allocationIssue = en ? `You can set aside up to ${money(walletAvailable)} from this wallet. Enter a smaller amount or choose another wallet.` : `এই ওয়ালেট থেকে সর্বোচ্চ ${money(walletAvailable)} আলাদা রাখা যাবে। কম টাকা লিখুন অথবা অন্য ওয়ালেট বেছে নিন।`;
+  }
   const now = new Date();
   const today = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
   const dateLabel = (value: string) => {
@@ -141,11 +158,12 @@ export function SavingsGoalsModal({ onClose }: { onClose: () => void }) {
 
   function allocate(event: React.FormEvent) {
     event.preventDefault();
-    if (!allocateTo || allocationDisabled) return;
+    if (!allocateTo || allocationDisabled || allocationIssue || !allocationAmount) return;
     const goalId = allocateTo;
+    const amountMinor = allocationAmount;
     void commit(async () => {
       if (!availableAccounts.some(account => account.id === accountId)) throw new Error('SAVINGS_ACCOUNT_REQUIRED');
-      return db.allocateSavingsGoal(opened.current.workspaceId!, goalId, accountId, positiveAmount(amount), note.trim() || undefined);
+      return db.allocateSavingsGoal(opened.current.workspaceId!, goalId, accountId, amountMinor, note.trim() || undefined);
     }, () => { setAllocateTo(null); setAmount(''); setNote(''); });
   }
 
@@ -204,18 +222,23 @@ export function SavingsGoalsModal({ onClose }: { onClose: () => void }) {
         {row.goal.deadline && row.goal.deadline <= today && BigInt(row.remainingMinor) > 0n && <p className="text-xs text-amber-800">{en ? 'The target date has arrived or passed. Update the date or your savings plan.' : 'লক্ষ্যের তারিখ এসে গেছে বা পেরিয়েছে। তারিখ বা সঞ্চয়ের পরিকল্পনা বদলে নিন।'}</p>}
         {row.emergencyCoverageMonths !== null && <p className="text-xs text-slate-600">{en ? 'Essential expenses covered: ' : 'প্রয়োজনীয় খরচ চলবে: '}<strong>{en ? row.emergencyCoverageMonths : toBengaliDigits(row.emergencyCoverageMonths)}</strong>{en ? ' months' : ' মাস'}</p>}
         {!row.goal.archived ? <div className="flex flex-wrap gap-2">
-          <button type="button" disabled={allocationDisabled || availableAccounts.length === 0} className={primaryButton} onClick={() => { setForm(null); setAllocateTo(row.goal.id); setAccountId(availableAccounts[0]?.id || ''); setAmount(''); setNote(''); setError(''); setNotice(''); }}><Plus className="h-3.5 w-3.5" />{en ? 'Set money aside' : 'টাকা আলাদা রাখুন'}</button>
+          <button type="button" disabled={allocationDisabled || availableAccounts.length === 0} className={primaryButton} onClick={() => { setForm(null); setAllocateTo(row.goal.id); setAccountId(availableAccounts.find(account => BigInt(available(account.id)) > 0n)?.id || availableAccounts[0]?.id || ''); setAmount(''); setNote(''); setError(''); setNotice(''); }}><Plus className="h-3.5 w-3.5" />{en ? 'Set money aside' : 'টাকা আলাদা রাখুন'}</button>
           <button type="button" disabled={disabled} className={secondaryButton} onClick={() => edit(row.goal)}>{en ? 'Edit' : 'সম্পাদনা'}</button>
           <button type="button" disabled={disabled || BigInt(row.requestedMinor) > 0n} title={BigInt(row.requestedMinor) > 0n ? en ? 'Release all reservations first' : 'আগে সব বরাদ্দ ছাড়ুন' : undefined} className={secondaryButton} onClick={() => void commit(() => db.setSavingsGoalArchived(opened.current.workspaceId!, row.goal.id, true), () => { if (form?.id === row.goal.id) setForm(null); if (allocateTo === row.goal.id) setAllocateTo(null); })}><Archive className="h-3.5 w-3.5" />{en ? 'Archive' : 'আর্কাইভ'}</button>
         </div> : <button type="button" disabled={disabled} className={secondaryButton} onClick={() => void commit(() => db.setSavingsGoalArchived(opened.current.workspaceId!, row.goal.id, false))}>{en ? 'Restore goal' : 'ফিরিয়ে আনুন'}</button>}
         {!row.goal.archived && availableAccounts.length === 0 && <p className="text-xs text-amber-800">{en ? 'Create or restore an asset wallet to set money aside.' : 'টাকা আলাদা রাখতে একটি সম্পদ ওয়ালেট তৈরি করুন বা ফিরিয়ে আনুন।'}</p>}
 
         {allocateTo === row.goal.id && <form className="space-y-3 rounded-xl bg-slate-50 p-3" onSubmit={allocate}>
-          <label className="block text-xs font-medium">{en ? 'From wallet' : 'কোন ওয়ালেট থেকে'}<AppSelect aria-label={en ? 'From wallet' : 'কোন ওয়ালেট থেকে'} className={fieldClass} disabled={allocationDisabled} value={accountId} onChange={event => setAccountId(event.target.value)}>{availableAccounts.map(account => <option key={account.id} value={account.id}>{formatAccountTitle(account.name, language)} · {money(available(account.id))}</option>)}</AppSelect></label>
-          <p className="text-xs text-slate-500">{en ? 'Available after reservations for all goals: ' : 'সব লক্ষ্য বাদে উপলব্ধ টাকা: '}<strong>{money(available(accountId))}</strong></p>
-          <label className="block text-xs font-medium">{en ? 'Amount (BDT)' : 'পরিমাণ (টাকা)'}<input className={fieldClass} inputMode="decimal" required disabled={allocationDisabled} value={amount} onChange={event => setAmount(event.target.value)} /></label>
+          <label className="block text-xs font-medium">{en ? 'From wallet' : 'কোন ওয়ালেট থেকে'}<AppSelect aria-label={en ? 'From wallet' : 'কোন ওয়ালেট থেকে'} className={fieldClass} disabled={allocationDisabled} value={accountId} onChange={event => { setAccountId(event.target.value); setError(''); }}>{availableAccounts.map(account => <option key={account.id} value={account.id}>{formatAccountTitle(account.name, language)} · {money(available(account.id))}</option>)}</AppSelect></label>
+          <dl className="space-y-2 rounded-xl border border-slate-200 bg-white p-3 text-xs">
+            <div className="flex justify-between gap-3"><dt className="text-slate-500">{en ? 'Wallet balance' : 'ওয়ালেটের ব্যালান্স'}</dt><dd className="break-all text-right font-semibold">{money(selectedWallet?.balanceMinor || '0')}</dd></div>
+            <div className="flex justify-between gap-3"><dt className="text-slate-500">{en ? 'Set aside across all goals' : 'সব লক্ষ্যে আলাদা রাখা'}</dt><dd className="break-all text-right">{money(selectedWallet?.allocatedMinor || '0')}</dd></div>
+            <div className="flex justify-between gap-3 border-t border-slate-100 pt-2"><dt className="font-semibold">{en ? 'Available to set aside' : 'এখন আলাদা রাখা যাবে'}</dt><dd className="break-all text-right font-bold text-blue-800">{money(walletAvailable)}</dd></div>
+          </dl>
+          <label className="block text-xs font-medium">{en ? 'Amount (BDT)' : 'পরিমাণ (টাকা)'}<input className={fieldClass} inputMode="decimal" required disabled={allocationDisabled} value={amount} aria-describedby={allocationHintId} aria-invalid={!!amount.trim() && !!allocationIssue} onChange={event => { setAmount(event.target.value); setError(''); }} /></label>
+          <p id={allocationHintId} role="status" className={`text-xs leading-relaxed ${allocationIssue ? 'rounded-xl bg-amber-50 p-3 text-amber-900' : 'text-slate-500'}`}>{allocationIssue || (en ? 'The target and monthly plan do not add money to your wallet. Only existing, unreserved money can be set aside.' : 'লক্ষ্য বা মাসিক পরিকল্পনা লিখলে ওয়ালেটে টাকা যোগ হয় না। ওয়ালেটে থাকা অব্যবহৃত টাকাই আলাদা রাখা যায়।')}</p>
           <label className="block text-xs font-medium">{en ? 'Note · optional' : 'নোট · ঐচ্ছিক'}<input className={fieldClass} maxLength={200} disabled={allocationDisabled} value={note} onChange={event => setNote(event.target.value)} /></label>
-          <div className="flex gap-2"><button type="submit" disabled={allocationDisabled} className={`${primaryButton} flex-1`}><Wallet className="h-3.5 w-3.5" />{busy ? en ? 'Saving…' : 'সেভ হচ্ছে…' : en ? 'Reserve money' : 'আলাদা রাখুন'}</button><button type="button" disabled={busy} className={secondaryButton} onClick={() => setAllocateTo(null)}>{en ? 'Cancel' : 'বাতিল'}</button></div>
+          <div className="flex gap-2"><button type="submit" disabled={allocationDisabled || !!allocationIssue || !allocationAmount} className={`${primaryButton} flex-1`}><Wallet className="h-3.5 w-3.5" />{busy ? en ? 'Saving…' : 'সেভ হচ্ছে…' : en ? 'Reserve money' : 'আলাদা রাখুন'}</button><button type="button" disabled={busy} className={secondaryButton} onClick={() => setAllocateTo(null)}>{en ? 'Cancel' : 'বাতিল'}</button></div>
         </form>}
 
         {row.contributions.length > 0 && <details className="border-t border-slate-100 pt-3"><summary className="cursor-pointer text-xs font-semibold text-slate-600">{en ? 'Reservation history' : 'টাকা আলাদা রাখার ইতিহাস'}</summary><ul className="mt-3 space-y-3">{row.contributions.map(contribution => <li key={contribution.allocationId} className="rounded-xl bg-slate-50 p-3 text-xs"><div className="flex flex-wrap items-start justify-between gap-2"><div className="min-w-0 flex-1"><p className="break-words font-semibold">{accountName(contribution.accountId)}</p><p className="mt-1 text-slate-500">{dateLabel(contribution.createdAtUtc)} · {money(contribution.amountMinor)}</p>{contribution.note && <p className="mt-1 break-words text-slate-500">{contribution.note}</p>}</div>{BigInt(contribution.requestedMinor) > 0n && <button type="button" disabled={disabled} className={secondaryButton} aria-label={en ? `Release ${money(contribution.requestedMinor)} from ${accountName(contribution.accountId)}` : `${accountName(contribution.accountId)} থেকে ${money(contribution.requestedMinor)} ছাড়ুন`} onClick={() => void commit(() => db.releaseSavingsAllocation(opened.current.workspaceId!, row.goal.id, contribution.allocationId, contribution.requestedMinor))}><ArrowDownLeft className="h-3.5 w-3.5" />{en ? 'Release' : 'ছাড়ুন'} {money(contribution.requestedMinor)}</button>}</div><p className="mt-2 leading-relaxed text-slate-500">{en ? 'Still reserved: ' : 'এখনও বরাদ্দ: '}{money(contribution.requestedMinor)}{BigInt(contribution.releasedMinor) > 0n && <>{en ? ' · Released: ' : ' · ছাড়া হয়েছে: '}{money(contribution.releasedMinor)}</>}</p></li>)}</ul></details>}
