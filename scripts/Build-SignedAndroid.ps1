@@ -3,9 +3,22 @@ param(
     [Parameter(Mandatory = $true)][ValidateRange(3, 2100000000)][int]$VersionCode,
     [Parameter(Mandatory = $true)][ValidatePattern('^[A-Za-z0-9][A-Za-z0-9.+-]{0,63}$')][string]$VersionName,
     [switch]$LowMemory,
-    [switch]$BridgeTestOnly
+    [switch]$BridgeTestOnly,
+    [string]$AIServiceOrigin = $env:VITE_AI_API_BASE_URL
 )
 $ErrorActionPreference = 'Stop'
+$nativeAIOrigin = $null
+if (!$BridgeTestOnly) {
+    [uri]$nativeAIUri = $null
+    if ([string]::IsNullOrWhiteSpace($AIServiceOrigin) -or
+        ![uri]::TryCreate($AIServiceOrigin, [UriKind]::Absolute, [ref]$nativeAIUri) -or
+        $nativeAIUri.Scheme -ne 'https' -or $nativeAIUri.IsLoopback -or
+        $nativeAIUri.UserInfo -or $nativeAIUri.Query -or $nativeAIUri.Fragment -or
+        $nativeAIUri.AbsolutePath -ne '/') {
+        throw 'Android AI service origin is required. Pass -AIServiceOrigin with the approved HTTPS server origin (no path, credentials or localhost). No APK was built.'
+    }
+    $nativeAIOrigin = $nativeAIUri.GetLeftPart([UriPartial]::Authority)
+}
 if ([Security.Principal.WindowsIdentity]::GetCurrent().Name -match '\\CodexSandbox') {
     throw 'Build under the desktop owner Windows account so the private signing credentials can be decrypted.'
 }
@@ -64,6 +77,7 @@ $variables = @{
     HISAB_ANDROID_VERSION_CODE = [string]$VersionCode
     HISAB_ANDROID_VERSION_NAME = $VersionName
 }
+if (!$BridgeTestOnly) { $variables.VITE_AI_API_BASE_URL = $nativeAIOrigin }
 $previousVariables = @{}
 foreach ($name in $variables.Keys) { $previousVariables[$name] = [Environment]::GetEnvironmentVariable($name, 'Process'); [Environment]::SetEnvironmentVariable($name, $variables[$name], 'Process') }
 function Invoke-BuildStep([string]$executable, [string[]]$arguments) {
@@ -93,6 +107,9 @@ try {
         Invoke-BuildStep 'npx.cmd' @('tsx', '--test', '--test-concurrency=1', 'src/test/*.test.ts')
     } else { Invoke-BuildStep 'npm.cmd' @('test') }
     Invoke-BuildStep 'npm.cmd' @('run', 'build')
+    $nativeAIInBuild = Get-ChildItem -LiteralPath (Join-Path $workspaceRoot 'dist/assets') -Filter '*.js' |
+        Where-Object { [IO.File]::ReadAllText($_.FullName).Contains($nativeAIOrigin) }
+    if (!$nativeAIInBuild) { throw 'Android web bundle is missing its required AI service origin. No APK was built.' }
     Invoke-BuildStep 'npx.cmd' @('cap', 'sync', 'android')
     Push-Location (Join-Path $workspaceRoot 'android')
     try {
@@ -118,6 +135,19 @@ try {
     if ($LASTEXITCODE -ne 0) { throw 'APK signature verification failed.' }
     $expected = ($publicInfo.certificateSha256 -replace ':', '').ToLowerInvariant()
     if (!($signature -match [regex]::Escape($expected))) { throw 'APK signing certificate does not match the permanent key.' }
+    Add-Type -AssemblyName System.IO.Compression.FileSystem
+    $nativeApk = [IO.Compression.ZipFile]::OpenRead($apkPath)
+    try {
+        $nativeAIInApk = $false
+        foreach ($entry in $nativeApk.Entries) {
+            if ($entry.FullName -match '^assets/public/assets/[^/]+\.js$') {
+                $reader = [IO.StreamReader]::new($entry.Open())
+                try { if ($reader.ReadToEnd().Contains($nativeAIOrigin)) { $nativeAIInApk = $true } }
+                finally { $reader.Dispose() }
+            }
+        }
+        if (!$nativeAIInApk) { throw 'Signed APK is missing its AI service origin. It will not be archived as a valid build.' }
+    } finally { $nativeApk.Dispose() }
     $apkHash = (Get-FileHash -LiteralPath $apkPath -Algorithm SHA256).Hash
     $archiveRoot = Join-Path $workspaceRoot 'build/test-apks'
     New-Item -ItemType Directory -Force -Path $archiveRoot | Out-Null
@@ -125,7 +155,7 @@ try {
     if (Test-Path -LiteralPath $archivePath) {
         if ((Get-FileHash -LiteralPath $archivePath -Algorithm SHA256).Hash -ne $apkHash) { throw 'A different preserved APK already uses this version; choose a new version.' }
     } else { Copy-Item -LiteralPath $apkPath -Destination $archivePath }
-    $evidence = @{ applicationId = $publicInfo.applicationId; versionCode = $VersionCode; versionName = $VersionName; commit = (git rev-parse HEAD); certificateSha256 = $publicInfo.certificateSha256; apkSha256 = $apkHash; apkPath = $archivePath; builtAtUtc = [DateTime]::UtcNow.ToString('o'); physicalDeviceAcceptance = 'PENDING'; published = $false }
+    $evidence = @{ applicationId = $publicInfo.applicationId; versionCode = $VersionCode; versionName = $VersionName; commit = (git rev-parse HEAD); certificateSha256 = $publicInfo.certificateSha256; apkSha256 = $apkHash; apkPath = $archivePath; aiServiceOrigin = $nativeAIOrigin; builtAtUtc = [DateTime]::UtcNow.ToString('o'); physicalDeviceAcceptance = 'PENDING'; published = $false }
     $evidence | ConvertTo-Json | Set-Content -LiteralPath $evidencePath -Encoding UTF8
     $evidence | ConvertTo-Json
 } finally {

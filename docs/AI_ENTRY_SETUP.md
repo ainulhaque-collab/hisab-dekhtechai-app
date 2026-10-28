@@ -40,6 +40,7 @@ Production requires an existing Redis REST database supporting atomic `EVAL`, co
 ## Android / hosted Web configuration still required
 
 - A reachable HTTPS AI service; `localhost` on a phone is the phone itself. Set public `VITE_AI_API_BASE_URL=https://YOUR_AI_HOST` for Android builds. It is a public origin, never a secret. Same-origin hosted Web may leave it empty.
+- Signed Android builds require `-AIServiceOrigin https://YOUR_AI_HOST` (or the equivalent process environment variable). The build script validates an HTTPS origin before signing work, injects it only for the build, and checks both the web output and final APK before archiving. It restores the caller environment afterward. This prevents a newly signed update from disabling existing native AI entry through a missing build-time variable.
 - Set `AI_ENABLED=true`, `AI_PROVIDER=gemini`, `GEMINI_API_KEY`, `GEMINI_MODEL=auto`, exact `AI_ALLOWED_ORIGINS` (hosted Web origin and Android `https://localhost`), and `GOOGLE_OAUTH_CLIENT_IDS` including the registered Web and Android IDs from the same Google project.
 - Set the production Redis REST credentials and desired quota limits. Without shared quota storage, the endpoint stays unavailable. No Redis account, paid resource or hosting deployment is created by this code.
 - Vercel adapter: `api/ai/extract.ts`, 60-second function budget, `/api` excluded from the SPA fallback. Vercel deployment/build routing and the actual Redis script have not been live-tested in this batch. No publication or production readiness is claimed.
