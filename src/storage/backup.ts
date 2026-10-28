@@ -4,6 +4,7 @@ import { validateReceiptBlob } from './receipts';
 import { mergeWorkspaceImage, validateWorkspaceImage } from './workspaceImages';
 import { SYSTEM_ACCOUNTS } from '../contracts/ledger';
 import { validateSavingsOperations } from './savingsOperations';
+import { readSavingsLoans } from './loanBook';
 
 export const MAX_BACKUP_BYTES = 40 * 1024 * 1024;
 const MAPS = ['workspaces', 'accounts', 'accountGroups', 'accountPermissions', 'categories', 'parties',
@@ -133,6 +134,7 @@ export function mergeBackup(current: Data, incoming: Data, replaceUntouchedStart
     if (image !== undefined) validateWorkspaceImage(image);
   }
   validateSavingsOperations(ops.values(), ws, accounts);
+  readSavingsLoans({ syncOperations: ops, workspaces: ws, accounts, journalTransactions: journals });
   if (!Array.isArray(incoming.appliedOperations || [])) throw new Error('BACKUP_INVALID');
   result.appliedOperations = [...new Set([...(current.appliedOperations || []), ...(incoming.appliedOperations || [])])];
   result.schemaVersion = 5;

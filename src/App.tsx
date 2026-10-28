@@ -22,6 +22,7 @@ import { ProfileModal } from './components/ProfileModal';
 import { TeamSharingModal } from './components/TeamSharingModal';
 import { AboutModal } from './components/AboutModal';
 import { SavingsGoalsModal } from './components/SavingsGoalsModal';
+import { SavingsLoansModal } from './components/SavingsLoansModal';
 import { PinLockScreen } from './components/PinLockScreen';
 import { pinLock } from './security/pinLock';
 import { JournalTransaction } from './contracts/types';
@@ -102,6 +103,8 @@ function MainApp() {
   const [isTeamSharingModalOpen, setIsTeamSharingModalOpen] = useState(false);
   const [isAboutModalOpen, setIsAboutModalOpen] = useState(false);
   const [isSavingsGoalsOpen, setIsSavingsGoalsOpen] = useState(false);
+  const [savingsLoanGoalId, setSavingsLoanGoalId] = useState<string | undefined>();
+  const [isSavingsLoansOpen, setIsSavingsLoansOpen] = useState(false);
 
   if (!isUnlocked) {
     return <PinLockScreen onUnlocked={() => setIsUnlocked(true)} />;
@@ -215,7 +218,8 @@ function MainApp() {
         isOpen={isAboutModalOpen}
         onClose={() => setIsAboutModalOpen(false)}
       />
-      {isSavingsGoalsOpen && <SavingsGoalsModal onClose={() => setIsSavingsGoalsOpen(false)} />}
+      {isSavingsGoalsOpen && <SavingsGoalsModal onClose={() => setIsSavingsGoalsOpen(false)} onOpenLoans={goalId => { setSavingsLoanGoalId(goalId); setIsSavingsGoalsOpen(false); setIsSavingsLoansOpen(true); }} />}
+      {isSavingsLoansOpen && <SavingsLoansModal initialGoalId={savingsLoanGoalId} onClose={() => { setIsSavingsLoansOpen(false); setIsSavingsGoalsOpen(true); }} />}
     </div>
   );
 }

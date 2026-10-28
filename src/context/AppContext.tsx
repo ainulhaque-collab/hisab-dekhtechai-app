@@ -9,6 +9,7 @@ import { Capacitor } from '@capacitor/core';
 import { LocalDatabase } from '../storage/db';
 import { SyncOrchestrator, SyncStatusInfo } from '../sync/orchestrator';
 import { AutomaticSync } from '../sync/automaticSync';
+import { runForegroundLoanRepayments } from '../services/loanAutoRepayment';
 import { SimulatedGoogleDriveTransport, RealGoogleDriveTransport } from '../drive/transport';
 import { GoogleAuthManager, GoogleUserProfile } from '../auth/googleAuth';
 import { generateUUID } from '../domain/journal';
@@ -330,6 +331,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       enabled: () => (typeof navigator === 'undefined' || navigator.onLine) &&
         (typeof document === 'undefined' || document.visibilityState === 'visible') && !!auth.getProfile(),
       authorize: authorizeAutomaticSync,
+      afterVerifiedSync: async () => { if (auth.getProfile()?.subjectHash === db.getIdentity()?.ownerSubjectHash) await runForegroundLoanRepayments(db); refreshRef.current(); },
     });
     automatic.current = worker;
     const foreground = () => { if (document.visibilityState === 'visible') worker.request(true); };
@@ -415,6 +417,8 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     refreshState();
     const status = sync.getStatus();
     if (status.state !== 'synced_verified') throw new Error(status.lastError || status.state);
+    if (auth.getProfile()?.subjectHash === db.getIdentity()?.ownerSubjectHash) await runForegroundLoanRepayments(db);
+    refreshState();
   };
 
   const createWorkspace = async (name: string, kind: 'personal' | 'business', description = '') => {

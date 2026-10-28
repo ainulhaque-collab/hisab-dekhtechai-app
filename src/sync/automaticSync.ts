@@ -18,6 +18,7 @@ export class AutomaticSync {
     intervalMs?: number;
     debounceMs?: number;
     now?: () => number;
+    afterVerifiedSync?: () => Promise<void>;
   }) {}
 
   start(): void {
@@ -49,6 +50,7 @@ export class AutomaticSync {
       if (this.stopped || !this.options.enabled()) return;
       await this.sync.triggerSync(false);
       const status = this.sync.getStatus();
+      if (status.state === 'synced_verified' && !this.stopped && this.options.enabled()) await this.options.afterVerifiedSync?.();
       if (['error_retryable', 'network_unavailable'].includes(status.state)) {
         this.retryAt = (this.options.now?.() ?? Date.now()) + this.retryMs;
         this.retryMs = Math.min(this.retryMs * 2, 120_000); this.dirty = true;

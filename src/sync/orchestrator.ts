@@ -9,6 +9,7 @@
 
 import { LocalDatabase } from '../storage/db';
 import { isSavingsOperation, validateSavingsOperations } from '../storage/savingsOperations';
+import { isLoanOperation, readSavingsLoans } from '../storage/loanBook';
 import { DriveTransport } from '../drive/transport';
 import {
   SyncBatch,
@@ -728,7 +729,7 @@ export class SyncOrchestrator {
     for (const op of batch.operations) {
       if (!op || typeof op.operationId !== 'string') throw new Error('Invalid synchronization operation.');
       const existing = batchIds.get(op.operationId) || this.db.getRawState().syncOperations.get(op.operationId);
-      if (existing && (isSavingsOperation(existing) || isSavingsOperation(op))) {
+      if (existing && (isSavingsOperation(existing) || isSavingsOperation(op) || isLoanOperation(existing) || isLoanOperation(op))) {
         const { contentSha256: _oldHash, ...oldFields } = existing;
         const { contentSha256: _newHash, ...newFields } = op;
         if (canonicalJson(oldFields) !== canonicalJson(newFields)) throw new Error('SAVINGS_EVENT_CONFLICT');
@@ -779,6 +780,7 @@ export class SyncOrchestrator {
     }
 
     validateSavingsOperations(this.db.getRawState().syncOperations.values(), this.db.getRawState().workspaces, this.db.getRawState().accounts);
+    readSavingsLoans(this.db.getRawState());
     await this.db.commitTransaction();
     } catch (error) { await this.db.rollbackTransaction(); throw error; }
   }

@@ -46,6 +46,7 @@ import { createWorkspaceImage, validateWorkspaceImage } from './workspaceImages'
 import { decodeBackup, encodeBackup, mergeBackup } from './backup';
 import { projectSavingsGoals, validateSavingsGoalEvent, type SavingsGoal, type SavingsGoalEvent, type SavingsProjection } from '../domain/savingsGoals';
 import { isSavingsOperation, savingsRecords, validateSavingsOperations } from './savingsOperations';
+import { issueSavingsLoan, repaySavingsLoan, readSavingsLoans, isLoanLedgerAccount, isLoanJournal, type NewSavingsLoan } from './loanBook';
 import {
   createDurableStorageDriver,
   DurableStorageDriver,
@@ -580,6 +581,7 @@ export class LocalDatabase {
   ): Promise<UUID> {
     const tx = balanced.transaction;
     const lines = balanced.lines;
+    if (isLoanJournal(tx.id) || lines.some(line => isLoanLedgerAccount(line.accountId))) throw new Error('LOAN_PROTECTED_JOURNAL');
     validateTransactionTime(tx);
     if (receipt) {
       validateReceiptBlob(receipt);
@@ -797,7 +799,7 @@ export class LocalDatabase {
 
   public getAccounts(workspaceId: UUID, includeArchived = false): Account[] {
     return Array.from(this.state.accounts.values()).filter(
-      (a) => a.workspaceId === workspaceId && (includeArchived || !a.archivedAt)
+      (a) => a.workspaceId === workspaceId && !isLoanLedgerAccount(a.id) && (includeArchived || !a.archivedAt)
     );
   }
 
@@ -842,6 +844,7 @@ export class LocalDatabase {
     id: UUID,
     updates: Partial<Pick<Account, 'name' | 'accountNumberMasked' | 'kind' | 'groupId'>>
   ): Account | null {
+    if (isLoanLedgerAccount(id)) throw new Error('LOAN_PROTECTED_ACCOUNT');
     const acc = this.state.accounts.get(id);
     if (!acc) return null;
     if (updates.name !== undefined) acc.name = updates.name.trim();
@@ -864,6 +867,7 @@ export class LocalDatabase {
   }
 
   public restoreAccount(id: UUID): boolean {
+    if (isLoanLedgerAccount(id)) throw new Error('LOAN_PROTECTED_ACCOUNT');
     const acc = this.state.accounts.get(id);
     if (!acc) return false;
     acc.archivedAt = null;
@@ -1138,6 +1142,7 @@ export class LocalDatabase {
     accountId: UUID,
     opType: SyncOperationType = 'journal.post'
   ): boolean {
+    if (isLoanLedgerAccount(accountId)) return false;
     const acc = this.state.accounts.get(accountId);
     if (!acc) return false;
     const ws = this.state.workspaces.get(acc.workspaceId);
@@ -1299,6 +1304,7 @@ export class LocalDatabase {
    * Deletes (voids/reverses) a transaction cleanly using balanced double-entry accounting.
    */
   public async deleteTransaction(txId: UUID, reason = 'User deleted transaction'): Promise<void> {
+    if (isLoanJournal(txId)) throw new Error('LOAN_PROTECTED_JOURNAL');
     const tx = this.state.journalTransactions.get(txId);
     if (!tx) {
       throw new Error(`Transaction ${txId} not found`);
@@ -1377,6 +1383,7 @@ export class LocalDatabase {
     }
   ): Promise<void> {
     const origTx = this.state.journalTransactions.get(originalId);
+    if (isLoanJournal(originalId)) throw new Error('LOAN_PROTECTED_JOURNAL');
     if (!origTx) throw new Error(`Transaction ${originalId} not found`);
 
     const opId = generateUUID();
@@ -1506,7 +1513,7 @@ export class LocalDatabase {
    * Account balance = Opening Balance + Sum(Debits) - Sum(Credits)
    */
   public calculateAccountSummaries(workspaceId: UUID): AccountBalanceSummary[] {
-    const accounts = this.getAccounts(workspaceId, true);
+    const accounts = this.getAllAccounts(workspaceId);
     const txs = this.getTransactions(workspaceId);
 
     const summaries: AccountBalanceSummary[] = [];
@@ -1552,7 +1559,7 @@ export class LocalDatabase {
    */
   public getDashboardData(workspaceId: UUID): DashboardData {
     const ws = this.getWorkspace(workspaceId) || this.getWorkspaces()[0];
-    const accountSummaries = this.calculateAccountSummaries(workspaceId);
+    const accountSummaries = this.calculateAccountSummaries(workspaceId).filter(a => !isLoanLedgerAccount(a.accountId));
 
     let totalConsolidated = 0n;
     for (const s of accountSummaries) {
@@ -1707,7 +1714,7 @@ export class LocalDatabase {
     const balances: Record<string, string> = {};
     for (const summary of this.calculateAccountSummaries(workspaceId)) {
       const account = this.state.accounts.get(summary.accountId);
-      if (account && (account.classification || 'asset') === 'asset') balances[summary.accountId] = summary.currentBalanceMinor;
+      if (account && !isLoanLedgerAccount(account.id) && (account.classification || 'asset') === 'asset') balances[summary.accountId] = summary.currentBalanceMinor;
     }
     const now = new Date();
     const day = today || `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
@@ -1757,6 +1764,7 @@ export class LocalDatabase {
       const item = projection.goals.find(item => item.goal.id === goalId);
       if (!item) throw new Error('SAVINGS_GOAL_NOT_FOUND');
       if (item.deleted) throw new Error('SAVINGS_GOAL_DELETED');
+      if (archived && this.getSavingsLoans().some(r => r.issue.terms.goalId === goalId && (r.pendingReferences || r.balance.totalDueMinor !== '0'))) throw new Error('LOAN_OUTSTANDING');
       if (archived && BigInt(item.requestedMinor) > 0n) throw new Error('SAVINGS_ALLOCATIONS_REMAIN');
       return { version: 1, action: 'goal.set', goal: { ...item.goal, archived, revision: item.goal.revision + 1 } };
     });
@@ -1800,11 +1808,21 @@ export class LocalDatabase {
       const item = projection.goals.find(item => item.goal.id === goalId);
       if (!item) throw new Error('SAVINGS_GOAL_NOT_FOUND');
       if (item.deleted) throw new Error('SAVINGS_GOAL_DELETED');
+      if (this.getSavingsLoans().some(r => r.issue.terms.goalId === goalId && (r.pendingReferences || r.balance.totalDueMinor !== '0'))) throw new Error('LOAN_OUTSTANDING');
       if (!item.goal.archived) throw new Error('SAVINGS_ARCHIVE_BEFORE_DELETE');
       if (BigInt(item.requestedMinor) > 0n) throw new Error('SAVINGS_ALLOCATIONS_REMAIN');
       return { version: 1, action: 'goal.delete', goalId };
     });
   }
+
+  public getSavingsLoans(workspaceId?: string, asOfDate?: string) {
+    const owner = this.getIdentity()?.ownerSubjectHash;
+    return readSavingsLoans(this.state, asOfDate).filter(row => row.issue.terms.ownerHash === owner &&
+      (!workspaceId || row.issue.terms.sourceWorkspaceId === workspaceId || row.issue.terms.borrowerWorkspaceId === workspaceId));
+  }
+
+  public issueSavingsLoan(input: NewSavingsLoan, now = new Date()) { return issueSavingsLoan(this, input, now); }
+  public repaySavingsLoan(loanId: string, requestId: string, amountMinor?: string, now = new Date()) { return repaySavingsLoan(this, loanId, requestId, amountMinor, now); }
 
   public getBudgets(workspaceId: UUID): Budget[] {
     return Array.from(this.state.budgets.values()).filter((b) => b.workspaceId === workspaceId);
@@ -2024,6 +2042,7 @@ export class LocalDatabase {
     this.state.schemaMigrations = [...(data.schemaMigrations || [])];
     this.state.preferences = new Map(data.preferences || []);
     validateSavingsOperations(this.state.syncOperations.values(), this.state.workspaces, this.state.accounts);
+    readSavingsLoans(this.state);
 
   }
 

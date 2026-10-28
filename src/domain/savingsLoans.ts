@@ -196,7 +196,7 @@ function jobId(terms: SavingsLoanTerms, type: 'reminder' | 'repayment', day: str
 }
 
 export type LoanAutoRepaymentPlan =
-  | { status: 'not-due' | 'paid' | 'no-available-money' | 'already-recorded'; amountMinor: '0' }
+  | { status: 'not-due' | 'paid' | 'no-available-money'; amountMinor: '0' }
   | { status: 'proposal'; payment: SavingsLoanPayment; amountMinor: string; principalMinor: string; interestMinor: string };
 
 /** availableMinor MUST exclude all other savings reservations. Caller still needs
@@ -207,8 +207,11 @@ export function planLoanAutoRepayment(input: SavingsLoanTerms, records: readonly
   if (typeof availableMinor !== 'string' || !SIGNED.test(availableMinor)) return fail();
   if (projected.status === 'paid') return { status: 'paid', amountMinor: '0' };
   if (asOfDate < terms.dueDate) return { status: 'not-due', amountMinor: '0' };
-  const paymentId = jobId(terms, 'repayment', asOfDate);
-  if (records.some(record => record.id === paymentId)) return { status: 'already-recorded', amountMinor: '0' };
+  // The committed payment history is the execution cursor. Retrying the same
+  // snapshot yields one ID; newly available money after a partial payment can
+  // produce a new ID on the same day. The storage layer rechecks live balances.
+  const history = projected.payments.map(p => [p.id, p.amountMinor, p.effectiveDate]);
+  const paymentId = jobId(terms, 'repayment', `${asOfDate}:${computeSha256Sync(canonicalJson(history))}`);
   const available = BigInt(availableMinor), due = BigInt(projected.totalDueMinor);
   if (available <= 0n) return { status: 'no-available-money', amountMinor: '0' };
   const amount = available < due ? available : due;

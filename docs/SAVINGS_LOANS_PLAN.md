@@ -1,7 +1,8 @@
 # Savings-backed business loans
 
-Status: owner decisions captured and pure calculation/planning engine implemented
-on 28 October 2026. Not integrated with app wallets or enabled for real money.
+Status: Android/Web forms, atomic wallet/loan accounting and foreground automatic
+repayment implemented on 28 October 2026; synthetic validation passes. Physical
+APK/real Drive owner acceptance and closed-app push/background execution pending.
 Source: owner request in the existing development conversation. Tracked with
 selected Notion items 41/43 (savings), 44 (debt), 45 (reminders), and 01/03
 (notification delivery/inbox):
@@ -32,23 +33,23 @@ https://app.notion.com/p/403bf836a600815a8dcccec4ca26eda9
 3. Repay the available spendable amount partially; leave the rest outstanding.
    Other goals' reservations and unrelated wallets must not be used.
 
-## Remaining policy/configuration
+## Confirmed calculation and delivery policy
 
-- An owner question is pending about incomplete months: accrue monthly rate/30
-  for each late day, or charge on each completed calendar-month anniversary.
-  The pure engine supports both explicitly; no live default is selected.
-- Daily reminder time in Asia/Dhaka and the Firebase project identity are pending.
+- Owner selected monthly rate/30 for each late day on unpaid principal. The app
+  persists daily-30; the engine's alternative completed-month basis is not offered.
+- Owner selected reminders at 19:00 Asia/Dhaka and confirmed Firebase is not yet
+  created. Actual push delivery is pending; see FIREBASE_NOTIFICATIONS_SETUP.md.
 - Repayment allocation order (principal-first or interest-first) is an explicit
-  required engine term. It must be displayed and selected in the future loan form;
-  tests of either option do not select a policy on the owner's behalf.
-- The proposed calculation accrues only after the due date, before repayments
+  required term, displayed in the loan form. Principal-first is visibly preselected
+  and can be changed before recording a loan; no hidden allocation order.
+- The calculation accrues only after the due date, before repayments
   on their effective local date, and carries fractional paisa between segments,
-  rounding down to whole paisa. These rules must be shown in the loan preview.
+  rounding down to whole paisa. The form explains these rules.
   The engine has no grace-period or extra-fee assumption and never invents a rate.
 
 ## Implemented independent foundation
 
-`src/domain/savingsLoans.ts` is pure, detached from production storage and UI:
+`src/domain/savingsLoans.ts` supplies pure calculations used by storage and UI:
 
 - Strict immutable terms/payment schemas, integer-paisa/BigInt calculation,
   principal/interest separation and chronological replay.
@@ -56,18 +57,48 @@ https://app.notion.com/p/403bf836a600815a8dcccec4ca26eda9
   month-end/leap-year handling and reduced principal after partial repayments.
 - Payment-ID deduplication; changed-ID payload conflicts, foreign loan references
   and overpayment are rejected rather than silently changing the ledger.
-- Due-date partial-repayment proposals capped by provided spendable funds, stable
-  owner/loan/local-day IDs, and no proposal before due or after settlement.
+- Due-date partial-repayment proposals capped by provided spendable funds. IDs
+  include owner, loan, date and committed payment history. Identical snapshot
+  retries use one ID; new money permits another same-day partial repayment.
 - Daily reminder proposals from seven days before due, continuing while unpaid;
   chosen timezone/time, stable IDs and paid-loan cancellation. A proposal is not
   a sent notification. A stable ID alone is not distributed exactly-once execution.
 
-`src/test/savings_loans.test.ts`: 10 focused tests pass for these calculations,
-boundaries and validation. They use synthetic records and never touch app data.
-The wallet commit, cross-workspace accounting, UI, coordinated execution and push
-transport below remain unimplemented; the installed signed v15 is unchanged.
+`src/storage/loanBook.ts` commits principal cash movement, linked workspace-local
+balanced receivable/payable journals, source reservation releases, immutable loan
+metadata and outbox atomically. Principal returns to the original goal; paid
+interest uses separate income/expense journals and remains cash available to plan.
+Internal loan ledger accounts are archived/non-spendable and hidden from wallets.
+Goal archive/delete is blocked while debt remains. Loan journals cannot be edited
+or reversed through ordinary transaction controls. Schema 5/protocol 1 retained.
 
-## Implementation constraints to resolve
+`SavingsLoansModal` opens from Savings goals, supports Bengali amounts, the DOM
+calendar, rate/order/automatic setting, manual partial/full repayment and history.
+The creating device executes repayments; other devices can view synced loans.
+This deliberately prevents two replicas automatically debiting the same loan.
+Device-loss/executor reassignment needs a separate coordinated recovery workflow.
+
+`runForegroundLoanRepayments` runs only after verified Drive sync on the original
+device and a matching fresh owner receipt. Each loan has an explicit automatic
+setting in its form (preselected on, can be turned off before creation). The form
+states execution starts at 19:00 Asia/Dhaka on the due date. Overdue loans may
+repay at later syncs when more available money arrives. Every payment rechecks
+current debt, spendable funds and goal status inside its transaction. Unrelated
+goals stay reserved. Stale/no sync, wrong owner/device and missing references do
+not auto-pay. This is eventual offline accounting, not a global bank balance lock.
+
+20 focused loan tests and 238 total tests pass; browser/API type checks and Web
+build pass. A 390px Bengali synthetic UI test created a 2,000 BDT loan, repaid
+1,000 BDT, retained the other goal and verified zero pending links/four balanced
+journals. Evidence: build/loans-integrated-final-tests.log and
+build/savings-loan-mobile.jpg. Real user financial records were not modified.
+
+Closed-app Android/Web push and closed-app settlement are NOT enabled by this
+foreground worker. Firebase delivery is a separate dependency and does not gain
+financial write authority. The app states the limitation rather than reporting
+unsent notifications or unsaved payments as successful.
+
+## Safety contract and remaining release checks
 
 - Current savings are reservations over wallet balances, not a separate ledger
   account. Loan issuance must link the reservation reduction, money movement,
@@ -99,7 +130,7 @@ transport below remain unimplemented; the installed signed v15 is unchanged.
 
 ## Acceptance work before release
 
-- Owner decisions resolved; accessible Bengali/English borrow/repay forms.
+- Owner decisions resolved; forms implemented; physical EN/BN acceptance pending.
 - Issue, partial/full/manual/automatic repayment and return-to-goal scenarios.
 - Separate borrowed versus funded goal progress, wallet availability and reports.
 - Same/cross-workspace ownership, insufficient balance, other-goal protection.
@@ -107,6 +138,6 @@ transport below remain unimplemented; the installed signed v15 is unchanged.
   permission denial, offline delivery and duplicate-job reconciliation.
 - Late-charge boundaries, partial repayments and repeated-run/rounding tests.
 - Two-device/offline concurrency, atomic rollback, restart, sync and backup restore.
-- Synthetic data first; no existing customer records or installed features changed
-  by this requirements document. No bank debit, fee, paid resource, notification
-  send, APK release or deployment is activated by this plan.
+- Synthetic data first; no existing customer records changed. No bank debit,
+  extra fee, paid resource or actual notification send activated. APK/preview
+  delivery is recorded separately in the canonical Notion tracker.

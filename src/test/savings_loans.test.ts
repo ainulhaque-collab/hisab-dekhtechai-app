@@ -103,7 +103,10 @@ test('Loans: automatic partial repayment proposes only available money and becom
   assert.equal(plan.principalMinor, '300000');
   assert.equal(plan.interestMinor, '0');
   assert.deepEqual(planLoanAutoRepayment(structuredClone(contract), [], '2026-10-31', '300000'), plan);
-  assert.equal(planLoanAutoRepayment(contract, [plan.payment], '2026-10-31', '700000').status, 'already-recorded');
+  assert.equal(planLoanAutoRepayment(contract, [plan.payment], '2026-10-31', '0').status, 'no-available-money');
+  const laterSameDay = planLoanAutoRepayment(contract, [plan.payment], '2026-10-31', '100000');
+  assert.equal(laterSameDay.status, 'proposal');
+  if (laterSameDay.status === 'proposal') assert.notEqual(laterSameDay.payment.id, plan.payment.id);
   const next = planLoanAutoRepayment(contract, [plan.payment], '2026-11-01', '900000');
   assert.equal(next.status, 'proposal');
   if (next.status !== 'proposal') throw new Error('Expected proposal');

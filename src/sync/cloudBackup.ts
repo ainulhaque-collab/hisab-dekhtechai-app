@@ -3,6 +3,7 @@ import { DriveTransport } from '../drive/transport';
 import { decodeBackup } from '../storage/backup';
 import { canonicalJson, computeSha256 } from './canonical';
 import { isSavingsOperation } from '../storage/savingsOperations';
+import { isLoanOperation } from '../storage/loanBook';
 
 const KEY = 'verified-drive-backup-v1';
 export interface CloudBackupReceipt { ownerHash: string; fingerprint: string; fileId: string; verifiedAt: string }
@@ -14,6 +15,8 @@ export async function financialFingerprint(data: Record<string, any>): Promise<s
   const savings = (data.syncOperations || []).filter(([, op]: [string, any]) => isSavingsOperation(op));
   // Omit the extension when empty to preserve existing checkpoint fingerprints.
   if (savings.length) payload.savingsOperations = [...savings].sort(([a], [b]) => a.localeCompare(b));
+  const loans = (data.syncOperations || []).filter(([, op]: [string, any]) => isLoanOperation(op));
+  if (loans.length) payload.loanOperations = [...loans].sort(([a], [b]) => a.localeCompare(b));
   return computeSha256(canonicalJson(payload));
 }
 
