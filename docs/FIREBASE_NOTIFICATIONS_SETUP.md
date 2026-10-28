@@ -54,27 +54,22 @@ and shows Blaze. Do not enable billing or paid products just to follow this guid
 An independent Spark notifications project can keep the existing OAuth/Gemini
 project and its settings untouched.
 
-## Remaining implementation and verification
+## Delivery acceptance and next work
 
-1. Wire the verified Android/Web client configs to the SDKs. Preserve the existing
-   permanent signing identity and Google OAuth IDs. Do not replace Google Drive
-   sign-in with Firebase Authentication for this feature.
-2. Configure native/web notification permission and a Web service worker,
-   device registration/token rotation, sign-out revocation and owner isolation.
-3. Configure a trusted sender with least-privilege FCM credentials stored only on
-   the server. Never commit service-account keys or expose them through VITE vars,
-   the APK, Notion, chat or downloadable files. Private registration tokens stay
-   server-side and owner-scoped.
-   The owner approved the exact keyless sender proposal and its scoped IAM
-   resources are now applied (details below). No static private key was created.
-   Any further access expansion needs its own concrete review; do not reuse the
-   broad default Firebase Admin account.
-4. Schedule at 13:00 UTC (19:00 Asia/Dhaka). Store only needed reminder metadata
+The Android/Web SDKs, explicit permission UI, bundled service worker, owner-scoped
+token lifecycle and keyless sender are implemented as described below. Existing
+permanent signing, Google OAuth, Drive storage and financial schema are retained.
+
+1. Verify the actual test notification on the owner Android and HTTPS Web clients,
+   including foreground/background receipt, denial, offline and rotation paths.
+   FCM acceptance alone does not confirm delivery. No broad announcement is a test.
+2. Schedule loan reminders at 13:00 UTC (19:00 Asia/Dhaka). Store only needed reminder metadata
    and authenticated device registrations, not a second copy of the ledger.
    Deduplicate each loan/local-date notification; cancel on full repayment and
    handle denied permissions, offline delivery, expired tokens and retries.
-5. Test Android and Web background delivery with synthetic loans before enabling
-   it for the owner. No public admin announcements are sent as a setup test.
+3. Add reviewed owner-only announcement controls and a safe scheduler/executor
+   design. Never reuse the broad default Firebase Admin account or expand the
+   approved Preview IAM boundary without a separate concrete review.
 
 ## Applied trusted-sender boundary
 
