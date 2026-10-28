@@ -101,14 +101,23 @@ export class NotificationService {
       if (binding && binding.owner !== owner) { await (await this.adapter()).remove(); binding = null; }
       if (!binding) binding = { owner, deviceId: crypto.randomUUID(), secret: crypto.randomUUID(), enabled: false };
       this.save(binding);
+      let stage = 'PLATFORM';
       try {
         if (browserPermission && await browserPermission !== 'granted') throw new Error('PUSH_PERMISSION_DENIED');
         const adapter = await this.adapter();
+        stage = 'TOKEN';
         const token = await adapter.token(prompt);
+        stage = 'SERVER';
         await this.request({ action: 'register', deviceId: binding.deviceId, secret: binding.secret, token,
           platform: Capacitor.isNativePlatform() ? 'android' : 'web', language: this.language() === 'bn' ? 'bn' : 'en' }, owner);
         this.save({ ...binding, enabled: true }); this.update({ enabled: true });
-      } catch (error) { await this.platform?.remove().catch(() => {}); this.save({ ...binding, enabled: false }); this.update({ enabled: false }); throw error; }
+      } catch (error) {
+        await this.platform?.remove().catch(() => {}); this.save({ ...binding, enabled: false }); this.update({ enabled: false });
+        if (error instanceof Error && /^PUSH_[A-Z_]+$/.test(error.message)) throw error;
+        const name = error && typeof error === 'object' && 'name' in error ? String(error.name) : '';
+        const category = ({ AbortError: 'ABORT', NotSupportedError: 'UNSUPPORTED', TypeError: 'TYPE', SecurityError: 'SECURITY', InvalidStateError: 'STATE' } as Record<string, string>)[name] || 'SDK';
+        throw new Error(`PUSH_${stage}_${category}_FAILED`);
+      }
     });
   }
   disable() {
