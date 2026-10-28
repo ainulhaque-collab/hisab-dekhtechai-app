@@ -333,3 +333,23 @@ test('Offline savings require consent for first Google owner binding and survive
   assert.ok(savingsOperations(db).every(op => op.ownerHash === subjectHash));
   assert.equal(db.getSavingsProjection(workspaceId).goals.find(item => item.goal.id === goal.id)?.fundedMinor, '3500');
 });
+
+test('A late offline allocation on an archived goal stays unfunded and can be released without restoring the goal', async () => {
+  const { db, account } = await fundedDatabase();
+  const goal = await db.saveSavingsGoal(workspaceId, { name: 'Synthetic archived race', kind: 'general', targetMinor: '10000' });
+  const { db: offline } = await replica(db);
+  await db.setSavingsGoalArchived(workspaceId, goal.id, true);
+  await offline.allocateSavingsGoal(workspaceId, goal.id, account.id, '8000');
+  await replay(db, savingsOperations(offline));
+  let item = db.getSavingsProjection(workspaceId).goals[0];
+  assert.equal(item.goal.archived, true);
+  assert.equal(item.requestedMinor, '8000');
+  assert.equal(item.fundedMinor, '0');
+  await db.releaseSavingsAllocation(workspaceId, goal.id, item.contributions[0].allocationId, '8000');
+  item = db.getSavingsProjection(workspaceId).goals[0];
+  assert.equal(item.goal.archived, true);
+  assert.equal(item.requestedMinor, '0');
+  assert.equal(item.contributions[0].releasedMinor, '8000');
+  assert.equal(db.getTransactions(workspaceId).length, 0);
+  assert.equal(db.calculateAccountSummaries(workspaceId).find(value => value.accountId === account.id)?.currentBalanceMinor, '10000');
+});
