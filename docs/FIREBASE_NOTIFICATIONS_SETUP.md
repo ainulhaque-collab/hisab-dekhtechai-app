@@ -147,7 +147,7 @@ CI debug APKs retain their separate `.debug` package with live notifications off
 
 `POST /api/notifications/push` authenticates the existing Google bearer token
 online, binds the verified owner hash, checks exact allowed origins and accepts
-only fixed register/unregister/test/transaction schemas. It cannot accept a
+only fixed register/unregister/test/transaction/inbox/read schemas. It cannot accept a
 custom message, recipient, topic or campaign. Device registration is capped at
 five per owner. Redis atomically claims each FCM token for one owner/installation,
 checks an installation secret for revocation, expires inactive registrations,
@@ -218,6 +218,30 @@ are not reconstructed from the ledger. Inbox load failures keep the current
 screen data, and owner changes discard pending responses. UI templates are
 local EN/BN strings; strict response validation rejects extra fields, duplicate
 IDs, unknown kinds, future timestamps and unsorted sequences.
+
+If the inactive sequence counter expires before a later read cursor, the next
+reservation atomically clears that old cursor before assigning its new sequence.
+Otherwise a returning user's first notification could incorrectly appear read.
+An offline execution of the production Lua with a simulated Redis command
+adapter reproduced that failure at day 91 and passed after the server-only fix.
+The same check covers the 100-item bound, ordering, deduplication, owner isolation,
+monotonic reads and the 30-day content cutoff. It does not access live data.
+
+29 October acceptance: Web inbox access without push opt-in, one self-test
+received at 10:22:23 Asia/Dhaka, unread 1 → read 0, inbox refresh and full-page
+reload persistence passed. English/Bangla 390px layouts were checked; temporary
+viewport and language changes were restored. Final browser/API types and all
+265 tests pass. Evidence is under `build/notification-qa/inbox-*` (ignored).
+
+Signed `1.0.19-test` (20) was installed in place on the known owner TECNO phone;
+cold launch and the read-only native media permission probe passed. Package,
+permanent certificate, original first-install time and data directory are
+retained. APK SHA-256:
+`DE3DB21CF57506FC27CCC05007074890B8F1A952ADBA905F815CFE04110F1097`.
+Its compiled client is `27017e197ed18e86bf34e2452c87d63506b2d64f`;
+the later expiry correction changes only the hosted server, so it requires no
+APK rebuild. Physical inbox and record-level retention acceptance remain for
+the owner to confirm; metadata/probe success is not financial-record parity.
 
 ## Official references reviewed
 

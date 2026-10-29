@@ -57,6 +57,9 @@ if redis.call('EXISTS', KEYS[1]) == 1 then return 1 end
 if tonumber(redis.call('GET', KEYS[2]) or '0') >= 300 or tonumber(redis.call('GET', KEYS[3]) or '0') >= 3000 then return 2 end
 redis.call('SET', KEYS[1], '1', 'EX', 172800)
 for i = 2,3 do redis.call('INCR', KEYS[i]); redis.call('EXPIRE', KEYS[i], 172800) end
+-- A late read can outlive the inactive sequence counter. Start both in the
+-- same generation so the first returning notification is never already read.
+if redis.call('EXISTS', KEYS[6]) == 0 then redis.call('DEL', KEYS[7]) end
 local sequence = redis.call('INCR', KEYS[6])
 redis.call('EXPIRE', KEYS[6], 7776000)
 redis.call('ZADD', KEYS[4], sequence, ARGV[1])
@@ -124,8 +127,8 @@ export class RedisPushStore implements PushStore {
   async reserve(owner: string, event: string) {
     const day = new Date(this.now()).toISOString().slice(0, 10);
     const id = pushHash(event);
-    const result = await this.command(['EVAL', RESERVE_SCRIPT, 6, `${PREFIX}event:${owner}:${id}`,
-      `${PREFIX}daily:${owner}:${day}`, `${PREFIX}daily:global:${day}`, `${PREFIX}inbox:${owner}:order`, `${PREFIX}inbox:${owner}:items`, `${PREFIX}inbox:${owner}:sequence`,
+    const result = await this.command(['EVAL', RESERVE_SCRIPT, 7, `${PREFIX}event:${owner}:${id}`,
+      `${PREFIX}daily:${owner}:${day}`, `${PREFIX}daily:global:${day}`, `${PREFIX}inbox:${owner}:order`, `${PREFIX}inbox:${owner}:items`, `${PREFIX}inbox:${owner}:sequence`, `${PREFIX}inbox:${owner}:read`,
       id, event.startsWith('test:') ? 'test' : 'transaction', this.now()]);
     if (result === 2) throw new PushError('PUSH_LIMIT_REACHED', 429);
     if (result !== 0 && result !== 1) throw new PushError('PUSH_STORAGE_UNAVAILABLE');
