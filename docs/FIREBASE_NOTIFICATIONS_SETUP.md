@@ -174,8 +174,20 @@ enable notifications and press Send test to this device. Check the actual device
 notification. Then save a user-created test transaction on one device and check
 the other. Agent tests do not create financial records in the owner's dataset.
 
-Still pending: physical/Web receipt acceptance, loan reminder metadata/scheduled
-dispatch at 19:00 Asia/Dhaka, and reviewed owner-only announcement controls.
+28 October acceptance: the owner confirmed that the signed Android test
+notification arrived. Web registration and foreground FCM receipt were observed
+at 20:51:26 Asia/Dhaka; registration survived refresh. The minified Android
+read-only media bridge probe passed. The installed phone release is
+`1.0.18-test` (19), with original first-install metadata/data directory retained.
+See `build/notification-qa/delivery-acceptance.json` and `installed-upgrade.json`.
+Native feature code is based on `b72ed39`; subsequent diagnostic/worker fixes
+are Web changes. The existing build script records HEAD at archive time, so
+that field alone is not a compiled-source fingerprint; the QA evidence keeps
+that distinction explicit.
+
+Still pending: cross-device/background acceptance from the owner's next actual
+transaction, loan reminder metadata/scheduled dispatch at 19:00 Asia/Dhaka,
+and reviewed owner-only announcement controls.
 Preview does not run a production Cron schedule. No production promotion, paid
 scheduler, broad broadcast or background money executor was added.
 
@@ -183,6 +195,29 @@ FCM delivery does not execute financial transfers. Closed-app settlement needs
 its own secure executor and current-balance/sync design. Current loan automatic
 repayment is explicitly limited to the original device while the app is open
 after verified sync. Do not label a sent reminder as a successful repayment.
+
+## Notification inbox (29 October)
+
+Settings → Notifications → Notification inbox shows fixed transaction/test
+templates, server event times, unread count and Mark all as read. It works
+without enabling push permission. The authenticated API uses the same verified
+Google owner and exact request/CORS checks. No recipient/token, amount, account,
+workspace name, note, receipt or arbitrary message text enters its response.
+
+Event reservation and inbox insertion share one Redis Lua operation. The owner
+inbox is bounded to the latest 100 items, with a 30-day content retention window.
+The sequence/read cursor expires after 90 days of inactivity; it cannot move
+backwards when an older device marks its older view read. Read requests accept
+an existing owner-scoped item ID, never a client-chosen future cursor. Listing
+or reading sends no push and consumes no AI or FCM send quota. A delivery failure
+can leave an inbox item; the inbox does not claim that the push was delivered.
+Financial history remains separate and unchanged.
+
+Only events created after this feature is deployed appear; older notifications
+are not reconstructed from the ledger. Inbox load failures keep the current
+screen data, and owner changes discard pending responses. UI templates are
+local EN/BN strings; strict response validation rejects extra fields, duplicate
+IDs, unknown kinds, future timestamps and unsorted sequences.
 
 ## Official references reviewed
 

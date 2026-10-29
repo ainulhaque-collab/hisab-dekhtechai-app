@@ -2,6 +2,17 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { NotificationService } from '../notifications/service';
 import { firebaseWebConfig, pushEndpoint } from '../notifications/config';
+import { validateNotificationInbox } from '../notifications/inbox';
+
+test('untrusted inbox responses cannot supply message HTML, credentials, duplicate IDs or future dates', () => {
+  const now = Date.now(), item = { id: 'a'.repeat(64), kind: 'transaction', at: now, sequence: 2 };
+  assert.deepEqual(validateNotificationInbox({ items: [item], readThrough: 0 }, now).items, [item]);
+  for (const value of [{ items: [{ ...item, body: '<script>private</script>' }], readThrough: 0 },
+    { items: [{ ...item, kind: 'campaign' }], readThrough: 0 }, { items: [item, item], readThrough: 0 },
+    { items: [{ ...item, at: now + 60001 }], readThrough: 0 }, { items: [item], readThrough: -1 },
+    { items: Array.from({ length: 101 }, () => item), readThrough: 0 }, { items: [], readThrough: 0, token: 'secret' }])
+    assert.throws(() => validateNotificationInbox(value, now), /^Error: PUSH_INBOX_INVALID$/);
+});
 
 test('notification endpoint requires a trusted HTTPS origin on Android; client config rejects foreign projects/private extras', () => {
   assert.throws(() => pushEndpoint('', 'https://localhost', true), /NOT_CONFIGURED/);
@@ -26,7 +37,7 @@ test('enable, silent resume, owner-change race and disable keep device registrat
   const identity = { isTestMode: () => false, getProfile: () => profile ? { subjectHash: profile } : null, getValidAccessToken: async () => 'synthetic-auth' };
   const service = new NotificationService({ enabled: true, endpoint: 'https://approved.example/api/notifications/push',
     platformFactory: async () => ({ token: async prompt => { prompts.push(prompt); return 'synthetic-device-token'.repeat(3); }, remove: async () => { removed++; }, dispose() {} }),
-    fetchFn: async (_url, init) => { const body = JSON.parse(init!.body as string); requests.push(body); return new Response(JSON.stringify(body.action === 'test' ? { accepted: 1 } : { registered: body.action === 'register' }), { headers: { 'Content-Type': 'application/json' } }); } });
+    fetchFn: async (_url, init) => { const body = JSON.parse(init!.body as string); requests.push(body); return new Response(JSON.stringify(body.action === 'test' ? { accepted: 1 } : body.action === 'inbox' ? { items: [], readThrough: 0 } : { registered: body.action === 'register' }), { headers: { 'Content-Type': 'application/json' } }); } });
   const detach = service.attach(identity, () => owner, () => 'bn');
   assert.equal(prompts.length, 0, 'mount must not ask permission');
   await service.register(); assert.equal(service.snapshot().enabled, true); assert.deepEqual(prompts, [true]);
@@ -34,6 +45,7 @@ test('enable, silent resume, owner-change race and disable keep device registrat
   await service.test(); assert.equal(service.snapshot().accepted, true);
   assert.equal(requests.at(-1).action, 'test');
   await service.disable(); assert.equal(service.snapshot().enabled, false); assert.equal(removed, 1); assert.equal(requests.at(-1).action, 'unregister');
+  assert.deepEqual(await service.inbox(), { items: [], readThrough: 0 }, 'viewing the inbox requires no push opt-in');
   assert.ok([...storage.keys()].every(key => key.startsWith('hisab_push_')), 'notification settings never write ledger keys');
   assert.ok(requests.every(body => !('amount' in body) && !('note' in body) && !('workspaceId' in body)));
   // A Google account change during token renewal must not send under stale UI ownership.

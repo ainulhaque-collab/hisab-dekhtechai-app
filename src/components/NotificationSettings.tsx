@@ -1,10 +1,13 @@
-import { useSyncExternalStore } from 'react';
-import { Bell, BellOff, Send } from 'lucide-react';
+import { useState, useSyncExternalStore } from 'react';
+import { Bell, BellOff, Send, Inbox } from 'lucide-react';
 import { notificationService } from '../notifications/service';
 import { primaryButton, secondaryButton } from './ModalShell';
+import { NotificationInbox } from './NotificationInbox';
 
 export function NotificationSettings({ en }: { en: boolean }) {
   const state = useSyncExternalStore(notificationService.subscribe, notificationService.snapshot);
+  const [inbox, setInbox] = useState(false);
+  if (inbox) return <NotificationInbox en={en} onBack={() => setInbox(false)} />;
   const error = state.error;
   const message = error === 'PUSH_PERMISSION_DENIED'
     ? en ? 'Notifications are blocked. Allow them in your phone or browser settings, then try again.' : 'নোটিফিকেশন বন্ধ আছে। ফোন বা ব্রাউজারের সেটিংসে অনুমতি দিয়ে আবার চেষ্টা করুন।'
@@ -18,6 +21,7 @@ export function NotificationSettings({ en }: { en: boolean }) {
     ? en ? 'Five devices are already registered. Turn notifications off on an older device first.' : 'ইতিমধ্যে পাঁচটি ডিভাইস যুক্ত আছে। আগে পুরোনো একটি ডিভাইসে নোটিফিকেশন বন্ধ করুন।'
     : en ? 'Notifications could not connect. Check your internet and try again. Your entries are saved.' : 'নোটিফিকেশন সংযোগ হয়নি। ইন্টারনেট দেখে আবার চেষ্টা করুন। আপনার হিসাব সংরক্ষিত আছে।';
   return <div className="space-y-4">
+    <button type="button" className={`${secondaryButton} w-full`} onClick={() => setInbox(true)}><Inbox className="h-4 w-4" />{en ? 'Notification inbox' : 'নোটিফিকেশন ইনবক্স'}</button>
     <div className="rounded-2xl border border-blue-100 bg-blue-50/60 p-4">
       <div className="flex items-center gap-3"><Bell className="h-5 w-5 text-blue-700" /><h3 className="text-sm font-semibold text-slate-900">{en ? 'Updates on this device' : 'এই ডিভাইসের নোটিফিকেশন'}</h3></div>
       <p className="mt-3 text-xs leading-relaxed text-slate-600">{en ? 'Receive an alert when a transaction is saved on your connected devices. Amounts, account names and notes stay off the lock screen.' : 'সংযুক্ত ডিভাইসে লেনদেন সংরক্ষিত হলে বার্তা পাবেন। লক স্ক্রিনে টাকার পরিমাণ, অ্যাকাউন্টের নাম বা নোট দেখানো হবে না।'}</p>

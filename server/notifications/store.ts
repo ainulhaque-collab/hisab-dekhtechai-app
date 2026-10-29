@@ -1,4 +1,5 @@
 import { createHash } from 'node:crypto';
+import { validateNotificationInbox, type NotificationInbox } from '../../src/notifications/inbox.js';
 
 export class PushError extends Error {
   constructor(public code: string, public status = 503) { super(code); }
@@ -13,6 +14,8 @@ export interface PushStore {
   devices(owner: string): Promise<PushDevice[]>;
   forget(owner: string, device: PushDevice): Promise<void>;
   reserve(owner: string, event: string): Promise<boolean>;
+  inbox(owner: string): Promise<NotificationInbox>;
+  markRead(owner: string, id: string): Promise<void>;
 }
 export const pushHash = (value: string) => createHash('sha256').update(value).digest('hex');
 const PREFIX = 'hisab:push:preview:v1:';
@@ -54,6 +57,32 @@ if redis.call('EXISTS', KEYS[1]) == 1 then return 1 end
 if tonumber(redis.call('GET', KEYS[2]) or '0') >= 300 or tonumber(redis.call('GET', KEYS[3]) or '0') >= 3000 then return 2 end
 redis.call('SET', KEYS[1], '1', 'EX', 172800)
 for i = 2,3 do redis.call('INCR', KEYS[i]); redis.call('EXPIRE', KEYS[i], 172800) end
+local sequence = redis.call('INCR', KEYS[6])
+redis.call('EXPIRE', KEYS[6], 7776000)
+redis.call('ZADD', KEYS[4], sequence, ARGV[1])
+redis.call('HSET', KEYS[5], ARGV[1], cjson.encode({id=ARGV[1],kind=ARGV[2],at=tonumber(ARGV[3]),sequence=sequence}))
+local count = redis.call('ZCARD', KEYS[4])
+if count > 100 then
+  local expired = redis.call('ZRANGE', KEYS[4], 0, count-101)
+  for _,id in ipairs(expired) do redis.call('HDEL', KEYS[5], id) end
+  redis.call('ZREMRANGEBYRANK', KEYS[4], 0, count-101)
+end
+redis.call('EXPIRE', KEYS[4], 2592000); redis.call('EXPIRE', KEYS[5], 2592000)
+return 0`;
+
+export const INBOX_SCRIPT = `
+local result = {tonumber(redis.call('GET', KEYS[3]) or '0')}
+for _,id in ipairs(redis.call('ZREVRANGE', KEYS[1], 0, 99)) do
+  local raw = redis.call('HGET', KEYS[2], id)
+  if raw and cjson.decode(raw).at >= tonumber(ARGV[1]) then table.insert(result, raw)
+  else redis.call('HDEL', KEYS[2], id); redis.call('ZREM', KEYS[1], id) end
+end
+return result`;
+export const READ_SCRIPT = `
+local sequence = redis.call('ZSCORE', KEYS[1], ARGV[1])
+if not sequence then return 1 end
+local previous = tonumber(redis.call('GET', KEYS[2]) or '0')
+if tonumber(sequence) > previous then redis.call('SET', KEYS[2], sequence, 'EX', 7776000) end
 return 0`;
 
 /** Dedicated namespace in the existing free REST Redis, never ledger/AI keys. */
@@ -94,10 +123,24 @@ export class RedisPushStore implements PushStore {
   }
   async reserve(owner: string, event: string) {
     const day = new Date(this.now()).toISOString().slice(0, 10);
-    const result = await this.command(['EVAL', RESERVE_SCRIPT, 3, `${PREFIX}event:${owner}:${pushHash(event)}`,
-      `${PREFIX}daily:${owner}:${day}`, `${PREFIX}daily:global:${day}`]);
+    const id = pushHash(event);
+    const result = await this.command(['EVAL', RESERVE_SCRIPT, 6, `${PREFIX}event:${owner}:${id}`,
+      `${PREFIX}daily:${owner}:${day}`, `${PREFIX}daily:global:${day}`, `${PREFIX}inbox:${owner}:order`, `${PREFIX}inbox:${owner}:items`, `${PREFIX}inbox:${owner}:sequence`,
+      id, event.startsWith('test:') ? 'test' : 'transaction', this.now()]);
     if (result === 2) throw new PushError('PUSH_LIMIT_REACHED', 429);
     if (result !== 0 && result !== 1) throw new PushError('PUSH_STORAGE_UNAVAILABLE');
     return result === 0;
+  }
+  async inbox(owner: string) {
+    const result = await this.command(['EVAL', INBOX_SCRIPT, 3, `${PREFIX}inbox:${owner}:order`, `${PREFIX}inbox:${owner}:items`, `${PREFIX}inbox:${owner}:read`, this.now() - 2592000000]);
+    try {
+      if (!Array.isArray(result) || !result.length) throw new Error();
+      return validateNotificationInbox({ readThrough: result[0], items: result.slice(1).map(value => JSON.parse(value)) }, this.now());
+    } catch { throw new PushError('PUSH_INBOX_UNAVAILABLE'); }
+  }
+  async markRead(owner: string, id: string) {
+    const result = await this.command(['EVAL', READ_SCRIPT, 2, `${PREFIX}inbox:${owner}:order`, `${PREFIX}inbox:${owner}:read`, id]);
+    if (result === 1) throw new PushError('PUSH_INBOX_ITEM_MISSING', 409);
+    if (result !== 0) throw new PushError('PUSH_INBOX_UNAVAILABLE');
   }
 }

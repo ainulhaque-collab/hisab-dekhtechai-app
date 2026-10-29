@@ -2,6 +2,7 @@ import { Capacitor } from '@capacitor/core';
 import type { AIIdentity } from '../ai/client';
 import { pushEndpoint } from './config';
 import { createPushPlatform, type PushPlatform } from './platform';
+import { validateNotificationInbox } from './inbox';
 
 interface Binding { owner: string; deviceId: string; secret: string; enabled: boolean }
 interface QueuedEvent { id: string; at: number }
@@ -141,6 +142,12 @@ export class NotificationService {
       if (!result.accepted) throw new Error('PUSH_DELIVERY_UNAVAILABLE');
       this.update({ accepted: true });
     });
+  }
+  async inbox() { return validateNotificationInbox(await this.request({ action: 'inbox' })); }
+  async markRead(itemId: string) {
+    if (!/^[a-f0-9]{64}$/.test(itemId)) throw new Error('PUSH_INBOX_INVALID');
+    const result = await this.request({ action: 'read', itemId });
+    if (result?.read !== true) throw new Error('PUSH_INBOX_INVALID');
   }
   /** Called only after a new local journal is durable, never imports or sync. */
   committed = (id: string) => {

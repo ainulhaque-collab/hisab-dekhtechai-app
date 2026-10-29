@@ -30,11 +30,18 @@ export function createPushRouter(options: PushHttpOptions) {
         unregister: ['ownerHash', 'action', 'deviceId', 'secret'],
         test: ['ownerHash', 'action', 'deviceId', 'secret', 'eventId'],
         transaction: ['ownerHash', 'action', 'eventId'],
+        inbox: ['ownerHash', 'action'],
+        read: ['ownerHash', 'action', 'itemId'],
       };
-      if (!body || typeof body !== 'object' || Array.isArray(body) || !Object.hasOwn(keys, body.action) ||
+      if (!body || typeof body !== 'object' || Array.isArray(body) || typeof body.action !== 'string' || !Object.hasOwn(keys, body.action) ||
         Object.keys(body).some(key => !keys[body.action].includes(key)) || !/^[a-f0-9]{64}$/.test(body.ownerHash)) throw new PushError('PUSH_REQUEST_INVALID', 400);
       if (owner !== body.ownerHash) throw new PushError('PUSH_OWNER_MISMATCH', 403);
-      if (body.action !== 'transaction' && (!UUID.test(body.deviceId) || !UUID.test(body.secret))) throw new PushError('PUSH_REQUEST_INVALID', 400);
+      if (['register', 'unregister', 'test'].includes(body.action) && (!UUID.test(body.deviceId) || !UUID.test(body.secret))) throw new PushError('PUSH_REQUEST_INVALID', 400);
+      if (body.action === 'inbox') { res.json(await options.store.inbox(owner)); return; }
+      if (body.action === 'read') {
+        if (typeof body.itemId !== 'string' || !/^[a-f0-9]{64}$/.test(body.itemId)) throw new PushError('PUSH_REQUEST_INVALID', 400);
+        await options.store.markRead(owner, body.itemId); res.json({ read: true }); return;
+      }
       if (['transaction', 'test'].includes(body.action) && (typeof body.eventId !== 'string' || !/^[a-zA-Z0-9_-]{8,128}$/.test(body.eventId))) throw new PushError('PUSH_REQUEST_INVALID', 400);
       if (body.action === 'register') {
         if (typeof body.token !== 'string' || !/^[A-Za-z0-9_:\-]{32,4096}$/.test(body.token) ||
