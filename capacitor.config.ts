@@ -4,15 +4,10 @@ const config: CapacitorConfig = {
   appId: 'com.hisabdekhtechai.app',
   appName: 'Hisab Dekhtechai',
   webDir: 'dist',
+  plugins: { PushNotifications: { presentationOptions: ['alert', 'sound'] } },
   server: {
     androidScheme: 'https',
     cleartext: false,
-  },
-  android: {
-    buildOptions: {
-      keystorePath: 'release-key.keystore',
-      keystoreAlias: 'hisabdekhtechai',
-    },
   },
 };
 

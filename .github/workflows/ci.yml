@@ -8,9 +8,14 @@ on:
       - 'stabilization/**'
       - 'development/**'
       - 'fix/**'
+      - 'codex/**'
   pull_request:
     branches:
       - '**'
+  workflow_dispatch:
+
+permissions:
+  contents: read
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
@@ -39,6 +44,9 @@ jobs:
 
       - name: Run Test Suite (Gate 2)
         run: npm test
+
+      - name: Verify compiled AI server runtime
+        run: npm run test:api-runtime
 
       - name: Build Web Application Bundle (Gate 3)
         run: npm run build

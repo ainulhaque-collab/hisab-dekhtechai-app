@@ -1,0 +1,28 @@
+{
+  "status": "APPLIED",
+  "ownerApprovalDate": "2026-10-28",
+  "projectId": "hisab-dekhtechai-notifications",
+  "projectNumber": "706081957087",
+  "customRole": {
+    "roleId": "hisabNotificationSender",
+    "includedPermissions": ["cloudmessaging.messages.create"]
+  },
+  "serviceAccountId": "hisab-preview-push",
+  "workloadIdentityPoolId": "hisab-vercel-preview",
+  "provider": {
+    "id": "vercel-preview",
+    "issuerUri": "https://oidc.vercel.com/ainulhaque-collab",
+    "issuerModeVerification": "VERIFIED_TEAM_ISSUER_IN_VERCEL_SECURITY_UI",
+    "allowedAudiences": ["https://vercel.com/ainulhaque-collab"],
+    "attributeMapping": {"google.subject": "assertion.sub"},
+    "attributeCondition": "assertion.owner_id == 'team_GtyIJ90B2vhl4tLHJkuyyamQ' && assertion.project_id == 'prj_3zLhTBZiE6SUBr05SjmxA57sq4bC' && assertion.environment == 'preview' && assertion.sub == 'owner:ainulhaque-collab:project:hisab-dekhtechai-app:environment:preview'"
+  },
+  "serviceAccountImpersonation": {
+    "role": "roles/iam.workloadIdentityUser",
+    "member": "principal://iam.googleapis.com/projects/706081957087/locations/global/workloadIdentityPools/hisab-vercel-preview/subject/owner:ainulhaque-collab:project:hisab-dekhtechai-app:environment:preview"
+  },
+  "accessBoundary": "All preview deployments of this one Vercel project; other projects, development and production excluded",
+  "privateKeyRequired": false,
+  "billingChangeProposed": false,
+  "ledgerAccessProposed": false
+}

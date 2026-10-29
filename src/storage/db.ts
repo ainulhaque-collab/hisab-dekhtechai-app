@@ -38,8 +38,16 @@ import {
   buildExpenseJournal,
   buildIncomeJournal,
 } from '../domain/journal';
-import { canonicalJson, computeSha256 } from '../sync/canonical';
+import { canonicalJson, computeSha256, computeSha256Sync } from '../sync/canonical';
 import { isDeleteConfirmed } from '../domain/confirmation';
+import { resolveJournalTime, validateTransactionTime } from '../domain/transactionTime';
+import { validateReceiptBlob } from './receipts';
+import { createWorkspaceImage, validateWorkspaceImage } from './workspaceImages';
+import { decodeBackup, encodeBackup, mergeBackup } from './backup';
+import { projectSavingsGoals, validateSavingsGoalEvent, type SavingsGoal, type SavingsGoalEvent, type SavingsProjection } from '../domain/savingsGoals';
+import { isSavingsOperation, savingsRecords, validateSavingsOperations } from './savingsOperations';
+import { projectReportMetadata, validateReportOperations, validateReportEvent, reconciliationFingerprint, type ReportEvent } from './reportMetadata';
+import { issueSavingsLoan, repaySavingsLoan, setLoanAutoRepayment, readSavingsLoans, isLoanLedgerAccount, isLoanJournal, type NewSavingsLoan } from './loanBook';
 import {
   createDurableStorageDriver,
   DurableStorageDriver,
@@ -47,6 +55,12 @@ import {
 } from './drivers/durableStorage';
 
 export const CURRENT_SCHEMA_VERSION = 5;
+
+function storageError(error: unknown): Error {
+  if (error instanceof Error) return error;
+  const message = error && typeof error === 'object' && 'message' in error ? error.message : error;
+  return new Error(typeof message === 'string' ? message : 'Local database operation failed.');
+}
 
 export interface DatabaseState {
   schemaVersion: number;
@@ -94,8 +108,33 @@ export class LocalDatabase {
   private inTransaction = false;
   private snapshotBeforeTx: string | null = null;
   private driver: DurableStorageDriver | null = null;
+  private changeListeners = new Set<() => void>();
+  private journalListeners = new Set<(operationId: string) => void>();
+  private notifiedPending = new Set<string>();
 
-  constructor(storageKey = 'hisab_dekhtechai_db', driver?: DurableStorageDriver) {
+  public subscribeToLocalChanges(listener: () => void): () => void {
+    this.changeListeners.add(listener);
+    return () => { this.changeListeners.delete(listener); };
+  }
+
+  /** Optional side effects for newly committed local journals only. */
+  public subscribeToCommittedJournals(listener: (operationId: string) => void): () => void {
+    this.journalListeners.add(listener);
+    return () => { this.journalListeners.delete(listener); };
+  }
+
+  public isTransactionInProgress(): boolean { return this.inTransaction; }
+
+  private notifyCommittedChanges(ids = this.getPendingOutbox().map(op => op.operationId)): void {
+    const changed = ids.some(id => !this.notifiedPending.has(id));
+    this.notifiedPending = new Set(ids);
+    if (changed) for (const listener of this.changeListeners) {
+      try { listener(); } catch { console.warn('Local change listener failed. Records are already saved.'); }
+    }
+  }
+
+  constructor(storageKey = 'hisab_dekhtechai_db', driver?: DurableStorageDriver, private readonly isolated = false) {
+    if (isolated && !driver) throw new Error('Isolated verification requires an explicit memory driver.');
     this.storageKey = storageKey;
     this.state = this.createEmptyState();
     if (driver) {
@@ -186,12 +225,13 @@ export class LocalDatabase {
    * Never wipes data if parsing fails: preserves emergency backup and throws.
    */
   public loadFromStorage(): boolean {
-    if (typeof localStorage !== 'undefined') {
+    if (!this.isolated && typeof localStorage !== 'undefined') {
       const raw = localStorage.getItem(this.storageKey);
       if (raw) {
         try {
           const parsed = JSON.parse(raw);
-          this.loadFromSerializable(parsed);
+          // Constructor hydration must not launch asynchronous migrations before driver init.
+          this.hydrateState(parsed);
           return true;
         } catch (err) {
           console.error('[CRITICAL] Failed to parse or migrate database from localStorage. Preserving data to prevent wipe:', err);
@@ -230,7 +270,8 @@ export class LocalDatabase {
         try {
           const parsed = JSON.parse(durableData);
           await this.loadFromSerializable(parsed);
-          this.persistSync();
+          if ((parsed.schemaVersion || 1) < CURRENT_SCHEMA_VERSION) await this.persist();
+          else this.persistSync();
           return;
         } catch (err) {
           console.error('[CRITICAL] Failed to parse durable storage state. Preserving emergency snapshot before error:', err);
@@ -258,7 +299,7 @@ export class LocalDatabase {
     verified: boolean;
     recordsMigrated: number;
   }> {
-    if (typeof localStorage === 'undefined' || !this.driver) {
+    if (this.isolated || typeof localStorage === 'undefined' || !this.driver) {
       return { migrated: false, verified: false, recordsMigrated: 0 };
     }
 
@@ -286,7 +327,8 @@ export class LocalDatabase {
       }
 
       // Step 3: Write to durable driver
-      await this.driver.setItem(this.storageKey, JSON.stringify(this.toSerializable()));
+      const expectedData = JSON.stringify(this.toSerializable());
+      await this.driver.setItem(this.storageKey, expectedData);
 
       // Step 4: Verification read-back
       const readBack = await this.driver.getItem(this.storageKey);
@@ -298,7 +340,8 @@ export class LocalDatabase {
       const verifiedTxCount = (verifiedParsed.journalTransactions || []).length;
       const verifiedAccCount = (verifiedParsed.accounts || []).length;
 
-      if (verifiedTxCount !== legacyTxCount || verifiedAccCount !== legacyAccCount) {
+      if (verifiedTxCount !== legacyTxCount || verifiedAccCount !== legacyAccCount ||
+          canonicalJson(verifiedParsed) !== canonicalJson(JSON.parse(expectedData))) {
         throw new Error(
           `Record count mismatch during migration verification! Expected ${legacyTxCount} txs, got ${verifiedTxCount}`
         );
@@ -316,7 +359,7 @@ export class LocalDatabase {
       };
     } catch (migrationErr) {
       console.error('[Storage Migration Error] Migration failed, rolling back to safety snapshot:', migrationErr);
-      return { migrated: false, verified: false, recordsMigrated: 0 };
+      throw migrationErr;
     }
   }
 
@@ -324,7 +367,7 @@ export class LocalDatabase {
    * Persists database state synchronously to memory/localStorage cache.
    */
   public persistSync(): void {
-    if (typeof localStorage !== 'undefined') {
+    if (!this.isolated && typeof localStorage !== 'undefined') {
       try {
         const serializable = this.toSerializable();
         localStorage.setItem(this.storageKey, JSON.stringify(serializable));
@@ -363,13 +406,15 @@ export class LocalDatabase {
       })
       .then(async () => {
         try {
+          const committedIds = this.getPendingOutbox().map(op => op.operationId);
           if (this.driver) {
             const serializable = this.toSerializable();
             await this.driver.setItem(this.storageKey, JSON.stringify(serializable));
           }
           this.persistSync();
+          if (!this.inTransaction) this.notifyCommittedChanges(committedIds);
         } catch (err: any) {
-          const errorObj = err instanceof Error ? err : new Error(String(err));
+          const errorObj = storageError(err);
           this.lastPersistenceError = errorObj;
           console.error('[CRITICAL LocalDatabase Storage Write Error]:', errorObj);
           throw errorObj;
@@ -414,15 +459,26 @@ export class LocalDatabase {
   // --- Atomic Database Transactions ---
 
   public async beginTransaction(): Promise<void> {
+    // The native connection must finish opening before taking the transaction lock.
+    await this.init();
     // Strictly wait for all in-flight writes in the durability queue to settle before beginning transaction
     await this.writeQueuePromise.catch(() => {});
     if (this.inTransaction) {
       throw new Error('Transaction already in progress.');
     }
+    const snapshot = JSON.stringify(this.toSerializable());
     this.inTransaction = true;
-    this.snapshotBeforeTx = JSON.stringify(this.toSerializable());
-    if (this.driver && typeof this.driver.beginTransaction === 'function') {
-      await this.driver.beginTransaction();
+    this.snapshotBeforeTx = snapshot;
+    try {
+      if (this.driver && typeof this.driver.beginTransaction === 'function') {
+        await this.driver.beginTransaction();
+      }
+    } catch (error) {
+      // A rejected native begin never grants the caller a transaction. Release
+      // only this attempt's memory lock; do not roll back another native owner.
+      this.inTransaction = false;
+      this.snapshotBeforeTx = null;
+      throw storageError(error);
     }
   }
 
@@ -437,6 +493,7 @@ export class LocalDatabase {
       }
       this.inTransaction = false;
       this.snapshotBeforeTx = null;
+      this.notifyCommittedChanges();
     } catch (err) {
       await this.rollbackTransaction();
       throw err;
@@ -491,6 +548,10 @@ export class LocalDatabase {
   }
 
   public setDeviceIdentity(deviceId: UUID, deviceName: string): void {
+    if (deviceId !== this.state.deviceIdentity.deviceId) {
+      this.state.deviceIdentity.counter = Array.from(this.state.syncOperations.values())
+        .reduce((highest, op) => op.deviceId === deviceId ? Math.max(highest, op.seq) : highest, 0) + 1;
+    }
     this.state.deviceIdentity.deviceId = deviceId;
     this.state.deviceIdentity.deviceName = deviceName;
   }
@@ -515,154 +576,7 @@ export class LocalDatabase {
   /**
    * Seeds default workspace, asset accounts (Cash, bKash, Bank), and categories.
    */
-  public seedDefaultEntities(): void {
-    const now = new Date().toISOString();
-    const wsPersonalId = 'ws-personal-default';
-    const wsBusinessId = 'ws-business-default';
-
-    // 1. Personal Workspace
-    const wsPersonal: Workspace = {
-      id: wsPersonalId,
-      ownerSubjectHash: this.state.localIdentity?.ownerSubjectHash || 'local-owner',
-      name: 'ব্যক্তিগত (Personal)',
-      kind: 'personal',
-      currency: 'BDT',
-      createdAt: now,
-    };
-    this.state.workspaces.set(wsPersonal.id, wsPersonal);
-
-    // 2. Business Workspace
-    const wsBusiness: Workspace = {
-      id: wsBusinessId,
-      ownerSubjectHash: this.state.localIdentity?.ownerSubjectHash || 'local-owner',
-      name: 'দোকান / ব্যবসা (Business)',
-      kind: 'business',
-      currency: 'BDT',
-      createdAt: now,
-    };
-    this.state.workspaces.set(wsBusiness.id, wsBusiness);
-
-    // Default Personal Accounts (Clean slate: 0 opening balance)
-    const accCash: Account = {
-      id: 'acc-cash-1',
-      workspaceId: wsPersonalId,
-      name: 'Cash in Hand (নগদ ক্যাশ)',
-      kind: 'cash',
-      classification: 'asset',
-      openingBalanceMinor: '0',
-      createdAt: now,
-    };
-    const accBkash: Account = {
-      id: 'acc-bkash-1',
-      workspaceId: wsPersonalId,
-      name: 'bKash (বিকাশ একাউন্ট)',
-      kind: 'bkash',
-      classification: 'asset',
-      accountNumberMasked: '',
-      openingBalanceMinor: '0',
-      createdAt: now,
-    };
-    const accBank: Account = {
-      id: 'acc-bank-1',
-      workspaceId: wsPersonalId,
-      name: 'Bank Account (ব্যাংক হিসাব)',
-      kind: 'bank',
-      classification: 'asset',
-      accountNumberMasked: '',
-      openingBalanceMinor: '0',
-      createdAt: now,
-    };
-    this.state.accounts.set(accCash.id, accCash);
-    this.state.accounts.set(accBkash.id, accBkash);
-    this.state.accounts.set(accBank.id, accBank);
-
-    // Default Business Accounts (Clean slate: 0 opening balance)
-    const accBizCash: Account = {
-      id: 'acc-biz-cash',
-      workspaceId: wsBusinessId,
-      name: 'Cash Drawer (দোকানের ক্যাশ)',
-      kind: 'cash',
-      classification: 'asset',
-      openingBalanceMinor: '0',
-      createdAt: now,
-    };
-    const accBizBkash: Account = {
-      id: 'acc-biz-bkash',
-      workspaceId: wsBusinessId,
-      name: 'bKash Merchant (মার্চেন্ট)',
-      kind: 'bkash',
-      classification: 'asset',
-      accountNumberMasked: '',
-      openingBalanceMinor: '0',
-      createdAt: now,
-    };
-    this.state.accounts.set(accBizCash.id, accBizCash);
-    this.state.accounts.set(accBizBkash.id, accBizBkash);
-
-    // Default Categories with Sub-categories
-    const categories: Array<Omit<Category, 'workspaceId'> & { workspaceId?: UUID }> = [
-      // Personal Expenses
-      { id: 'cat-food', kind: 'expense', name: 'খাবার ও রেস্তোরাঁ', nameEn: 'Food & Dining', icon: 'Utensils', color: '#EF4444' },
-      { id: 'cat-food-restaurant', parentId: 'cat-food', kind: 'expense', name: 'রেস্তোরাঁ ও ডাইনিং', nameEn: 'Restaurant & Dining', icon: 'Utensils', color: '#EF4444' },
-      { id: 'cat-food-snacks', parentId: 'cat-food', kind: 'expense', name: 'চা ও নাশতা', nameEn: 'Tea & Snacks', icon: 'Coffee', color: '#EF4444' },
-
-      { id: 'cat-groceries', kind: 'expense', name: 'কাঁচাবাজার ও মুদি', nameEn: 'Groceries', icon: 'ShoppingCart', color: '#F97316' },
-      { id: 'cat-groc-veg', parentId: 'cat-groceries', kind: 'expense', name: 'শাকসবজি ও ফলমূল', nameEn: 'Vegetables & Fruits', icon: 'Apple', color: '#F97316' },
-      { id: 'cat-groc-fish', parentId: 'cat-groceries', kind: 'expense', name: 'মাছ, মাংস ও চাল-ডাল', nameEn: 'Meat, Fish & Rice', icon: 'Package', color: '#F97316' },
-
-      { id: 'cat-transport', kind: 'expense', name: 'যাতায়াত ও ভাড়া', nameEn: 'Transport & Commute', icon: 'Bus', color: '#3B82F6' },
-      { id: 'cat-transport-bus', parentId: 'cat-transport', kind: 'expense', name: 'বাস / রিকশা ভাড়া', nameEn: 'Bus & Rickshaw', icon: 'Bus', color: '#3B82F6' },
-      { id: 'cat-transport-fuel', parentId: 'cat-transport', kind: 'expense', name: 'বাইক / গাড়ির জ্বালানি', nameEn: 'Fuel & Gas', icon: 'Fuel', color: '#3B82F6' },
-
-      { id: 'cat-utility', kind: 'expense', name: 'বিদ্যুৎ ও গ্যাস বিল', nameEn: 'Utility Bills', icon: 'Zap', color: '#EAB308' },
-      { id: 'cat-medical', kind: 'expense', name: 'ওষুধ ও চিকিৎসা', nameEn: 'Medical & Healthcare', icon: 'HeartPulse', color: '#EC4899' },
-      { id: 'cat-rent', kind: 'expense', name: 'বাসা ভাড়া', nameEn: 'House Rent', icon: 'Home', color: '#8B5CF6' },
-
-      // Personal Income
-      { id: 'cat-salary', kind: 'income', name: 'মাসিক বেতন', nameEn: 'Monthly Salary', icon: 'Briefcase', color: '#10B981' },
-      { id: 'cat-freelance', kind: 'income', name: 'ফ্রিল্যান্সিং ও বোনাস', nameEn: 'Freelance & Bonus', icon: 'Laptop', color: '#06B6D4' },
-      { id: 'cat-investment', kind: 'income', name: 'বিনিয়োগ ও লভ্যাংশ', nameEn: 'Investments & Profit', icon: 'TrendingUp', color: '#14B8A6' },
-
-      // Transfer Fees
-      { id: 'cat-transfer-fee', kind: 'expense', name: 'ক্যাশআউট চার্জ ও ব্যাংক ফি', nameEn: 'Transfer & Cashout Fee', icon: 'Percent', color: '#64748B' },
-
-      // Business Categories
-      { id: 'cat-biz-sales', kind: 'income', name: 'পণ্য বিক্রয়', nameEn: 'Sales Revenue', icon: 'Store', color: '#10B981', workspaceId: wsBusinessId },
-      { id: 'cat-biz-purchase', kind: 'expense', name: 'মাল ক্রয় ও স্টক', nameEn: 'Stock Purchase', icon: 'Package', color: '#F97316', workspaceId: wsBusinessId },
-      { id: 'cat-biz-salary', kind: 'expense', name: 'কর্মচারীর বেতন', nameEn: 'Staff Salary', icon: 'Users', color: '#EF4444', workspaceId: wsBusinessId },
-      { id: 'cat-biz-rent', kind: 'expense', name: 'দোকান ভাড়া', nameEn: 'Shop Rent', icon: 'Building2', color: '#8B5CF6', workspaceId: wsBusinessId },
-    ];
-
-    for (const cat of categories) {
-      const fullCat: Category = {
-        ...cat,
-        workspaceId: cat.workspaceId || wsPersonalId,
-      };
-      this.state.categories.set(fullCat.id, fullCat);
-    }
-
-    // Default Business Parties (Partners, Staff, Suppliers, Customers)
-    const partyPartner: BusinessParty = {
-      id: 'party-partner-1',
-      workspaceId: wsBusinessId,
-      name: 'করিম সাহেব (পার্টনার)',
-      role: 'partner',
-      phone: '01711-000000',
-      openingBalanceMinor: '0',
-      createdAt: now,
-    };
-    const partyStaff: BusinessParty = {
-      id: 'party-staff-1',
-      workspaceId: wsBusinessId,
-      name: 'রাশেদ (কর্মচারী)',
-      role: 'staff',
-      phone: '01811-000000',
-      openingBalanceMinor: '0',
-      createdAt: now,
-    };
-    this.state.parties.set(partyPartner.id, partyPartner);
-    this.state.parties.set(partyStaff.id, partyStaff);
-  }
+  public seedDefaultEntities(): void { populateStarterEntities(this.state); }
 
   // --- Transactions and Atomic Commits ---
 
@@ -671,10 +585,17 @@ export class LocalDatabase {
    */
   public async commitJournalWithOutbox(
     balanced: BalancedJournal,
-    op: SyncOperation
+    op: SyncOperation,
+    receipt?: ReceiptBlob | null
   ): Promise<UUID> {
     const tx = balanced.transaction;
     const lines = balanced.lines;
+    if (isLoanJournal(tx.id) || lines.some(line => isLoanLedgerAccount(line.accountId))) throw new Error('LOAN_PROTECTED_JOURNAL');
+    validateTransactionTime(tx);
+    if (receipt) {
+      validateReceiptBlob(receipt);
+      if (receipt.sha256 !== tx.receiptBlobSha256) throw new Error('Receipt does not match the transaction.');
+    }
 
     // Check if operation was already applied
     if (this.state.appliedOperations.has(op.operationId)) {
@@ -715,7 +636,15 @@ export class LocalDatabase {
         this.state.syncDeviceHeads.set(op.deviceId, op.seq);
       }
 
+      if (receipt && !this.state.receiptBlobs.has(receipt.sha256)) {
+        this.state.receiptBlobs.set(receipt.sha256, { ...receipt });
+        this.queueSyncOp('receipt.attach', receipt.sha256, { blob: receipt });
+      }
+
       await this.commitTransaction();
+      for (const listener of this.journalListeners) {
+        try { listener(op.operationId); } catch { /* A saved journal never depends on notification delivery. */ }
+      }
       return fullTx.id;
     } catch (err) {
       await this.rollbackTransaction();
@@ -742,9 +671,10 @@ export class LocalDatabase {
       entityId,
       type: opType,
       createdAtUtc: new Date().toISOString(),
-      payload,
+      payload: JSON.parse(JSON.stringify(payload)),
       contentSha256: '',
     };
+    op.contentSha256 = computeSha256Sync(canonicalJson(op.payload));
     this.state.syncOperations.set(opId, op);
     this.state.syncOutbox.set(opId, {
       opId,
@@ -771,13 +701,14 @@ export class LocalDatabase {
     return this.state.workspaces.get(id);
   }
 
-  public createWorkspace(name: string, kind: 'personal' | 'business'): Workspace {
+  public createWorkspace(name: string, kind: 'personal' | 'business', description = ''): Workspace {
     if (!name.trim()) throw new Error('Workspace name is required.');
     const ws: Workspace = {
       id: generateUUID(),
       ownerSubjectHash: this.state.localIdentity?.ownerSubjectHash || 'local-owner',
       name: name.trim(),
       kind,
+      description: description.trim().slice(0, 500),
       currency: 'BDT',
       createdAt: new Date().toISOString(),
     };
@@ -810,14 +741,18 @@ export class LocalDatabase {
     return true;
   }
 
-  public editWorkspace(id: UUID, updates: Partial<Pick<Workspace, 'name' | 'kind'>>): boolean {
+  public editWorkspace(id: UUID, updates: Partial<Pick<Workspace, 'name' | 'kind' | 'description'>> & { imageDataUrl?: string | null }): boolean {
     const ws = this.state.workspaces.get(id);
     if (!ws) return false;
     this.assertWorkspaceOwner(ws);
     if (updates.name !== undefined && !updates.name.trim()) throw new Error('Workspace name is required.');
+    if (updates.imageDataUrl !== undefined && !this.inTransaction) throw new Error('Save workspace photos inside a database transaction.');
+    const image = updates.imageDataUrl === undefined ? undefined : createWorkspaceImage(updates.imageDataUrl, generateUUID(), ws.image);
     if (updates.name !== undefined) ws.name = updates.name.trim();
     if (updates.kind) ws.kind = updates.kind;
-    this.queueSyncOp('workspace.update', id, { id, name: ws.name, kind: ws.kind });
+    if (updates.description !== undefined) ws.description = updates.description.trim().slice(0, 500);
+    if (image) ws.image = image;
+    this.queueSyncOp('workspace.update', id, { id, name: ws.name, kind: ws.kind, description: ws.description, ...(image ? { image } : {}) });
     this.autoPersist();
     return true;
   }
@@ -831,16 +766,34 @@ export class LocalDatabase {
     const ws = this.state.workspaces.get(id);
     if (!ws || ws.deletedAt) return 'Workspace not found.';
     this.assertWorkspaceOwner(ws);
-    if (!ws.archivedAt && this.getWorkspaces().length <= 1) return 'Keep at least one active workspace.';
-    const collections = [this.state.accounts, this.state.accountGroups, this.state.accountPermissions,
-      this.state.categories, this.state.parties, this.state.journalTransactions, this.state.budgets,
-      this.state.recurringRules, this.state.recurringOccurrences, this.state.receiptBlobs, this.state.conflicts];
-    if (collections.some(collection => Array.from((collection as Map<string, any>).values()).some(record => record.workspaceId === id)))
-      return 'This workspace contains records. Archive it to preserve its history.';
-    // Retained operations/snapshots can reference a workspace even after visible records are removed.
+    if (Array.from(this.state.syncOperations.values()).some(op => op.entityId === id && isSavingsOperation(op)))
+      return 'This workspace contains savings history. Archive it to keep that history.';
+    const starter = { localIdentity: null, workspaces: new Map(), accounts: new Map(), categories: new Map(), parties: new Map() };
+    populateStarterEntities(starter);
+    const protectedCollections = [this.state.accountGroups, this.state.accountPermissions, this.state.journalTransactions,
+      this.state.budgets, this.state.recurringRules];
+    if (protectedCollections.some(collection => Array.from((collection as Map<string, any>).values()).some(record => record.workspaceId === id)))
+      return 'This workspace contains financial records. Archive it to preserve its history.';
+    for (const [records, templates] of [[this.state.accounts, starter.accounts], [this.state.categories, starter.categories], [this.state.parties, starter.parties]] as const) {
+      if (Array.from((records as Map<string, any>).values()).some(record => record.workspaceId === id && !sameStarterRecord(record, templates.get(record.id))))
+        return 'This workspace has custom accounts, categories or people. Archive it to keep them safe.';
+    }
+    // Financial operations still protect their workspace. Empty starter-only recovery
+    // points may retain the tombstone safely and must not make defaults undeletable.
+    const snapshotHasHistory = (snapshot: LocalSnapshot) => {
+      if (!snapshot.dataJson?.includes(id)) return false;
+      try {
+        const data = JSON.parse(snapshot.dataJson);
+        if ((data.localSnapshots || []).length) return true; // Older recursive snapshots are conservative.
+        if (['accountGroups', 'accountPermissions', 'journalTransactions', 'budgets', 'recurringRules']
+          .some(key => (data[key] || []).some(([, record]: [string, any]) => record.workspaceId === id))) return true;
+        return (['accounts', 'categories', 'parties'] as const).some(key =>
+          (data[key] || []).some(([, record]: [string, any]) => record.workspaceId === id && !sameStarterRecord(record, starter[key].get(record.id))));
+      } catch { return true; }
+    };
     if (Array.from(this.state.syncOperations.values()).some(op => !op.type.startsWith('workspace.') &&
       (op.entityId === id || JSON.stringify(op.payload).includes(id))) ||
-      Array.from(this.state.localSnapshots.values()).some(snapshot => JSON.stringify(snapshot).includes(id)))
+      Array.from(this.state.localSnapshots.values()).some(snapshotHasHistory))
       return 'Retained history or synchronization references this workspace. Archive it instead.';
     return null;
   }
@@ -858,7 +811,7 @@ export class LocalDatabase {
 
   public getAccounts(workspaceId: UUID, includeArchived = false): Account[] {
     return Array.from(this.state.accounts.values()).filter(
-      (a) => a.workspaceId === workspaceId && (includeArchived || !a.archivedAt)
+      (a) => a.workspaceId === workspaceId && !isLoanLedgerAccount(a.id) && (includeArchived || !a.archivedAt)
     );
   }
 
@@ -903,6 +856,7 @@ export class LocalDatabase {
     id: UUID,
     updates: Partial<Pick<Account, 'name' | 'accountNumberMasked' | 'kind' | 'groupId'>>
   ): Account | null {
+    if (isLoanLedgerAccount(id)) throw new Error('LOAN_PROTECTED_ACCOUNT');
     const acc = this.state.accounts.get(id);
     if (!acc) return null;
     if (updates.name !== undefined) acc.name = updates.name.trim();
@@ -925,6 +879,7 @@ export class LocalDatabase {
   }
 
   public restoreAccount(id: UUID): boolean {
+    if (isLoanLedgerAccount(id)) throw new Error('LOAN_PROTECTED_ACCOUNT');
     const acc = this.state.accounts.get(id);
     if (!acc) return false;
     acc.archivedAt = null;
@@ -959,6 +914,7 @@ export class LocalDatabase {
     }
 
     const hasReferences = BigInt(acc.openingBalanceMinor) !== 0n ||
+      Array.from(this.state.syncOperations.values()).some(op => isSavingsOperation(op) && op.payload.savingsEvent?.accountId === id) ||
       Array.from(this.state.accountPermissions.values()).some(g => g.accountIds.includes(id)) ||
       Array.from(this.state.recurringRules.values()).some(r => JSON.stringify(r).includes(id)) ||
       this.getPendingOutbox().some(op => op.entityId === id || JSON.stringify(op.payload).includes(id));
@@ -1007,7 +963,7 @@ export class LocalDatabase {
     if (updates.name !== undefined) group.name = updates.name.trim();
     if (updates.icon !== undefined) group.icon = updates.icon;
     if (updates.description !== undefined) group.description = updates.description.trim();
-    this.queueSyncOp('group.update', id, updates);
+    this.queueSyncOp('group.update', id, { id, ...updates });
     this.autoPersist();
     return group;
   }
@@ -1045,6 +1001,7 @@ export class LocalDatabase {
     const group = this.state.accountGroups.get(groupId);
     if (!acc || !group || acc.workspaceId !== group.workspaceId) return false;
     acc.groupId = groupId;
+    this.queueSyncOp('account.update', accountId, { id: accountId, groupId });
     this.autoPersist();
     return true;
   }
@@ -1053,6 +1010,7 @@ export class LocalDatabase {
     const acc = this.state.accounts.get(accountId);
     if (!acc) return false;
     acc.groupId = null;
+    this.queueSyncOp('account.update', accountId, { id: accountId, groupId: null });
     this.autoPersist();
     return true;
   }
@@ -1196,6 +1154,7 @@ export class LocalDatabase {
     accountId: UUID,
     opType: SyncOperationType = 'journal.post'
   ): boolean {
+    if (isLoanLedgerAccount(accountId)) return false;
     const acc = this.state.accounts.get(accountId);
     if (!acc) return false;
     const ws = this.state.workspaces.get(acc.workspaceId);
@@ -1250,6 +1209,7 @@ export class LocalDatabase {
       color,
     };
     this.state.categories.set(cat.id, cat);
+    this.queueSyncOp('category.create', cat.id, { category: cat });
     this.autoPersist();
     return cat;
   }
@@ -1264,6 +1224,7 @@ export class LocalDatabase {
     const cat = this.state.categories.get(categoryId);
     if (cat) {
       cat.archivedAt = new Date().toISOString();
+      this.queueSyncOp('category.archive', categoryId, { id: categoryId, archivedAt: cat.archivedAt });
       this.autoPersist();
     }
   }
@@ -1279,6 +1240,7 @@ export class LocalDatabase {
       cat.name = name;
       if (nameEn !== undefined) cat.nameEn = nameEn;
       if (parentId !== undefined) cat.parentId = parentId;
+      this.queueSyncOp('category.update', categoryId, { id: categoryId, name: cat.name, nameEn: cat.nameEn, parentId: cat.parentId });
       this.autoPersist();
     }
   }
@@ -1305,6 +1267,7 @@ export class LocalDatabase {
       createdAt: new Date().toISOString(),
     };
     this.state.parties.set(id, party);
+    this.queueSyncOp('party.create', id, { party });
     this.autoPersist();
     return party;
   }
@@ -1329,6 +1292,7 @@ export class LocalDatabase {
       if (updates.phone !== undefined) p.phone = updates.phone;
       if (updates.role !== undefined) p.role = updates.role;
       if (updates.notes !== undefined) p.notes = updates.notes;
+      this.queueSyncOp('party.update', id, { id, ...updates });
       this.autoPersist();
     }
   }
@@ -1337,6 +1301,7 @@ export class LocalDatabase {
     const p = this.state.parties.get(id);
     if (p) {
       p.archivedAt = new Date().toISOString();
+      this.queueSyncOp('party.archive', id, { id, archivedAt: p.archivedAt });
       this.autoPersist();
     }
   }
@@ -1351,6 +1316,7 @@ export class LocalDatabase {
    * Deletes (voids/reverses) a transaction cleanly using balanced double-entry accounting.
    */
   public async deleteTransaction(txId: UUID, reason = 'User deleted transaction'): Promise<void> {
+    if (isLoanJournal(txId)) throw new Error('LOAN_PROTECTED_JOURNAL');
     const tx = this.state.journalTransactions.get(txId);
     if (!tx) {
       throw new Error(`Transaction ${txId} not found`);
@@ -1379,11 +1345,12 @@ export class LocalDatabase {
       const payload = {
         originalTransactionId: tx.id,
         reversalTransactionId: reversalBalanced.transaction.id,
+        reversalBalanced,
         reason,
       };
       const op: SyncOperation = {
         protocolVersion: 1,
-        ownerHash: this.getIdentity()?.ownerSubjectHash || 'owner',
+        ownerHash: this.getIdentity()?.ownerSubjectHash || 'local-owner',
         deviceId: this.getDeviceId(),
         seq: this.getNextDeviceSeq(),
         operationId: opId,
@@ -1419,6 +1386,7 @@ export class LocalDatabase {
     cmd: {
       amountMinor: string;
       effectiveDate: string;
+      effectiveTime?: string;
       assetAccountId: UUID;
       categoryId: UUID;
       note?: string;
@@ -1427,10 +1395,14 @@ export class LocalDatabase {
     }
   ): Promise<void> {
     const origTx = this.state.journalTransactions.get(originalId);
+    if (isLoanJournal(originalId)) throw new Error('LOAN_PROTECTED_JOURNAL');
     if (!origTx) throw new Error(`Transaction ${originalId} not found`);
 
     const opId = generateUUID();
     const effectivePartyId = cmd.partyId !== undefined ? cmd.partyId : origTx.partyId || null;
+    const timing = resolveJournalTime(!cmd.effectiveTime && cmd.effectiveDate === origTx.effectiveDate && origTx.occurredTimezoneOffsetMinutes !== undefined
+      ? { effectiveDate: origTx.effectiveDate, occurredAtUtc: origTx.occurredAtUtc, occurredTimezoneOffsetMinutes: origTx.occurredTimezoneOffsetMinutes }
+      : { effectiveDate: cmd.effectiveDate, effectiveTime: cmd.effectiveTime });
 
     // 1. Build reversal journal
     const reversalBalanced = buildReversalJournal(
@@ -1447,9 +1419,11 @@ export class LocalDatabase {
         assetAccountId: cmd.assetAccountId,
         revenueCategoryId: cmd.categoryId,
         amountMinor: cmd.amountMinor,
-        effectiveDate: cmd.effectiveDate,
+        ...timing,
         note: cmd.note,
         partyId: effectivePartyId,
+        receiptBlobSha256: origTx.receiptBlobSha256,
+        receiptName: origTx.receiptName,
         opId,
       });
     } else {
@@ -1458,9 +1432,11 @@ export class LocalDatabase {
         assetAccountId: cmd.assetAccountId,
         expenseCategoryId: cmd.categoryId,
         amountMinor: cmd.amountMinor,
-        effectiveDate: cmd.effectiveDate,
+        ...timing,
         note: cmd.note,
         partyId: effectivePartyId,
+        receiptBlobSha256: origTx.receiptBlobSha256,
+        receiptName: origTx.receiptName,
         opId,
       });
     }
@@ -1500,7 +1476,7 @@ export class LocalDatabase {
       };
       const op: SyncOperation = {
         protocolVersion: 1,
-        ownerHash: this.getIdentity()?.ownerSubjectHash || 'owner',
+        ownerHash: this.getIdentity()?.ownerSubjectHash || 'local-owner',
         deviceId: this.getDeviceId(),
         seq: this.getNextDeviceSeq(),
         operationId: opId,
@@ -1549,7 +1525,7 @@ export class LocalDatabase {
    * Account balance = Opening Balance + Sum(Debits) - Sum(Credits)
    */
   public calculateAccountSummaries(workspaceId: UUID): AccountBalanceSummary[] {
-    const accounts = this.getAccounts(workspaceId, true);
+    const accounts = this.getAllAccounts(workspaceId);
     const txs = this.getTransactions(workspaceId);
 
     const summaries: AccountBalanceSummary[] = [];
@@ -1595,7 +1571,7 @@ export class LocalDatabase {
    */
   public getDashboardData(workspaceId: UUID): DashboardData {
     const ws = this.getWorkspace(workspaceId) || this.getWorkspaces()[0];
-    const accountSummaries = this.calculateAccountSummaries(workspaceId);
+    const accountSummaries = this.calculateAccountSummaries(workspaceId).filter(a => !isLoanLedgerAccount(a.accountId));
 
     let totalConsolidated = 0n;
     for (const s of accountSummaries) {
@@ -1737,12 +1713,175 @@ export class LocalDatabase {
     }
   }
 
+  public getReportMetadata(workspaceId: UUID) {
+    validateReportOperations(this.state.syncOperations.values(),this.state.workspaces,this.state.accounts,this.state.journalTransactions);
+    return projectReportMetadata(this.state.syncOperations.values(),workspaceId);
+  }
+
+  private async commitReportEvent(workspaceId: UUID, build: () => ReportEvent): Promise<void> {
+    await this.beginTransaction();
+    try {
+      const ws = this.state.workspaces.get(workspaceId);
+      if (!ws || ws.archivedAt || ws.deletedAt || ws.ownerSubjectHash !== (this.getIdentity()?.ownerSubjectHash || 'local-owner')) throw new Error('REPORT_METADATA_OWNER');
+      this.queueSyncOp('workspace.update',workspaceId,{id:workspaceId,reportEvent:validateReportEvent(build())});
+      validateReportOperations(this.state.syncOperations.values(),this.state.workspaces,this.state.accounts,this.state.journalTransactions);
+      await this.commitTransaction();
+    } catch (error) { await this.rollbackTransaction(); throw error; }
+  }
+
+  public async setTransactionBookmark(transactionId: UUID, enabled: boolean): Promise<void> {
+    const original = this.getTransaction(transactionId);
+    if (!original) throw new Error('REPORT_METADATA_REFERENCE');
+    await this.commitReportEvent(original.workspaceId,()=>{
+      const tx = this.getTransaction(transactionId);
+      if (!tx || tx.workspaceId !== original.workspaceId) throw new Error('REPORT_METADATA_REFERENCE');
+      const previous = this.getReportMetadata(tx.workspaceId).bookmarks.get(transactionId);
+      return {version:1,action:'bookmark.set',transactionId,enabled,revision:(previous?.revision || 0)+1};
+    });
+  }
+
+  public async recordReconciliation(workspaceId: UUID, accountId: UUID, actualMinor: string, note = ''): Promise<void> {
+    await this.commitReportEvent(workspaceId,()=>{
+      const account = this.state.accounts.get(accountId);
+      if (!account || account.workspaceId !== workspaceId || account.archivedAt || (account.classification || 'asset') !== 'asset' || isLoanLedgerAccount(account.id)) throw new Error('REPORT_METADATA_REFERENCE');
+      const balance = this.calculateAccountSummaries(workspaceId).find(row=>row.accountId===accountId);
+      if (!balance) throw new Error('REPORT_METADATA_REFERENCE');
+      return {version:1,action:'reconciliation.record',record:{id:generateUUID(),accountId,expectedMinor:balance.currentBalanceMinor,actualMinor,
+        fingerprint:reconciliationFingerprint(account,this.getTransactions(workspaceId)),note:note.trim()}};
+    });
+  }
+
+  // Savings are earmarks over real account balances, never journal postings.
+  private savingsWorkspace(workspaceId: UUID, requireActive = true): Workspace {
+    const ws = this.state.workspaces.get(workspaceId);
+    if (!ws || ws.deletedAt || requireActive && ws.archivedAt) throw new Error('SAVINGS_WORKSPACE_UNAVAILABLE');
+    if (ws.ownerSubjectHash !== (this.getIdentity()?.ownerSubjectHash || 'local-owner')) throw new Error('SAVINGS_OWNER_MISMATCH');
+    return ws;
+  }
+
+  public getSavingsProjection(workspaceId: UUID, today?: string): SavingsProjection {
+    this.savingsWorkspace(workspaceId, false);
+    const balances: Record<string, string> = {};
+    for (const summary of this.calculateAccountSummaries(workspaceId)) {
+      const account = this.state.accounts.get(summary.accountId);
+      if (account && !isLoanLedgerAccount(account.id) && (account.classification || 'asset') === 'asset') balances[summary.accountId] = summary.currentBalanceMinor;
+    }
+    const now = new Date();
+    const day = today || `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
+    return projectSavingsGoals(savingsRecords(this.state.syncOperations.values(), workspaceId), workspaceId, balances, day);
+  }
+
+  private async commitSavingsEvent(workspaceId: UUID,
+    build: (projection: SavingsProjection) => SavingsGoalEvent): Promise<SavingsGoalEvent> {
+    await this.beginTransaction();
+    try {
+      this.savingsWorkspace(workspaceId);
+      const event = validateSavingsGoalEvent(build(this.getSavingsProjection(workspaceId)));
+      this.queueSyncOp('workspace.update', workspaceId, event.action === 'goal.delete'
+        ? { id: workspaceId, savingsDeletion: { version: 1, goalId: event.goalId } }
+        : { id: workspaceId, savingsEvent: event });
+      validateSavingsOperations(this.state.syncOperations.values(), this.state.workspaces, this.state.accounts);
+      await this.commitTransaction();
+      return event;
+    } catch (error) { await this.rollbackTransaction(); throw error; }
+  }
+
+  public async saveSavingsGoal(workspaceId: UUID, input: {
+    id?: UUID; name: string; kind: 'general' | 'emergency'; targetMinor: string;
+    deadline?: string; monthlyContributionMinor?: string; essentialMonthlyMinor?: string; coverageMonths?: number;
+  }): Promise<SavingsGoal> {
+    const event = await this.commitSavingsEvent(workspaceId, projection => {
+      const existingItem = input.id ? projection.goals.find(item => item.goal.id === input.id) : undefined;
+      if (existingItem?.deleted) throw new Error('SAVINGS_GOAL_DELETED');
+      const existing = existingItem?.goal;
+      if (input.id && !existing) throw new Error('SAVINGS_GOAL_NOT_FOUND');
+      if (existing?.archived) throw new Error('SAVINGS_GOAL_ARCHIVED');
+      return { version: 1, action: 'goal.set', goal: {
+        id: existing?.id || generateUUID(), workspaceId, name: input.name.trim(), kind: input.kind,
+        targetMinor: input.targetMinor, ...(input.deadline ? { deadline: input.deadline } : {}),
+        ...(input.monthlyContributionMinor ? { monthlyContributionMinor: input.monthlyContributionMinor } : {}),
+        ...(input.essentialMonthlyMinor ? { essentialMonthlyMinor: input.essentialMonthlyMinor } : {}),
+        ...(input.coverageMonths !== undefined ? { coverageMonths: input.coverageMonths } : {}),
+        revision: (existing?.revision || 0) + 1, archived: false,
+      } };
+    });
+    if (event.action !== 'goal.set') throw new Error('SAVINGS_EVENT_INVALID');
+    return event.goal;
+  }
+
+  public async setSavingsGoalArchived(workspaceId: UUID, goalId: UUID, archived: boolean): Promise<void> {
+    await this.commitSavingsEvent(workspaceId, projection => {
+      const item = projection.goals.find(item => item.goal.id === goalId);
+      if (!item) throw new Error('SAVINGS_GOAL_NOT_FOUND');
+      if (item.deleted) throw new Error('SAVINGS_GOAL_DELETED');
+      if (archived && this.getSavingsLoans().some(r => r.issue.terms.goalId === goalId && (r.pendingReferences || r.balance.totalDueMinor !== '0'))) throw new Error('LOAN_OUTSTANDING');
+      if (archived && BigInt(item.requestedMinor) > 0n) throw new Error('SAVINGS_ALLOCATIONS_REMAIN');
+      return { version: 1, action: 'goal.set', goal: { ...item.goal, archived, revision: item.goal.revision + 1 } };
+    });
+  }
+
+  public async allocateSavingsGoal(workspaceId: UUID, goalId: UUID, accountId: UUID, amountMinor: string, note?: string): Promise<void> {
+    await this.commitSavingsEvent(workspaceId, projection => {
+      if (projection.orphanAllocationCount || projection.orphanReleaseCount) throw new Error('SAVINGS_SYNC_INCOMPLETE');
+      const item = projection.goals.find(item => item.goal.id === goalId);
+      if (!item) throw new Error('SAVINGS_GOAL_NOT_FOUND');
+      if (item.deleted) throw new Error('SAVINGS_GOAL_DELETED');
+      if (item.goal.archived) throw new Error('SAVINGS_GOAL_ARCHIVED');
+      const account = this.state.accounts.get(accountId);
+      if (!account || account.workspaceId !== workspaceId || account.archivedAt || (account.classification || 'asset') !== 'asset')
+        throw new Error('SAVINGS_ACCOUNT_UNAVAILABLE');
+      const event: SavingsGoalEvent = { version: 1, action: 'allocation.add', goalId, allocationId: generateUUID(),
+        accountId, amountMinor, ...(note?.trim() ? { note: note.trim() } : {}) };
+      validateSavingsGoalEvent(event);
+      const available = projection.accounts.find(item => item.accountId === accountId)?.availableMinor || '0';
+      if (BigInt(amountMinor) > BigInt(available)) throw new Error('SAVINGS_INSUFFICIENT_AVAILABLE');
+      return event;
+    });
+  }
+
+  public async releaseSavingsAllocation(workspaceId: UUID, goalId: UUID, allocationId: UUID, amountMinor: string): Promise<void> {
+    await this.commitSavingsEvent(workspaceId, projection => {
+      const item = projection.goals.find(item => item.goal.id === goalId);
+      if (!item) throw new Error('SAVINGS_GOAL_NOT_FOUND');
+      const contribution = item.contributions.find(value => value.allocationId === allocationId);
+      if (!contribution) throw new Error('SAVINGS_EVENT_INVALID');
+      const event: SavingsGoalEvent = { version: 1, action: 'allocation.release', goalId, allocationId, amountMinor };
+      validateSavingsGoalEvent(event);
+      if (BigInt(amountMinor) > BigInt(contribution.requestedMinor)) throw new Error('SAVINGS_RELEASE_EXCEEDS_ALLOCATION');
+      return event;
+    });
+  }
+
+  public async safeDeleteSavingsGoal(workspaceId: UUID, goalId: UUID, confirmation: string): Promise<void> {
+    if (!isDeleteConfirmed(confirmation)) throw new Error('SAVINGS_DELETE_CONFIRMATION');
+    await this.commitSavingsEvent(workspaceId, projection => {
+      const item = projection.goals.find(item => item.goal.id === goalId);
+      if (!item) throw new Error('SAVINGS_GOAL_NOT_FOUND');
+      if (item.deleted) throw new Error('SAVINGS_GOAL_DELETED');
+      if (this.getSavingsLoans().some(r => r.issue.terms.goalId === goalId && (r.pendingReferences || r.balance.totalDueMinor !== '0'))) throw new Error('LOAN_OUTSTANDING');
+      if (!item.goal.archived) throw new Error('SAVINGS_ARCHIVE_BEFORE_DELETE');
+      if (BigInt(item.requestedMinor) > 0n) throw new Error('SAVINGS_ALLOCATIONS_REMAIN');
+      return { version: 1, action: 'goal.delete', goalId };
+    });
+  }
+
+  public getSavingsLoans(workspaceId?: string, asOfDate?: string) {
+    const owner = this.getIdentity()?.ownerSubjectHash;
+    return readSavingsLoans(this.state, asOfDate).filter(row => row.issue.terms.ownerHash === owner &&
+      (!workspaceId || row.issue.terms.sourceWorkspaceId === workspaceId || row.issue.terms.borrowerWorkspaceId === workspaceId));
+  }
+
+  public issueSavingsLoan(input: NewSavingsLoan, now = new Date()) { return issueSavingsLoan(this, input, now); }
+  public repaySavingsLoan(loanId: string, requestId: string, amountMinor?: string, now = new Date(), automatic = false) { return repaySavingsLoan(this, loanId, requestId, amountMinor, now, automatic); }
+  public setLoanAutoRepayment(loanId: string, enabled: boolean) { return setLoanAutoRepayment(this, loanId, enabled); }
+
   public getBudgets(workspaceId: UUID): Budget[] {
     return Array.from(this.state.budgets.values()).filter((b) => b.workspaceId === workspaceId);
   }
 
   public setBudget(budget: Budget): void {
     this.state.budgets.set(budget.id, budget);
+    this.queueSyncOp('budget.set', budget.id, { budget });
     this.autoPersist();
   }
 
@@ -1753,7 +1892,9 @@ export class LocalDatabase {
   }
 
   public setRecurringRule(rule: RecurringRule): void {
+    const exists = this.state.recurringRules.has(rule.id);
     this.state.recurringRules.set(rule.id, rule);
+    this.queueSyncOp(exists ? 'recurring.rule.update' : 'recurring.rule.create', rule.id, { rule });
     this.autoPersist();
   }
 
@@ -1762,8 +1903,15 @@ export class LocalDatabase {
   }
 
   public async storeReceiptBlob(blob: ReceiptBlob): Promise<void> {
-    this.state.receiptBlobs.set(blob.sha256, blob);
-    await this.persist();
+    validateReceiptBlob(blob);
+    await this.beginTransaction();
+    try {
+      if (!this.state.receiptBlobs.has(blob.sha256)) {
+        this.state.receiptBlobs.set(blob.sha256, { ...blob });
+        this.queueSyncOp('receipt.attach', blob.sha256, { blob });
+      }
+      await this.commitTransaction();
+    } catch (error) { await this.rollbackTransaction(); throw error; }
   }
 
   // --- Snapshot and Non-destructive Migration Safeguards ---
@@ -1772,8 +1920,12 @@ export class LocalDatabase {
    * Captures an immutable recovery snapshot before running any schema migration.
    */
   public async captureRecoverySnapshot(): Promise<LocalSnapshot> {
-    const serialized = JSON.stringify(this.toSerializable());
+    await this.waitForPendingWrites();
+    if (this.inTransaction) throw new Error('Storage busy. Try backup again after the current save finishes.');
+    // Snapshots must not recursively embed all preceding snapshots.
+    const serialized = JSON.stringify({ ...this.toSerializable(), localSnapshots: [] });
     const hash = await computeSha256(serialized);
+    if (this.inTransaction) throw new Error('Storage busy. Try backup again after the current save finishes.');
 
     const snapshot: LocalSnapshot = {
       id: generateUUID(),
@@ -1788,7 +1940,8 @@ export class LocalDatabase {
     };
 
     this.state.localSnapshots.set(snapshot.id, snapshot);
-    await this.persist();
+    try { await this.persist(); }
+    catch (error) { this.state.localSnapshots.delete(snapshot.id); throw error; }
     return snapshot;
   }
 
@@ -1806,13 +1959,62 @@ export class LocalDatabase {
     // Verify hash integrity
     const computed = await computeSha256(snap.dataJson);
     if (computed !== snap.hash) {
-      throw new Error('Snapshot hash mismatch! Corrupted snapshot cannot be restored.');
+      throw new Error('BACKUP_CHECKSUM');
     }
 
-    const parsed = JSON.parse(snap.dataJson);
-    await this.loadFromSerializable(parsed);
-    await this.persist();
+    await this.restoreBackupData(JSON.parse(snap.dataJson));
     return true;
+  }
+
+  public async exportBackupFile(): Promise<string> {
+    // Export is an escape hatch when internal storage is full: settle writes,
+    // preserve the error, and copy the current records to a separate file.
+    await this.writeQueuePromise.catch(() => {});
+    if (this.inTransaction) throw new Error('Storage busy. Try backup again after the current save finishes.');
+    return encodeBackup(this.toSerializable());
+  }
+
+  public async importBackupFile(text: string): Promise<void> {
+    await this.restoreBackupData(await decodeBackup(text));
+  }
+
+  private async restoreBackupData(incoming: Record<string, any>): Promise<void> {
+    await this.waitForPendingWrites();
+    mergeBackup(this.toSerializable(), incoming, this.hasOnlyUntouchedStarters()); // Reject invalid/foreign files without writing anything.
+    // Capture a recovery point before import, then validate against the latest state
+    // inside the transaction. No newer journal, metadata or pending operation is removed.
+    await this.captureRecoverySnapshot();
+    await this.beginTransaction();
+    try {
+      const startersOnly = this.hasOnlyUntouchedStarters();
+      const merged = mergeBackup(this.toSerializable(), incoming, startersOnly);
+      await this.loadFromSerializable(merged);
+      if (startersOnly) {
+        // Publish recovered metadata after any initial workspace bootstrap operations.
+        // Existing immutable journal and pending operation IDs are never replaced.
+        for (const [key, type, field] of [
+          ['workspaces', 'workspace.create', 'workspace'], ['accounts', 'account.create', 'account'],
+          ['categories', 'category.create', 'category'], ['parties', 'party.create', 'party'],
+        ] as const) for (const [id] of incoming[key] || []) {
+          const record = (this.state[key] as Map<string, any>).get(id);
+          this.queueSyncOp(type, id, { [field]: { ...record } });
+        }
+      }
+      await this.commitTransaction();
+    } catch (error) { await this.rollbackTransaction(); throw error; }
+  }
+
+  public hasOnlyUntouchedStarters(): boolean {
+    if ([this.state.journalTransactions, this.state.journalLines, this.state.accountGroups, this.state.accountPermissions,
+      this.state.budgets, this.state.recurringRules, this.state.recurringOccurrences, this.state.receiptBlobs, this.state.conflicts]
+      .some(records => records.size > 0)) return false;
+    if (Array.from(this.state.syncOperations.values()).some(op => op.type !== 'workspace.create' ||
+        !['ws-personal-default', 'ws-business-default'].includes(op.entityId))) return false;
+    const starter = { localIdentity: null, workspaces: new Map(), accounts: new Map(), categories: new Map(), parties: new Map() };
+    populateStarterEntities(starter);
+    return (['workspaces', 'accounts', 'categories', 'parties'] as const).every(key =>
+      this.state[key].size === starter[key].size && Array.from((this.state[key] as Map<string, any>).values())
+        .every(record => sameStarterRecord(record, starter[key].get(record.id))));
   }
 
   // --- Serialization / Hydration ---
@@ -1846,8 +2048,22 @@ export class LocalDatabase {
   }
 
   public async loadFromSerializable(data: Record<string, any>): Promise<void> {
+    const previous = this.state;
+    try {
+      this.hydrateState(data);
+      const fromVer = data.schemaVersion || 1;
+      if (fromVer < 4) await this.runVersion4Migration(fromVer);
+      if (fromVer < 5) await this.runVersion5Migration(fromVer);
+    } catch (error) { this.state = previous; throw error; }
+  }
+
+  private hydrateState(data: Record<string, any>): void {
     const fromVer = data.schemaVersion || 1;
-    this.state.schemaVersion = Math.max(fromVer, CURRENT_SCHEMA_VERSION);
+    if (!Number.isSafeInteger(fromVer) || fromVer < 1 || fromVer > CURRENT_SCHEMA_VERSION) {
+      throw new Error('DATABASE_VERSION_UNSUPPORTED: Update the app before opening this database. Existing records have not been replaced.');
+    }
+    this.state = this.createEmptyState();
+    this.state.schemaVersion = fromVer;
     this.state.localIdentity = data.localIdentity || null;
     this.state.deviceIdentity = data.deviceIdentity || {
       deviceId: generateUUID(),
@@ -1856,6 +2072,7 @@ export class LocalDatabase {
       createdAt: new Date().toISOString(),
     };
     this.state.workspaces = new Map(data.workspaces || []);
+    for (const workspace of this.state.workspaces.values()) if (workspace.image !== undefined) validateWorkspaceImage(workspace.image);
     this.state.accounts = new Map(data.accounts || []);
     this.state.accountGroups = new Map(data.accountGroups || []);
     this.state.accountPermissions = new Map(data.accountPermissions || []);
@@ -1873,17 +2090,12 @@ export class LocalDatabase {
     this.state.recurringOccurrences = new Map(data.recurringOccurrences || []);
     this.state.receiptBlobs = new Map(data.receiptBlobs || []);
     this.state.localSnapshots = new Map(data.localSnapshots || []);
-    this.state.schemaMigrations = data.schemaMigrations || [];
+    this.state.schemaMigrations = [...(data.schemaMigrations || [])];
     this.state.preferences = new Map(data.preferences || []);
+    validateSavingsOperations(this.state.syncOperations.values(), this.state.workspaces, this.state.accounts);
+    readSavingsLoans(this.state);
+    validateReportOperations(this.state.syncOperations.values(),this.state.workspaces,this.state.accounts,this.state.journalTransactions);
 
-    // Perform non-destructive migrations if fromVer < 4
-    if (fromVer < 4) {
-      await this.runVersion4Migration(fromVer);
-    }
-    // Perform non-destructive migrations if fromVer < 5
-    if (fromVer < 5) {
-      await this.runVersion5Migration(fromVer);
-    }
   }
 
   private async runVersion4Migration(fromVer: number): Promise<void> {
@@ -1914,7 +2126,15 @@ export class LocalDatabase {
         await this.driver.setItem(`${this.storageKey}_pre_migration_v5`, rawCurrent);
       }
     }
-    await this.captureRecoverySnapshot();
+    // Stage the recovery point in memory. Never overwrite the original database
+    // until every migration and ledger check has succeeded.
+    const dataJson = JSON.stringify({ ...this.toSerializable(), localSnapshots: [] });
+    const createdAt = new Date().toISOString();
+    const snapshot: LocalSnapshot = { id: generateUUID(), dbSchemaVersion: this.state.schemaVersion,
+      hash: await computeSha256(dataJson), totalTransactions: this.state.journalTransactions.size,
+      totalLines: this.state.journalLines.size, pendingOutboxCount: this.getPendingOutbox().length,
+      verifiedAt: createdAt, createdAt, dataJson };
+    this.state.localSnapshots.set(snapshot.id, snapshot);
 
     // Step 2: Non-destructive accounts schema updates
     for (const [id, acc] of this.state.accounts.entries()) {
@@ -1978,7 +2198,6 @@ export class LocalDatabase {
 
     // 1. Transaction-level balance and aggregate trial balance
     for (const tx of txs) {
-      if (tx.isDeleted) continue;
       let txDebits = 0n;
       let txCredits = 0n;
       for (const line of tx.lines) {
@@ -2007,7 +2226,7 @@ export class LocalDatabase {
     }
 
     // 2. Independently calculate account balances
-    const accounts = this.getAccounts(workspaceId);
+    const accounts = this.getAllAccounts(workspaceId);
     const summaries = this.calculateAccountSummaries(workspaceId);
     const summaryMap = new Map(summaries.map((s) => [s.accountId, s]));
 
@@ -2016,7 +2235,6 @@ export class LocalDatabase {
       let expectedDebits = 0n;
       let expectedCredits = 0n;
       for (const tx of txs) {
-        if (tx.isDeleted) continue;
         for (const line of tx.lines) {
           if (line.accountId === acc.id && !line.categoryId) {
             expectedDebits += toPaisa(line.debitMinor);
@@ -2069,3 +2287,159 @@ export class LocalDatabase {
     return this.state;
   }
 }
+
+function sameStarterRecord(record: any, template: any): boolean {
+  if (!template) return false;
+  const clean = (value: any) => Object.fromEntries(Object.entries(value).filter(([key, entry]) =>
+    !['createdAt', 'ownerSubjectHash'].includes(key) && entry !== null && entry !== undefined));
+  return canonicalJson(clean(record)) === canonicalJson(clean(template));
+}
+
+function populateStarterEntities(state: Pick<DatabaseState, 'localIdentity' | 'workspaces' | 'accounts' | 'categories' | 'parties'>): void {
+    const now = new Date().toISOString();
+    const wsPersonalId = 'ws-personal-default';
+    const wsBusinessId = 'ws-business-default';
+
+    // 1. Personal Workspace
+    const wsPersonal: Workspace = {
+      id: wsPersonalId,
+      ownerSubjectHash: state.localIdentity?.ownerSubjectHash || 'local-owner',
+      name: 'ব্যক্তিগত (Personal)',
+      kind: 'personal',
+      currency: 'BDT',
+      createdAt: now,
+    };
+    state.workspaces.set(wsPersonal.id, wsPersonal);
+
+    // 2. Business Workspace
+    const wsBusiness: Workspace = {
+      id: wsBusinessId,
+      ownerSubjectHash: state.localIdentity?.ownerSubjectHash || 'local-owner',
+      name: 'দোকান / ব্যবসা (Business)',
+      kind: 'business',
+      currency: 'BDT',
+      createdAt: now,
+    };
+    state.workspaces.set(wsBusiness.id, wsBusiness);
+
+    // Default Personal Accounts (Clean slate: 0 opening balance)
+    const accCash: Account = {
+      id: 'acc-cash-1',
+      workspaceId: wsPersonalId,
+      name: 'Cash in Hand (নগদ ক্যাশ)',
+      kind: 'cash',
+      classification: 'asset',
+      openingBalanceMinor: '0',
+      createdAt: now,
+    };
+    const accBkash: Account = {
+      id: 'acc-bkash-1',
+      workspaceId: wsPersonalId,
+      name: 'bKash (বিকাশ একাউন্ট)',
+      kind: 'bkash',
+      classification: 'asset',
+      accountNumberMasked: '',
+      openingBalanceMinor: '0',
+      createdAt: now,
+    };
+    const accBank: Account = {
+      id: 'acc-bank-1',
+      workspaceId: wsPersonalId,
+      name: 'Bank Account (ব্যাংক হিসাব)',
+      kind: 'bank',
+      classification: 'asset',
+      accountNumberMasked: '',
+      openingBalanceMinor: '0',
+      createdAt: now,
+    };
+    state.accounts.set(accCash.id, accCash);
+    state.accounts.set(accBkash.id, accBkash);
+    state.accounts.set(accBank.id, accBank);
+
+    // Default Business Accounts (Clean slate: 0 opening balance)
+    const accBizCash: Account = {
+      id: 'acc-biz-cash',
+      workspaceId: wsBusinessId,
+      name: 'Cash Drawer (দোকানের ক্যাশ)',
+      kind: 'cash',
+      classification: 'asset',
+      openingBalanceMinor: '0',
+      createdAt: now,
+    };
+    const accBizBkash: Account = {
+      id: 'acc-biz-bkash',
+      workspaceId: wsBusinessId,
+      name: 'bKash Merchant (মার্চেন্ট)',
+      kind: 'bkash',
+      classification: 'asset',
+      accountNumberMasked: '',
+      openingBalanceMinor: '0',
+      createdAt: now,
+    };
+    state.accounts.set(accBizCash.id, accBizCash);
+    state.accounts.set(accBizBkash.id, accBizBkash);
+
+    // Default Categories with Sub-categories
+    const categories: Array<Omit<Category, 'workspaceId'> & { workspaceId?: UUID }> = [
+      // Personal Expenses
+      { id: 'cat-food', kind: 'expense', name: 'খাবার ও রেস্তোরাঁ', nameEn: 'Food & Dining', icon: 'Utensils', color: '#EF4444' },
+      { id: 'cat-food-restaurant', parentId: 'cat-food', kind: 'expense', name: 'রেস্তোরাঁ ও ডাইনিং', nameEn: 'Restaurant & Dining', icon: 'Utensils', color: '#EF4444' },
+      { id: 'cat-food-snacks', parentId: 'cat-food', kind: 'expense', name: 'চা ও নাশতা', nameEn: 'Tea & Snacks', icon: 'Coffee', color: '#EF4444' },
+
+      { id: 'cat-groceries', kind: 'expense', name: 'কাঁচাবাজার ও মুদি', nameEn: 'Groceries', icon: 'ShoppingCart', color: '#F97316' },
+      { id: 'cat-groc-veg', parentId: 'cat-groceries', kind: 'expense', name: 'শাকসবজি ও ফলমূল', nameEn: 'Vegetables & Fruits', icon: 'Apple', color: '#F97316' },
+      { id: 'cat-groc-fish', parentId: 'cat-groceries', kind: 'expense', name: 'মাছ, মাংস ও চাল-ডাল', nameEn: 'Meat, Fish & Rice', icon: 'Package', color: '#F97316' },
+
+      { id: 'cat-transport', kind: 'expense', name: 'যাতায়াত ও ভাড়া', nameEn: 'Transport & Commute', icon: 'Bus', color: '#3B82F6' },
+      { id: 'cat-transport-bus', parentId: 'cat-transport', kind: 'expense', name: 'বাস / রিকশা ভাড়া', nameEn: 'Bus & Rickshaw', icon: 'Bus', color: '#3B82F6' },
+      { id: 'cat-transport-fuel', parentId: 'cat-transport', kind: 'expense', name: 'বাইক / গাড়ির জ্বালানি', nameEn: 'Fuel & Gas', icon: 'Fuel', color: '#3B82F6' },
+
+      { id: 'cat-utility', kind: 'expense', name: 'বিদ্যুৎ ও গ্যাস বিল', nameEn: 'Utility Bills', icon: 'Zap', color: '#EAB308' },
+      { id: 'cat-medical', kind: 'expense', name: 'ওষুধ ও চিকিৎসা', nameEn: 'Medical & Healthcare', icon: 'HeartPulse', color: '#EC4899' },
+      { id: 'cat-rent', kind: 'expense', name: 'বাসা ভাড়া', nameEn: 'House Rent', icon: 'Home', color: '#8B5CF6' },
+
+      // Personal Income
+      { id: 'cat-salary', kind: 'income', name: 'মাসিক বেতন', nameEn: 'Monthly Salary', icon: 'Briefcase', color: '#10B981' },
+      { id: 'cat-freelance', kind: 'income', name: 'ফ্রিল্যান্সিং ও বোনাস', nameEn: 'Freelance & Bonus', icon: 'Laptop', color: '#06B6D4' },
+      { id: 'cat-investment', kind: 'income', name: 'বিনিয়োগ ও লভ্যাংশ', nameEn: 'Investments & Profit', icon: 'TrendingUp', color: '#14B8A6' },
+
+      // Transfer Fees
+      { id: 'cat-transfer-fee', kind: 'expense', name: 'ক্যাশআউট চার্জ ও ব্যাংক ফি', nameEn: 'Transfer & Cashout Fee', icon: 'Percent', color: '#64748B' },
+
+      // Business Categories
+      { id: 'cat-biz-sales', kind: 'income', name: 'পণ্য বিক্রয়', nameEn: 'Sales Revenue', icon: 'Store', color: '#10B981', workspaceId: wsBusinessId },
+      { id: 'cat-biz-purchase', kind: 'expense', name: 'মাল ক্রয় ও স্টক', nameEn: 'Stock Purchase', icon: 'Package', color: '#F97316', workspaceId: wsBusinessId },
+      { id: 'cat-biz-salary', kind: 'expense', name: 'কর্মচারীর বেতন', nameEn: 'Staff Salary', icon: 'Users', color: '#EF4444', workspaceId: wsBusinessId },
+      { id: 'cat-biz-rent', kind: 'expense', name: 'দোকান ভাড়া', nameEn: 'Shop Rent', icon: 'Building2', color: '#8B5CF6', workspaceId: wsBusinessId },
+    ];
+
+    for (const cat of categories) {
+      const fullCat: Category = {
+        ...cat,
+        workspaceId: cat.workspaceId || wsPersonalId,
+      };
+      state.categories.set(fullCat.id, fullCat);
+    }
+
+    // Default Business Parties (Partners, Staff, Suppliers, Customers)
+    const partyPartner: BusinessParty = {
+      id: 'party-partner-1',
+      workspaceId: wsBusinessId,
+      name: 'করিম সাহেব (পার্টনার)',
+      role: 'partner',
+      phone: '01711-000000',
+      openingBalanceMinor: '0',
+      createdAt: now,
+    };
+    const partyStaff: BusinessParty = {
+      id: 'party-staff-1',
+      workspaceId: wsBusinessId,
+      name: 'রাশেদ (কর্মচারী)',
+      role: 'staff',
+      phone: '01811-000000',
+      openingBalanceMinor: '0',
+      createdAt: now,
+    };
+    state.parties.set(partyPartner.id, partyPartner);
+    state.parties.set(partyStaff.id, partyStaff);
+  }

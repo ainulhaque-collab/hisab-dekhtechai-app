@@ -1,0 +1,12 @@
+{
+  "$schema": "https://openapi.vercel.sh/vercel.json",
+  "framework": "vite",
+  "buildCommand": "npm run build",
+  "outputDirectory": "dist",
+  "installCommand": "npm ci",
+  "headers": [{ "source": "/push-sw.js", "headers": [{ "key": "Cache-Control", "value": "no-cache" }] }],
+  "functions": { "api/ai/extract.ts": { "maxDuration": 60 }, "api/ai/guide.ts": { "maxDuration": 60 }, "api/notifications/push.ts": { "maxDuration": 60 }, "api/content.ts": { "maxDuration": 30 }, "api/articles.ts": { "maxDuration": 30 } },
+  "rewrites": [
+    { "source": "/((?!api/).*)", "destination": "/index.html" }
+  ]
+}
