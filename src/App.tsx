@@ -154,7 +154,7 @@ function MainApp() {
             />
           )}
 
-          {activeTab === 'reports' && <ReportsTab />}
+          {activeTab === 'reports' && <ReportsTab onSelectTransaction={handleSelectTransactionFromDashboard} />}
           </>}
         </main>
       </ErrorBoundary>

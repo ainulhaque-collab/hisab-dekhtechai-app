@@ -8,5 +8,5 @@
     "esModuleInterop": true,
     "rootDir": ".."
   },
-  "include": ["ai/**/*.ts", "notifications/**/*.ts"]
+  "include": ["ai/**/*.ts", "notifications/**/*.ts", "content.ts", "articles.ts"]
 }

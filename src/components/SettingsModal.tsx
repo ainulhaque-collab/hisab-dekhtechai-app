@@ -1,10 +1,12 @@
 import React, { useEffect, useState } from 'react';
-import { Settings, UserRound, BriefcaseBusiness, Cloud, Download, ChevronRight, ArrowLeft, Volume2, ShieldCheck, Globe2, LockKeyhole, LogOut, Bell } from 'lucide-react';
+import { Settings, UserRound, BriefcaseBusiness, Cloud, Download, ChevronRight, ArrowLeft, Volume2, ShieldCheck, Globe2, LockKeyhole, LogOut, Bell, BookOpen } from 'lucide-react';
 import { useApp } from '../context/AppContext';
 import { SecuritySettings } from './SecuritySettings';
 import { SoundSettings } from './SoundSettings';
 import { AIPrivacySettings } from './AIPrivacySettings';
 import { NotificationSettings } from './NotificationSettings';
+import { DataHealthPanel } from './DataHealthPanel';
+import { ContentCenter } from './ContentCenter';
 import { ModalShell, secondaryButton } from './ModalShell';
 
 interface SettingsModalProps {
@@ -12,13 +14,13 @@ interface SettingsModalProps {
   onOpenProfileModal: () => void; onOpenSyncModal: () => void; onOpenSnapshotModal: () => void;
 }
 export function SettingsModal({ isOpen, onClose, onOpenProfileModal, onOpenSyncModal, onOpenSnapshotModal }: SettingsModalProps) {
-  const { language, setLanguage, userProfile, signOut, db } = useApp();
-  const [section, setSection] = useState<'home' | 'sound' | 'security' | 'privacy' | 'backup' | 'notifications'>('home');
+  const { language, setLanguage, userProfile, signOut, db, currentWorkspace } = useApp();
+  const [section, setSection] = useState<'home' | 'sound' | 'security' | 'privacy' | 'backup' | 'notifications' | 'data' | 'content'>('home');
   const [signingOut, setSigningOut] = useState(false);
   useEffect(() => { if (isOpen) setSection('home'); }, [isOpen]);
   if (!isOpen) return null;
   const en = language === 'en';
-  const titles = { home: en ? 'Settings' : 'সেটিংস', sound: en ? 'Sounds & haptics' : 'শব্দ ও কম্পন', security: en ? 'App security' : 'অ্যাপের নিরাপত্তা', privacy: en ? 'Privacy' : 'গোপনীয়তা', backup: en ? 'Backup & recovery' : 'ব্যাকআপ ও পুনরুদ্ধার', notifications: en ? 'Notifications' : 'নোটিফিকেশন' };
+  const titles = { home: en ? 'Settings' : 'সেটিংস', sound: en ? 'Sounds & haptics' : 'শব্দ ও কম্পন', security: en ? 'App security' : 'অ্যাপের নিরাপত্তা', privacy: en ? 'Privacy' : 'গোপনীয়তা', backup: en ? 'Backup & recovery' : 'ব্যাকআপ ও পুনরুদ্ধার', notifications: en ? 'Notifications' : 'নোটিফিকেশন', data: en ? 'Data health & balance checks' : 'ডেটার অবস্থা ও ব্যালেন্স যাচাই', content:en?'Learn & Admin drafts':'শিখুন ও Admin-এর খসড়া' };
   const navigate = (callback: () => void) => { onClose(); callback(); };
   const row = (icon: React.ReactNode, title: string, subtitle: string, action: () => void) => <button type="button" onClick={action} className="flex w-full items-center gap-3 rounded-2xl border border-slate-100 p-4 text-left transition hover:border-blue-200 hover:bg-blue-50/30"><span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-slate-50 text-blue-700">{icon}</span><span className="min-w-0 flex-1"><span className="block text-xs font-semibold text-slate-800">{title}</span><span className="mt-1 block text-[11px] leading-relaxed text-slate-400">{subtitle}</span></span><ChevronRight className="h-4 w-4 shrink-0 text-slate-300" /></button>;
   return <ModalShell title={titles[section]} description={en ? 'Everything you need, in one place.' : 'প্রয়োজনীয় সব নিয়ন্ত্রণ এক জায়গায়।'} icon={<Settings className="h-5 w-5" />} onClose={onClose}>
@@ -32,6 +34,8 @@ export function SettingsModal({ isOpen, onClose, onOpenProfileModal, onOpenSyncM
         {row(<Bell className="h-4 w-4" />, en ? 'Notifications' : 'নোটিফিকেশন', en ? 'Transaction alerts and a test on this device' : 'লেনদেনের বার্তা ও এই ডিভাইসে পরীক্ষা', () => setSection('notifications'))}
         {row(<LockKeyhole className="h-4 w-4" />, en ? 'App security' : 'অ্যাপের নিরাপত্তা', en ? 'App PIN and supported biometric unlock' : 'অ্যাপ পিন ও সমর্থিত বায়োমেট্রিক আনলক', () => setSection('security'))}
         {row(<Cloud className="h-4 w-4" />, en ? 'Backup & recovery' : 'ব্যাকআপ ও পুনরুদ্ধার', en ? 'Google Drive sync, backup files and restore' : 'গুগল ড্রাইভ সিঙ্ক, ব্যাকআপ ফাইল ও রিস্টোর', () => setSection('backup'))}
+        {row(<ShieldCheck className="h-4 w-4" />, en ? 'Data health & balance checks' : 'ডেটার অবস্থা ও ব্যালেন্স যাচাই', en ? 'Saved records, sync, backup and real wallet balances' : 'সংরক্ষণ, সিঙ্ক, ব্যাকআপ ও বাস্তব ওয়ালেটের স্থিতি', () => setSection('data'))}
+        {row(<BookOpen className="h-4 w-4"/>,en?'Learn & Admin drafts':'শিখুন ও Admin-এর খসড়া',en?'Published posts, announcement drafts and verified Admin access':'প্রকাশিত লেখা, ঘোষণার খসড়া ও যাচাইকৃত Admin অনুমতি',()=>setSection('content'))}
         {row(<ShieldCheck className="h-4 w-4" />, en ? 'Privacy' : 'গোপনীয়তা', en ? 'Where your records are stored' : 'আপনার হিসাব কোথায় সংরক্ষিত থাকে', () => setSection('privacy'))}
         {userProfile?.email && <button type="button" disabled={signingOut} className="inline-flex items-center gap-2 p-3 text-xs font-semibold text-rose-600 disabled:opacity-50" onClick={async () => {
           const pending = db.getPendingOutbox().length;
@@ -40,6 +44,8 @@ export function SettingsModal({ isOpen, onClose, onOpenProfileModal, onOpenSyncM
       </>}
       {section === 'sound' && <SoundSettings />}
       {section === 'notifications' && <NotificationSettings en={en} />}
+      {section === 'content' && <ContentCenter key={db.getIdentity()?.ownerSubjectHash || 'local'}/>}
+      {section === 'data' && <DataHealthPanel key={`${db.getIdentity()?.ownerSubjectHash || 'local'}:${currentWorkspace?.id}`} onOpenSync={()=>navigate(onOpenSyncModal)} onOpenBackup={()=>navigate(onOpenSnapshotModal)} />}
       {section === 'security' && <SecuritySettings language={language} />}
       {section === 'backup' && <>
         {row(<Cloud className="h-4 w-4" />, en ? 'Google Drive sync' : 'গুগল ড্রাইভ সিঙ্ক', en ? 'Connect your account and check pending changes' : 'অ্যাকাউন্ট সংযুক্ত করুন ও অপেক্ষমাণ পরিবর্তন দেখুন', () => navigate(onOpenSyncModal))}

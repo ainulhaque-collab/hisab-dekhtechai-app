@@ -9,6 +9,7 @@
 
 import { LocalDatabase } from '../storage/db';
 import { isSavingsOperation, validateSavingsOperations } from '../storage/savingsOperations';
+import { validateReportOperations } from '../storage/reportMetadata';
 import { isLoanOperation, readSavingsLoans } from '../storage/loanBook';
 import { DriveTransport } from '../drive/transport';
 import {
@@ -781,6 +782,7 @@ export class SyncOrchestrator {
 
     validateSavingsOperations(this.db.getRawState().syncOperations.values(), this.db.getRawState().workspaces, this.db.getRawState().accounts);
     readSavingsLoans(this.db.getRawState());
+    validateReportOperations(this.db.getRawState().syncOperations.values(),this.db.getRawState().workspaces,this.db.getRawState().accounts,this.db.getRawState().journalTransactions);
     await this.db.commitTransaction();
     } catch (error) { await this.db.rollbackTransaction(); throw error; }
   }

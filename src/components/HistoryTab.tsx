@@ -20,7 +20,8 @@ import {
   AlertTriangle,
   User,
   Users,
-  Phone
+  Phone,
+  Bookmark
 } from 'lucide-react';
 import { JournalTransaction, PartyRole } from '../contracts/types';
 import { localDate, transactionTimeLabel } from '../domain/transactionTime';
@@ -61,6 +62,9 @@ export const HistoryTab: React.FC<HistoryTabProps> = ({
   const [partyFilter, setPartyFilter] = useState<string>('all');
   const [accountFilter, setAccountFilter] = useState<string>('all');
   const [categoryFilter, setCategoryFilter] = useState<string>('all');
+  const [bookmarkedOnly, setBookmarkedOnly] = useState(false);
+  const [bookmarkBusy, setBookmarkBusy] = useState(false);
+  const [bookmarkError, setBookmarkError] = useState<string | null>(null);
 
   const [activeModalTx, setActiveModalTx] = useState<JournalTransaction | null>(null);
   const [isEditing, setIsEditing] = useState(false);
@@ -87,6 +91,10 @@ export const HistoryTab: React.FC<HistoryTabProps> = ({
   const accountsMap = useMemo(() => new Map(accounts.map((a) => [a.id, a])), [accounts]);
   const categoriesMap = useMemo(() => new Map(categories.map((c) => [c.id, c])), [categories]);
   const partiesMap = useMemo(() => new Map(parties.map((p) => [p.id, p])), [parties]);
+  const bookmarkState = useMemo(() => {
+    try { return { ids:new Set(currentWorkspace ? [...db.getReportMetadata(currentWorkspace.id).bookmarks].filter(([,value])=>value.enabled).map(([id])=>id) : []), unavailable:false }; }
+    catch { return {ids:new Set<string>(),unavailable:true}; }
+  },[db,currentWorkspace,transactions]);
   const receiptPreview = useMemo(() => {
     const hash = activeModalTx?.receiptBlobSha256;
     const blob = hash ? db.getReceiptBlob(hash) : undefined;
@@ -116,6 +124,7 @@ export const HistoryTab: React.FC<HistoryTabProps> = ({
     const currentMonthPrefix = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
 
     return transactions.filter((tx) => {
+      if (bookmarkedOnly && !bookmarkState.ids.has(tx.id)) return false;
       // Period filter
       if (periodFilter === 'today' && tx.effectiveDate !== todayStr) return false;
       if (periodFilter === 'month' && !tx.effectiveDate.startsWith(currentMonthPrefix)) return false;
@@ -166,13 +175,14 @@ export const HistoryTab: React.FC<HistoryTabProps> = ({
 
       return true;
     });
-  }, [transactions, periodFilter, typeFilter, partyFilter, accountFilter, categoryFilter, searchTerm, categoriesMap, accountsMap, partiesMap]);
+  }, [transactions, periodFilter, typeFilter, partyFilter, accountFilter, categoryFilter, searchTerm, categoriesMap, accountsMap, partiesMap, bookmarkedOnly, bookmarkState]);
 
   const handleOpenDetail = (tx: JournalTransaction) => {
     setActiveModalTx(tx);
     setIsEditing(false);
     setShowDeleteConfirm(false);
     setEditError(null);
+    setBookmarkError(null);
 
     // Find original amount
     const primaryLine = tx.lines.find((l) => l.debitMinor !== '0' || l.creditMinor !== '0');
@@ -255,6 +265,8 @@ export const HistoryTab: React.FC<HistoryTabProps> = ({
       </div>
 
       {/* Search Bar */}
+      <button type="button" aria-pressed={bookmarkedOnly} disabled={bookmarkState.unavailable} onClick={()=>setBookmarkedOnly(value=>!value)} className={`inline-flex min-h-11 items-center gap-2 rounded-xl border px-3 text-xs font-semibold ${bookmarkedOnly?'border-blue-700 bg-blue-700 text-white':'border-slate-200 bg-white text-slate-600'}`}><Bookmark className="h-4 w-4" />{isEn?'Bookmarked only':'শুধু বুকমার্ক'} · {bookmarkState.ids.size.toLocaleString(isEn?'en-GB':'bn-BD')}</button>
+      {bookmarkState.unavailable && <p role="alert" className="rounded-xl bg-rose-50 p-3 text-xs text-rose-800">{isEn?'Bookmarks could not load. Your entries are saved.':'বুকমার্ক লোড হয়নি। আপনার হিসাব সংরক্ষিত আছে।'}</p>}
       <div className="relative">
         <Search className="w-4 h-4 absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-400" />
         <input
@@ -529,7 +541,8 @@ export const HistoryTab: React.FC<HistoryTabProps> = ({
               <button
                 type="button"
                 onClick={handleCloseModal}
-                className="p-1 rounded-lg text-slate-400 hover:bg-slate-100"
+                aria-label={isEn?'Close transaction details':'লেনদেনের বিস্তারিত বন্ধ করুন'}
+                className="min-h-11 min-w-11 flex items-center justify-center p-1 rounded-lg text-slate-400 hover:bg-slate-100"
               >
                 <X className="w-4 h-4" />
               </button>
@@ -640,6 +653,10 @@ export const HistoryTab: React.FC<HistoryTabProps> = ({
                 </div>
 
                 {/* Action Buttons: Edit and Delete */}
+                <button type="button" disabled={bookmarkBusy || bookmarkState.unavailable} aria-pressed={bookmarkState.ids.has(activeModalTx.id)}
+                  onClick={async()=>{setBookmarkBusy(true);setBookmarkError(null);try{await db.setTransactionBookmark(activeModalTx.id,!bookmarkState.ids.has(activeModalTx.id));refreshState();}catch{setBookmarkError(isEn?'Bookmark could not be saved. Please try again.':'বুকমার্ক সংরক্ষণ হয়নি। আবার চেষ্টা করুন।');}finally{setBookmarkBusy(false);}}}
+                  className="flex min-h-11 w-full items-center justify-center gap-2 rounded-xl border border-blue-100 bg-blue-50 p-3 text-xs font-semibold text-blue-800 disabled:opacity-40"><Bookmark className="h-4 w-4" fill={bookmarkState.ids.has(activeModalTx.id)?'currentColor':'none'}/>{bookmarkState.ids.has(activeModalTx.id)?(isEn?'Remove bookmark':'বুকমার্ক সরান'):(isEn?'Bookmark this entry':'এই লেনদেন বুকমার্ক করুন')}</button>
+                {bookmarkError && <p role="alert" className="text-xs text-rose-700">{bookmarkError}</p>}
                 {activeModalTx.transactionType !== 'reversal' && !(activeModalTx as any).isDeleted && (
                   <div className="flex gap-2 pt-2">
                     <button

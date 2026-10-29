@@ -46,6 +46,7 @@ import { createWorkspaceImage, validateWorkspaceImage } from './workspaceImages'
 import { decodeBackup, encodeBackup, mergeBackup } from './backup';
 import { projectSavingsGoals, validateSavingsGoalEvent, type SavingsGoal, type SavingsGoalEvent, type SavingsProjection } from '../domain/savingsGoals';
 import { isSavingsOperation, savingsRecords, validateSavingsOperations } from './savingsOperations';
+import { projectReportMetadata, validateReportOperations, validateReportEvent, reconciliationFingerprint, type ReportEvent } from './reportMetadata';
 import { issueSavingsLoan, repaySavingsLoan, setLoanAutoRepayment, readSavingsLoans, isLoanLedgerAccount, isLoanJournal, type NewSavingsLoan } from './loanBook';
 import {
   createDurableStorageDriver,
@@ -132,7 +133,8 @@ export class LocalDatabase {
     }
   }
 
-  constructor(storageKey = 'hisab_dekhtechai_db', driver?: DurableStorageDriver) {
+  constructor(storageKey = 'hisab_dekhtechai_db', driver?: DurableStorageDriver, private readonly isolated = false) {
+    if (isolated && !driver) throw new Error('Isolated verification requires an explicit memory driver.');
     this.storageKey = storageKey;
     this.state = this.createEmptyState();
     if (driver) {
@@ -223,7 +225,7 @@ export class LocalDatabase {
    * Never wipes data if parsing fails: preserves emergency backup and throws.
    */
   public loadFromStorage(): boolean {
-    if (typeof localStorage !== 'undefined') {
+    if (!this.isolated && typeof localStorage !== 'undefined') {
       const raw = localStorage.getItem(this.storageKey);
       if (raw) {
         try {
@@ -297,7 +299,7 @@ export class LocalDatabase {
     verified: boolean;
     recordsMigrated: number;
   }> {
-    if (typeof localStorage === 'undefined' || !this.driver) {
+    if (this.isolated || typeof localStorage === 'undefined' || !this.driver) {
       return { migrated: false, verified: false, recordsMigrated: 0 };
     }
 
@@ -365,7 +367,7 @@ export class LocalDatabase {
    * Persists database state synchronously to memory/localStorage cache.
    */
   public persistSync(): void {
-    if (typeof localStorage !== 'undefined') {
+    if (!this.isolated && typeof localStorage !== 'undefined') {
       try {
         const serializable = this.toSerializable();
         localStorage.setItem(this.storageKey, JSON.stringify(serializable));
@@ -1711,6 +1713,44 @@ export class LocalDatabase {
     }
   }
 
+  public getReportMetadata(workspaceId: UUID) {
+    validateReportOperations(this.state.syncOperations.values(),this.state.workspaces,this.state.accounts,this.state.journalTransactions);
+    return projectReportMetadata(this.state.syncOperations.values(),workspaceId);
+  }
+
+  private async commitReportEvent(workspaceId: UUID, build: () => ReportEvent): Promise<void> {
+    await this.beginTransaction();
+    try {
+      const ws = this.state.workspaces.get(workspaceId);
+      if (!ws || ws.archivedAt || ws.deletedAt || ws.ownerSubjectHash !== (this.getIdentity()?.ownerSubjectHash || 'local-owner')) throw new Error('REPORT_METADATA_OWNER');
+      this.queueSyncOp('workspace.update',workspaceId,{id:workspaceId,reportEvent:validateReportEvent(build())});
+      validateReportOperations(this.state.syncOperations.values(),this.state.workspaces,this.state.accounts,this.state.journalTransactions);
+      await this.commitTransaction();
+    } catch (error) { await this.rollbackTransaction(); throw error; }
+  }
+
+  public async setTransactionBookmark(transactionId: UUID, enabled: boolean): Promise<void> {
+    const original = this.getTransaction(transactionId);
+    if (!original) throw new Error('REPORT_METADATA_REFERENCE');
+    await this.commitReportEvent(original.workspaceId,()=>{
+      const tx = this.getTransaction(transactionId);
+      if (!tx || tx.workspaceId !== original.workspaceId) throw new Error('REPORT_METADATA_REFERENCE');
+      const previous = this.getReportMetadata(tx.workspaceId).bookmarks.get(transactionId);
+      return {version:1,action:'bookmark.set',transactionId,enabled,revision:(previous?.revision || 0)+1};
+    });
+  }
+
+  public async recordReconciliation(workspaceId: UUID, accountId: UUID, actualMinor: string, note = ''): Promise<void> {
+    await this.commitReportEvent(workspaceId,()=>{
+      const account = this.state.accounts.get(accountId);
+      if (!account || account.workspaceId !== workspaceId || account.archivedAt || (account.classification || 'asset') !== 'asset' || isLoanLedgerAccount(account.id)) throw new Error('REPORT_METADATA_REFERENCE');
+      const balance = this.calculateAccountSummaries(workspaceId).find(row=>row.accountId===accountId);
+      if (!balance) throw new Error('REPORT_METADATA_REFERENCE');
+      return {version:1,action:'reconciliation.record',record:{id:generateUUID(),accountId,expectedMinor:balance.currentBalanceMinor,actualMinor,
+        fingerprint:reconciliationFingerprint(account,this.getTransactions(workspaceId)),note:note.trim()}};
+    });
+  }
+
   // Savings are earmarks over real account balances, never journal postings.
   private savingsWorkspace(workspaceId: UUID, requireActive = true): Workspace {
     const ws = this.state.workspaces.get(workspaceId);
@@ -2054,6 +2094,7 @@ export class LocalDatabase {
     this.state.preferences = new Map(data.preferences || []);
     validateSavingsOperations(this.state.syncOperations.values(), this.state.workspaces, this.state.accounts);
     readSavingsLoans(this.state);
+    validateReportOperations(this.state.syncOperations.values(),this.state.workspaces,this.state.accounts,this.state.journalTransactions);
 
   }
 

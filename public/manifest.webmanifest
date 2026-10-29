@@ -1,0 +1,16 @@
+{
+  "id":"/",
+  "name":"হিসাব দেখতে চাই — Hisab DekhteChai",
+  "short_name":"Hisab",
+  "description":"Personal and business records, available offline after first setup.",
+  "lang":"bn",
+  "start_url":"/",
+  "scope":"/",
+  "display":"standalone",
+  "background_color":"#f8fafc",
+  "theme_color":"#1d4ed8",
+  "icons":[
+    {"src":"/icon-192.png","sizes":"192x192","type":"image/png","purpose":"any maskable"},
+    {"src":"/icon-512.png","sizes":"512x512","type":"image/png","purpose":"any maskable"}
+  ]
+}

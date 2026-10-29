@@ -7,7 +7,6 @@ import { exportTransactionsToCSV } from '../domain/csv';
 import { exportFinancialsToXLSX } from '../domain/excel';
 import {
   Download,
-  Calendar,
   Plus,
   X,
   Target,
@@ -19,8 +18,10 @@ import {
 } from 'lucide-react';
 import { Budget, RecurringRule } from '../contracts/types';
 import { generateUUID } from '../domain/journal';
+import { FinancialInsightsPanel } from './FinancialInsightsPanel';
+import type { JournalTransaction } from '../contracts/types';
 
-export const ReportsTab: React.FC = () => {
+export const ReportsTab: React.FC<{ onSelectTransaction?: (tx: JournalTransaction) => void }> = ({ onSelectTransaction }) => {
   const {
     currentWorkspace,
     dashboardData,
@@ -37,7 +38,7 @@ export const ReportsTab: React.FC = () => {
 
   const isEn = language === 'en';
 
-  const [activeSection, setActiveSection] = useState<'overview' | 'budget' | 'recurring' | 'calendar'>(
+  const [activeSection, setActiveSection] = useState<'overview' | 'budget' | 'recurring' | 'calendar' | 'details'>(
     'overview'
   );
   const [showAddBudgetModal, setShowAddBudgetModal] = useState(false);
@@ -66,7 +67,8 @@ export const ReportsTab: React.FC = () => {
     const currentMonth = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
 
     for (const tx of transactions) {
-      if (tx.effectiveDate.startsWith(currentMonth) && tx.transactionType === 'expense') {
+      if (tx.effectiveDate.startsWith(currentMonth) && !tx.isDeleted && !tx.isReplacedBy &&
+          (tx.transactionType === 'expense' || tx.transactionType === 'transfer')) {
         for (const line of tx.lines) {
           if (line.categoryId) {
             const current = map.get(line.categoryId) || 0n;
@@ -79,6 +81,10 @@ export const ReportsTab: React.FC = () => {
   }, [transactions]);
 
   if (!dashboardData || !currentWorkspace) return null;
+  if (activeSection === 'details' || activeSection === 'calendar') return <FinancialInsightsPanel
+    key={`${currentWorkspace.ownerSubjectHash}:${currentWorkspace.id}:${activeSection}`}
+    initialMode={activeSection === 'calendar' ? 'calendar' : 'report'}
+    onBack={() => setActiveSection('overview')} onOpenTransaction={onSelectTransaction} />;
 
   const netSavingsMinor =
     toPaisa(dashboardData.totalIncomeThisMonthMinor) - toPaisa(dashboardData.totalExpenseThisMonthMinor);
@@ -201,6 +207,9 @@ export const ReportsTab: React.FC = () => {
       </div>
 
       {/* Segmented Section Switcher */}
+      <button type="button" onClick={() => setActiveSection('details')} className="min-h-11 w-full rounded-xl border border-blue-100 bg-blue-50 px-4 py-3 text-left text-xs font-semibold text-blue-800">
+        {isEn ? 'Detailed reports, calendar & spending review' : 'বিস্তারিত রিপোর্ট, ক্যালেন্ডার ও খরচ যাচাই'}
+      </button>
       <div className="grid grid-cols-4 gap-1 p-1 bg-slate-100 rounded-xl text-xs font-medium">
         <button
           type="button"
@@ -238,11 +247,7 @@ export const ReportsTab: React.FC = () => {
         <button
           type="button"
           onClick={() => setActiveSection('calendar')}
-          className={`py-1.5 rounded-lg transition-all ${
-            activeSection === 'calendar'
-              ? 'bg-white text-slate-900 shadow-2xs font-semibold'
-              : 'text-slate-500 hover:text-slate-800'
-          }`}
+          className="py-1.5 rounded-lg text-slate-500 transition-colors hover:text-slate-800"
         >
           {isEn ? 'Cashflow' : 'ক্যালেন্ডার'}
         </button>
@@ -460,44 +465,6 @@ export const ReportsTab: React.FC = () => {
             {recurringRules.length === 0 && (
               <div className="p-8 text-center text-slate-400 text-xs bg-white rounded-xl border border-slate-200/80">
                 {isEn ? 'No recurring rules set' : 'কোনো পুনরাবৃত্ত রুল নেই'}
-              </div>
-            )}
-          </div>
-        </div>
-      )}
-
-      {/* Section 4: Calendar Cashflow */}
-      {activeSection === 'calendar' && (
-        <div className="bg-white p-4 rounded-xl border border-slate-200/80 shadow-2xs">
-          <h3 className="text-xs font-semibold text-slate-700 uppercase tracking-wider mb-2 flex items-center gap-1.5">
-            <Calendar className="w-3.5 h-3.5 text-slate-500" />
-            <span>{isEn ? 'Recent Cashflow Entries' : 'দৈনিক ক্যাশফ্লো তালিকা'}</span>
-          </h3>
-          <div className="space-y-1.5 text-xs">
-            {transactions.slice(0, 15).map((tx) => (
-              <div
-                key={tx.id}
-                className="flex items-center justify-between p-2 rounded-lg hover:bg-slate-50 transition-colors border-b border-slate-100 last:border-b-0"
-              >
-                <div className="flex items-center gap-2">
-                  <span className="text-slate-500 text-[11px] tabular-nums">{tx.effectiveDate}</span>
-                  <span className="text-slate-800 font-medium truncate max-w-[180px]">{tx.note || tx.transactionType}</span>
-                </div>
-                <span
-                  className={`font-semibold tabular-nums ${
-                    tx.transactionType === 'income' ? 'text-emerald-700' : 'text-slate-800'
-                  }`}
-                >
-                  {tx.transactionType === 'income' ? '+' : '-'}
-                  {formatBDT(tx.lines[0]?.debitMinor || tx.lines[0]?.creditMinor || '0', {
-                    locale: language,
-                  })}
-                </span>
-              </div>
-            ))}
-            {transactions.length === 0 && (
-              <div className="text-center text-slate-400 py-6">
-                {isEn ? 'No transactions yet' : 'কোনো লেনদেন নেই'}
               </div>
             )}
           </div>

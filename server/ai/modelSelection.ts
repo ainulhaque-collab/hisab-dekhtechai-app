@@ -2,6 +2,7 @@ import { GoogleGenAI, Model } from '@google/genai';
 import type { EntryExtractionProvider, ExtractionInput } from './provider.js';
 import { GeminiEntryProvider } from './gemini.js';
 import { validateExtractionMedia } from '../../src/ai/media.js';
+import { validateGuideInput,type GuideInput } from '../../src/ai/financialGuide.js';
 
 /** Reviewed production models, in reliability order. Google's catalog can also
  * advertise retired/unsupported models, and a newer version may be overloaded.
@@ -39,6 +40,13 @@ export class AutomaticGeminiEntryProvider implements EntryExtractionProvider {
   }
   async extract(input: ExtractionInput) {
     validateExtractionMedia(input);
+    return this.withChosen(provider=>provider.extract(input));
+  }
+  async guide(input:GuideInput) {
+    validateGuideInput(input);
+    return this.withChosen(provider=>{if(!provider.guide) throw new Error('AI_NOT_CONFIGURED');return provider.guide(input);});
+  }
+  private async withChosen<T>(action:(provider:EntryExtractionProvider)=>Promise<T>):Promise<T> {
     if (!this.chosen || this.chosen.expires <= Date.now()) {
       if (!this.selecting) this.selecting = (async () => {
         try {
@@ -58,7 +66,7 @@ export class AutomaticGeminiEntryProvider implements EntryExtractionProvider {
     // One generation attempt per click. A failed model is cooled down only for
     // the next explicitly requested extraction, never retried within this one.
     const chosen = this.chosen!;
-    try { return await chosen.provider.extract(input); }
+    try { return await action(chosen.provider); }
     catch (error) {
       if (error instanceof Error && ['AI_PROVIDER_BUSY', 'AI_MODEL_UNAVAILABLE'].includes(error.message)) {
         this.cooldowns.set(chosen.model, Date.now() + 10 * 60_000);
