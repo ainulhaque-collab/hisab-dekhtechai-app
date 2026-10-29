@@ -1,7 +1,9 @@
 # Free Preview infrastructure proposal — 29 October 2026
 
-The owner has no PostgreSQL or private object store. This is a proposal, not
-permission to provision, activate billing or mirror real financial data.
+The owner approved Neon Free PostgreSQL and Private Vercel Blob provisioning
+on 29 October 2026 for `hisab-dekhtechai-app` Preview only, with synthetic data
+first. This does not authorize a paid plan, Production access or uploads of
+real financial records. Provisioning results are recorded in the Notion tracker.
 The only initially approved administrator is ainulshalkhuria@gmail.com.
 Server-verified Google identity and verified email are required for that role.
 
@@ -17,9 +19,9 @@ budget. No free commercial production or unlimited customer count is promised.
 Neon also advertises object storage; availability, regions and private access
 must be confirmed before choosing it instead of the independent Blob provider.
 
-## Proposed setup, pending owner provisioning decision
+## Approved Preview setup and remaining activation gates
 
-1. Owner creates Neon Free project; choose region after availability/latency
+1. Create Neon Free project; choose region after availability/latency
    checks. Separate Preview database/role; standard PostgreSQL and Node adapters.
 2. Private Blob store linked only to Preview. No public financial objects or
    secrets in chat, Notion, client, APK or repository.

@@ -44,6 +44,26 @@ test('Gemini guide makes one bounded structured call and never invokes ledger to
   await assert.rejects(invalid.guide(input),/AI_RESPONSE_INVALID/);
 });
 
+test('guide sends exact taka decimals and localized display strings while binding the original minor-unit summary',async()=>{
+  for(const language of ['bn','en'] as const){
+    const original:GuideInput={...input,language,incomeMinor:'900719925474099312345',expenseMinor:'12081',categories:[{label:'Food',amountMinor:'12080'},{label:'Other',amountMinor:'1'},{label:'Empty',amountMinor:'0'}]};
+    const provider=new GeminiEntryProvider({apiKey:'synthetic-not-a-live-key',model:'gemini-3.6-flash'},async request=>{
+      const contents=request.contents as {parts:{text:string}[]}[];
+      const summary=JSON.parse(contents[0].parts[0].text);
+      assert.equal(summary.currency,'BDT');assert.equal(summary.amountUnit,'taka');
+      assert.equal(summary.income.amountDecimal,'9007199254740993123.45');
+      assert.equal(summary.expense.amountDecimal,'120.81');
+      assert.deepEqual(summary.categories.map((category:any)=>category.amountDecimal),['120.80','0.01','0.00']);
+      assert.equal(summary.categories[0].display,language==='bn'?'১২০.৮০ টাকা (BDT)':'BDT 120.80');
+      assert.doesNotMatch(JSON.stringify(summary),/amountMinor|incomeMinor|expenseMinor/);
+      assert.match(String(request.config?.systemInstruction),/NOT paisa/);
+      return {text:JSON.stringify(answer)};
+    });
+    const result=await provider.guide(original);
+    assert.equal(result.sourceSha256,guideInputHash(original));assert.equal(original.categories[0].amountMinor,'12080');
+  }
+});
+
 test('automatic Gemini guide shares the reviewed model selector and cools down a busy model without paid retries',async()=>{
   const chosen:string[]=[];
   const provider=new AutomaticGeminiEntryProvider('synthetic-not-a-live-key',{list:async()=>['gemini-3.6-flash','gemini-3.8-flash'].map(name=>({name,supportedActions:['generateContent'],outputTokenLimit:2048})),build:model=>({provider:'gemini',extract:async()=>{throw new Error('Not an entry request');},guide:async()=>{chosen.push(model);if(chosen.length===1)throw new Error('AI_PROVIDER_BUSY');return {provider:'gemini',sourceSha256:guideInputHash(input),guide:answer};}})});
