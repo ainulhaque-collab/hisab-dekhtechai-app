@@ -1,5 +1,11 @@
 # Free Preview infrastructure proposal — 29 October 2026
 
+**Superseded later on 29 October:** the owner's new master prompt selects
+Supabase Auth/PostgreSQL/Storage + Firebase. See `CLOUD_MIGRATION_AUDIT.md` for
+the current decision and applied development migrations. The earlier Neon
+database was not created; the empty private Blob is not app-connected.
+The following is the earlier approved proposal/history, not the active backend.
+
 The owner approved Neon Free PostgreSQL and Private Vercel Blob provisioning
 on 29 October 2026 for `hisab-dekhtechai-app` Preview only, with synthetic data
 first. This does not authorize a paid plan, Production access or uploads of

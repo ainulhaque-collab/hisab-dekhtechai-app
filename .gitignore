@@ -33,3 +33,6 @@ android/local.properties
 # Firebase local setup inputs; service credentials must never enter Git.
 .local-firebase/
 android/app/google-services.json
+
+# Local Supabase CLI cache, never migration source.
+supabase/.temp/
