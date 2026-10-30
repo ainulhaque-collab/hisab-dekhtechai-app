@@ -1,5 +1,14 @@
 # Owner-selected development batch — 29 October 2026
 
+Later on 29 October the owner's new master prompt superseded the earlier
+No-Supabase architecture decision. Current cloud work and verified development
+migrations are in `CLOUD_MIGRATION_AUDIT.md`; this file preserves the earlier
+feature-selection checkpoint. The installed app's local/Drive authority is
+unchanged until an explicit, verified per-owner migration is ready.
+
+Owner subsequently confirmed the saved PDF is readable and the AI guide works;
+server source `31acc7c` corrects guide amounts to exact decimal taka/BDT.
+
 The interactive selection authorizes only 02, 04, 05, 08, 09, 10, 11, 12, 13,
 14, 15, 18, 39, 47, 48 and 50 for this batch. Keep existing features intact.
 Do not recreate completed code or conflate local implementation with acceptance.
