@@ -163,7 +163,23 @@ when Phase 6 changes the interface, not as a database framework dependency.
   [function advisor](https://supabase.com/docs/guides/database/database-linter?lint=0029_authenticated_security_definer_function_executable),
   [password protection](https://supabase.com/docs/guides/auth/password-security#password-strength-and-leaked-password-protection).
   This is not a production security clearance for the entire shared project.
-- Public Auth settings confirm Google is enabled. Dashboard redirect settings
-  require owner sign-in in the browser; plugin access alone cannot reveal or
-  safely change that shared configuration. Next: secure Google PKCE/native
-  session/callback implementation, then explicit ownership migration and sync.
+- Source `5e36246`, incremental draft PR #6 against the existing feature branch:
+  exact-source Web CI #80 and Android debug CI #92 PASS; Preview READY.
+- Public Auth settings confirm Google enabled. Owner signed into the dashboard;
+  the four existing redirects and unrelated Site URL were inspected unchanged.
+  Exact additive callback proposal: `config/supabase-auth-preview.plan.json`.
+
+## Phase 2 adapter progress (not activated)
+
+`src/auth/cloud/` implements pinned Supabase PKCE, encrypted Web credentials,
+AndroidKeyStore vault, strict cold/warm callbacks, verified Auth identity,
+expected-user fencing, refresh and logout. See `docs/CLOUD_AUTH_BOUNDARY.md`.
+No AppProvider integration, financial upload or identity/authority cutover yet.
+Existing local/Drive and AI/FCM flows continue unchanged. Fifteen new tests use
+the actual SDK with synthetic HTTP responses; full suite 319/319, browser/API
+types, Web build and compiled API runtime PASS. Local Android debug build passed
+(187 tasks, 7m33s); no new APK installed. The callback target stays query-free
+to match exact hosted allowlist rules without falling back to another app's
+Site URL. Real owner OAuth/IndexedDB/hardware vault acceptance is still pending.
+Before activation: approved exact redirects, reviewed onboarding/migration UI,
+real Google/device tests, stable owner/legacy-ID mapping and durable cursor sync.

@@ -2,12 +2,16 @@
 	"appId": "com.hisabdekhtechai.app",
 	"appName": "Hisab Dekhtechai",
 	"webDir": "dist",
+	"loggingBehavior": "none",
 	"plugins": {
 		"PushNotifications": {
 			"presentationOptions": [
 				"alert",
 				"sound"
 			]
+		},
+		"App": {
+			"disableBackButtonHandler": true
 		}
 	},
 	"server": {
