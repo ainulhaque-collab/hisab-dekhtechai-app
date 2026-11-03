@@ -1,45 +1,33 @@
 # Agent document priority (READ FIRST)
 
-**Effective:** 2026-11-03  
-**Audience:** Codex, Claude Code, Antigravity, Cursor, and any coding agent
+**Effective:** 2026-11-03
 
-## Single source of truth for NEW work
+## Binding (read these only for new work)
 
-1. **`docs/PR_SUPABASE_LOCAL_FIRST_AGENT_HANDOVER.md`** — binding for architecture, cloud, sync, API/Webhook/MCP, and milestones.
-2. Live **source code** under `src/` — do not assume docs already match implementation; inspect the repo.
-3. Finance invariants still bind even if an older doc conflicts:
-   - integer BDT paisa (no float money math)
-   - balanced immutable journal
-   - atomic local write + outbox
-   - offline-first after device is initialized
-   - non-destructive schema migrations
-   - Bangla-first minimal blue/white UI
+1. `docs/PR_SUPABASE_LOCAL_FIRST_AGENT_HANDOVER.md`
+2. Live `src/` (inspect code; do not assume docs = implementation)
+3. Finance invariants always: integer paisa, balanced immutable journal, atomic outbox, offline-first, non-destructive migrations, Bangla-first UI
 
-## Superseded / historical only (do NOT implement as current requirements)
+## Supabase
 
-These files remain for history and QA evidence. **Do not** follow them when they conflict with the handover above:
+- project_id **only:** `sfzitbasxrpmtmldujbm`
+- New tables prefix **`hisab_`** — never touch **`deshpath_*`**
 
-| File | Status |
-|------|--------|
-| `05_GOOGLE_DRIVE_SYNC.md` | **Deprecated.** No Google Drive sync or backup. No production users. |
-| `12_GOOGLE_DEVELOPER_SETUP_AND_PLAY_RELEASE.md` | Historical Drive OAuth notes only. Login may still use Supabase Auth (optional Google IdP). Not Drive storage. |
-| `00_README_START_HERE.md` (pre-2026-11-03 “No Supabase” rules) | Superseded by handover for cloud/sync. |
-| `10_AGENT_MASTER_PROMPT.md` / `AGENT_COPY_PASTE_PROMPT.txt` (old “No Supabase”) | Replaced — use the copy-paste block inside the handover, or the updated files on this branch. |
-| `MASTER_DEVELOPMENT_DOCUMENT.md` | Archive snapshot; not the active agent contract. |
-| `03_ARCHITECTURE.md` Drive-as-only-cloud sections | Superseded. Keep local-first layering ideas. |
+## Removed from repo (do not restore without owner order)
 
-## Explicit owner decisions (2026-11-03)
+Drive-era / No-Supabase specs deleted: `MASTER_DEVELOPMENT_DOCUMENT`, `00_BANGLA_OVERVIEW`, `01_PRODUCT_PRD`, `02_CUSTOMER_FLOWS_UI`, `03_ARCHITECTURE`, `06_SECURITY`, `07_ANDROID`, `08_WEB`, `09_QA`, `11_DECISIONS`, `12_GOOGLE_SETUP`, `13_FLOWCHART`, `MILESTONE_CHECKLIST`, `adr/ADR-001`.
 
-- Cloud host now: **Supabase Postgres**
-- **No** Google Drive backup/sync path
-- Schema must stay **portable** to owner Postgres / VPS (`pg_dump` + plain SQL migrations)
-- Multi-customer capable
-- Keep core ledger features; add speed, animations, Public API, Webhooks, MCP
+`05_GOOGLE_DRIVE_SYNC.md` remains as a short **DEPRECATED** stub only.
 
-## If two docs conflict
+## Keep for reference
+
+- `04_DATA_MODEL_FINANCE.md` — ledger rules still useful
+- `05_GOOGLE_DRIVE_SYNC.md` — deprecated notice
+- `10_AGENT_MASTER_PROMPT.md`, `AGENT_COPY_PASTE_PROMPT.txt`
+- QA evidence reports under `docs/qa/` (historical only)
+
+## Conflict rule
 
 ```
-PR_SUPABASE_LOCAL_FIRST_AGENT_HANDOVER.md  >  00_AGENT_PRIORITY.md  >  live code behavior  >  older numbered docs
+PR_SUPABASE_LOCAL_FIRST_AGENT_HANDOVER.md > 00_AGENT_PRIORITY.md > live src/ > any leftover docs
 ```
-
-Stop and ask the owner only when the handover is silent **and** a finance invariant would be at risk.
