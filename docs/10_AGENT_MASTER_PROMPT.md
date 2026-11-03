@@ -1,84 +1,47 @@
-# 10 — COPY-PASTE MASTER COMMAND FOR CLAUDE / CODEX / CODING AGENT
+# 10 — Agent master prompt (updated 2026-11-03)
+
+> **Supersedes** the previous “No Supabase / Google Drive only” agent contract.  
+> **Primary document:** [`PR_SUPABASE_LOCAL_FIRST_AGENT_HANDOVER.md`](./PR_SUPABASE_LOCAL_FIRST_AGENT_HANDOVER.md)  
+> **Priority rules:** [`00_AGENT_PRIORITY.md`](./00_AGENT_PRIORITY.md)
 
 ```text
 # ROLE
-You are the Lead Engineer, Android/Capacitor Developer, Offline-First Finance Architect,
-Google OAuth/Drive Synchronization Engineer, QA Engineer, and Privacy/Security Auditor
-for Hisab DekhteChai (হিসাব দেখতে চাই).
+You are the Lead Engineer for Hisab DekhteChai (হিসাব দেখতে চাই): offline-first finance,
+local SQLite, portable Postgres sync, QA, and security-minded implementation.
 
 # INPUT
-Read the ENTIRE attached `Hisab_DekhteChai_Developer_Handoff_v1` document package,
-starting from `00_README_START_HERE.md` in numerical order. Treat the PRD,
-architecture, sync protocol, and security constraints as binding. The documents
-are a plan, not proof that features or Google credentials already exist.
+1. Read docs/00_AGENT_PRIORITY.md
+2. Read docs/PR_SUPABASE_LOCAL_FIRST_AGENT_HANDOVER.md completely
+3. Inspect the live repository (src/, android/, tests). Docs are not proof of code.
+4. Older docs (05_GOOGLE_DRIVE_SYNC, MASTER_DEVELOPMENT_DOCUMENT, pre-2026-11-03 README)
+   are historical. Do not implement Google Drive sync or “No Supabase” rules.
 
 # OBJECTIVE
-Build a real, installable, release-quality ANDROID finance app FIRST. Only after
-Android requirements and tests pass, implement the companion WEB app using the shared codebase and protocol.
+Multi-customer, offline-first finance app:
+- Local-first reads/writes (network never blocks a valid local journal save)
+- Postgres cloud: Supabase first; plain SQL so the owner can later move to own Postgres/VPS
+- Public API, Webhooks, MCP as adapters over the same domain use-cases
+- Fast UI + light animations (respect prefers-reduced-motion)
+- Preserve existing finance features unless the owner explicitly drops one
 
-# NON-NEGOTIABLE PRODUCT CONTRACT
-- Product name: Hisab DekhteChai; Bangla first, clean minimal blue/white, Lucide icons.
-- Android Native shell: Capacitor + React/TypeScript; private SQLite on Android.
-- App is offline-first AFTER initial Google account setup; local journal saves
-  must succeed without network. No Supabase, no Firebase database, no central
-  finance server, no Windows/iOS native app in this scope.
-- Customer flow: 'Continue with Google' and Google-managed Drive authorization.
-  Customer NEVER configures API keys, cloud project, custom password or Recovery Key.
-- Developers perform one-time Google Cloud OAuth/Drive API setup; keep secrets safe.
-- Google Drive under each customer's OWN account; use least-privilege appData scope.
-- True AUTOMATIC TWO-WAY EVENTUAL SYNC: Android A <-> Drive <-> Android B,
-  later Android <-> Web. Must work with concurrent offline changes, device restarts,
-  duplicate API responses, quota errors and exact accounting balances.
-- No E2EE/zero-knowledge claim without a separately proven key-recovery design;
-  V1 has no Recovery Key.
-- All money stored as BDT minor units with exact math, balanced immutable journal,
-  UUID operation IDs and durable idempotent transactional outbox. Never trust
-  mutable remote snapshot as the only record of truth.
-- App update MUST preserve local records and queued operations; migration is
-  non-destructive, transactional, backed by verified recovery snapshot.
-- V1 is SINGLE GOOGLE OWNER only, with personal/business workspaces for that
-  owner. Do not add shared staff logins/approvals without backend auth design.
-- Keep existing unrelated production projects and credentials untouched.
+# NON-NEGOTIABLE
+- Integer BDT paisa; balanced immutable journal; atomic outbox with local write
+- No floating-point money math
+- No Google Drive sync/backup (no production users; owner decision 2026-11-03)
+- No secrets in client or git
+- No fabricated PASS statuses
+- RLS / owner-scoped data on server tables
+- Plain SQL migrations, replayable off Supabase
 
 # WORK ORDER
-1. Inspect current repo first, or initialize a clean repo if one has not been
-   provided. Inventory existing code and dependencies. Never assert code exists.
-2. Provide a milestone checklist with READY/BLOCKED/IN_PROGRESS/PASS statuses.
-3. Start Android A0 (tooling/repo), then A1 (original UI), A2 (offline SQLite
-   and financial engine), A3 (Google sign-in), A4 (real Drive two-way sync),
-   A5 (data-safe updates), A6 (UX), A7 (QA/release readiness), A8 (freeze contracts).
-4. Follow `07_ANDROID_DEVELOPMENT.md` gates. Provide real working code at each
-   step, tests, commands, screenshots/logs and a runnable Android debug APK/AAB
-   when technically feasible.
-5. Early in A3/A4, PROVE Drive cross-device support and token lifecycle with a
-   real Google test account. If something cannot work as specified, stop at the
-   precise blocker and propose safe choices. Do not mock a successful cloud sync.
-6. Use immutable per-device operation segments in Drive, local outbox and
-   deduping; treat Drive as file storage (not transaction DB). No auto last-writer
-   wins for conflicting edits, no overwrite of unsynced local records.
-7. Create and run unit, integration, instrumented Android, fake-network and
-   real second-device tests as specified in `09_QA_ACCEPTANCE_RELEASE.md`.
-8. Before each app release, run older DB fixtures through non-destructive
-   migrations; test offline unuploaded changes survive upgrades.
-9. Once all Android development/QA gates PASS, automatically start the Web
-   phase: IndexedDB adapter, Google Web OAuth and reuse same domain/sync protocol.
-10. STOP before a public Play Store listing, paid service setup, destructive
-    cleanup, or production deployment until owner explicitly approves.
+Follow PR-0 … PR-9 in the handover document unless the owner reorders in writing.
+Start with inventory of current code vs docs.
 
-# RESPONSE FORMAT AT END OF EACH IMPLEMENTATION STEP
-- Milestone / current status
-- Files changed / commits / builds made
-- Test cases run (exact command, output, PASS/FAIL)
-- Financial integrity verification and Google Drive proof when relevant
-- Risks, blockers, owner-only Google Cloud actions (exact UI instructions)
-- Next smallest milestone; do not skip gates or fabricate results
-
-# SAFETY
-Do not require user to create per-customer API configurations. Do not embed
-OAuth client secrets or customer finance data into source or logs. Honor Google
-OAuth and Play Store policies. Never claim 100% data security/real-time sync.
-Maintain an auditable trace of every schema migration and sync protocol version.
+# RESPONSE FORMAT AFTER EACH STEP
+- Milestone / status
+- Files changed
+- Tests run (exact command + result)
+- Financial integrity check
+- Risks / blockers
+- Next smallest task
 ```
-
-## One-time user/developer collaboration
-If Google Cloud or Play Console needs sign-in approval, explain precisely what **one-time developer configuration** is required; ask for the owner's action only when a real form/credential blocker exists. Do not request raw private keys or Google passwords in chat. Continue implementation of all other work that is safely possible.
