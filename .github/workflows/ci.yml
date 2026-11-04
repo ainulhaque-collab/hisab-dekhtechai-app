@@ -40,5 +40,48 @@ jobs:
       - name: Run Test Suite (Gate 2)
         run: npm test
 
+      - name: Portable SQL and RLS in isolated PostgreSQL WASM
+        run: npm run test:sql
+
       - name: Build Web Application Bundle (Gate 3)
         run: npm run build
+
+  portable-postgres:
+    name: Native PostgreSQL 17 replay, isolation and restore
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: synthetic-ci-only
+          POSTGRES_DB: hisab_contract_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d hisab_contract_test"
+          --health-interval 5s --health-timeout 5s --health-retries 10
+    env:
+      HISAB_SQL_TEST_MODE: isolated
+      HISAB_TEST_PG_URL: postgresql://postgres:synthetic-ci-only@127.0.0.1:5432/hisab_contract_test
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - name: Replay migrations and verify two-owner RLS, exact journal and concurrent retries
+        run: npm run test:sql
+      - name: Scoped pg_dump/pg_restore into a separate fresh database
+        env:
+          HISAB_TEST_PG_CONTAINER: ${{ job.services.postgres.id }}
+        run: npm run test:sql-restore
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: portable-postgres-synthetic-evidence
+          path: build/pr2/native-restore-evidence.json
+          if-no-files-found: ignore
