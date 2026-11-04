@@ -66,9 +66,9 @@ test(`Postgres outbox pipeline over HTTP + real SQLite files (${native?'native P
   const a=await makeClient('a'),b=await makeClient('b');
   const ws=a.db.createWorkspace('সিন্থেটিক পরীক্ষা 😀','personal'),cash=a.db.createAccount(ws.id,'Synthetic cash','cash','0');
   const income=a.db.createCategory(ws.id,'Synthetic income','income'),food=a.db.createCategory(ws.id,'Synthetic food','expense');
-  let clock=10000,identity:string|null=owner;
+  let clock=10000,identity:string|null=owner,issuer='synthetic-test-only';
   const scope=(client:typeof a):SyncScope=>({ownerId:owner,workspaceId:ws.id,deviceId:client.db.getDeviceId()});
-  const engine=(client:typeof a)=>new PostgresSyncEngine({store:client.store,provider,scope:scope(client),online:()=>!offline,now:()=>clock,auth:{getVerifiedIdentity:async()=>identity?{subject:identity,issuer:'synthetic-test-only'}:null,signOut:async()=>{identity=null;}}});
+  const engine=(client:typeof a)=>new PostgresSyncEngine({store:client.store,provider,authIssuer:'synthetic-test-only',scope:scope(client),online:()=>!offline,now:()=>clock,auth:{getVerifiedIdentity:async()=>identity?{subject:identity,issuer}:null,signOut:async()=>{identity=null;}}});
   let ea=engine(a),eb=engine(b);
   const post=async(client:typeof a,kind:'income'|'expense',amount:string,transactionId?:string)=>{
     const opId=generateUUID();const j=kind==='income'?buildIncomeJournal({workspaceId:ws.id,assetAccountId:cash.id,revenueCategoryId:income.id,amountMinor:amount,effectiveDate:'2026-11-04',opId,transactionId,note:'বাংলা "নোট"\n😀'}):
@@ -104,7 +104,7 @@ test(`Postgres outbox pipeline over HTTP + real SQLite files (${native?'native P
     assert.ok(ops.some(op=>op.type==='account.update'));
     assert.equal(c.store.pendingCount({ownerId:owner,workspaceId:w.id,deviceId:c.db.getDeviceId()}),4);
     const cs={ownerId:owner,workspaceId:w.id,deviceId:c.db.getDeviceId()};
-    const e=new PostgresSyncEngine({store:c.store,provider,scope:cs,online:()=>true,auth:{getVerifiedIdentity:async()=>({subject:owner,issuer:'synthetic-test-only'}),signOut:async()=>{}}});
+    const e=new PostgresSyncEngine({store:c.store,provider,authIssuer:'synthetic-test-only',scope:cs,online:()=>true,auth:{getVerifiedIdentity:async()=>({subject:owner,issuer:'synthetic-test-only'}),signOut:async()=>{}}});
     assert.equal((await e.run()).state,'blocked');assert.equal(c.store.pendingCount(cs),1);
     c.db.queueSyncOp('receipt.attach',generateUUID(),{});
     await assert.rejects(c.store.readPending(cs,100),/SYNC_LOCAL_MAPPING_REQUIRED/);
@@ -115,6 +115,23 @@ test(`Postgres outbox pipeline over HTTP + real SQLite files (${native?'native P
     await post(b,'expense','80');assert.equal((await eb.run()).state,'caught_up');assert.equal((await ea.run()).state,'caught_up');
     assert.equal(a.db.calculateAccountSummaries(ws.id).find(x=>x.accountId===cash.id)?.currentBalanceMinor,'12000');
     assert.deepEqual(a.db.getTransactions(ws.id).map(x=>x.id).sort(),b.db.getTransactions(ws.id).map(x=>x.id).sort());
+  });
+  await t.test('changed Auth contact values preserve financial rows and cursor; matching contacts never authorize another UUID',async()=>{
+    // auth.users is the minimal identity shim in this DISPOSABLE stock-Postgres test only.
+    // Never run these fixture alterations on hosted Supabase Auth.
+    await exec('alter table auth.users add column if not exists email text, add column if not exists phone text');
+    await sql.query('update auth.users set email=$1,phone=$2 where id=$3',['old@example.invalid','8801712345678',owner]);
+    const beforeCursor=await a.store.readCursor(scope(a));
+    const fingerprint=async()=> (await sql.query("select md5(coalesce(jsonb_agg(to_jsonb(t) order by id)::text,'')) as hash from hisab_cloud.journal_transactions t where owner_id=$1",[owner])).rows[0].hash;
+    const before=await fingerprint(),localBefore=await a.driver.getItem('a');
+    await sql.query('update auth.users set email=$1,phone=$2 where id=$3',['replacement@example.invalid','8801912345678',owner]);
+    await sql.query('update auth.users set email=$1,phone=$2 where id=$3',['replacement@example.invalid','8801912345678',foreignOwner]);
+    const page=await asActor(owner,'sync_pull',{requestId:generateUUID(),scope:scope(a),cursor:beforeCursor,limit:100});
+    assert.equal(page.changes.length,0);assert.equal(page.nextCursor,beforeCursor);assert.equal(await fingerprint(),before);
+    assert.equal(await a.driver.getItem('a'),localBefore);assert.equal(a.db.getIdentity()?.ownerSubjectHash,owner);
+    await assert.rejects(sql.query('delete from auth.users where id=$1',[owner]),/foreign key constraint/);
+    assert.equal(await fingerprint(),before);
+    await assert.rejects(asActor(foreignOwner,'sync_pull',{requestId:generateUUID(),scope:{...scope(a),ownerId:foreignOwner},cursor:null,limit:100}),/SYNC_SCOPE_INVALID/);
   });
   await t.test('lost acknowledgement retries the same operation; no duplicate posting',async()=>{
     const tx=await post(a,'income','100');loseNextPush=true;
@@ -169,6 +186,11 @@ test(`Postgres outbox pipeline over HTTP + real SQLite files (${native?'native P
     assert.equal((await ea.run()).state,'caught_up');assert.equal((await eb.run()).state,'blocked');
     assert.equal(b.db.getTransaction(id)?.lines[0].debitMinor,'500');assert.ok(b.store.pendingCount(scope(b))>0);
     assert.ok(b.db.getRawState().conflicts.size>0);
+  });
+  await t.test('the same UUID from another Auth issuer cannot acknowledge or read this customer scope',async()=>{
+    const before=calls;issuer='foreign-issuer';
+    assert.equal((await ea.run()).state,'session_changed');assert.equal(calls,before);
+    issuer='synthetic-test-only';
   });
   await t.test('concurrent native commits cannot put a change behind an already-read cursor',{skip:!native},async()=>{
     const Pg=(await import('pg')).Client,c1=new Pg({connectionString:native}),c2=new Pg({connectionString:native});

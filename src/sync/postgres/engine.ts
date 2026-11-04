@@ -9,7 +9,9 @@ export class PostgresSyncEngine {
   private controller:AbortController|null=null;
   private retryAt=0;
   private failures=0;
-  constructor(private deps:{store:DatabaseSyncStore;provider:SyncProvider;auth:SyncAuthPort;scope:SyncScope;online:()=>boolean;now?:()=>number}) {}
+  constructor(private deps:{store:DatabaseSyncStore;provider:SyncProvider;auth:SyncAuthPort;authIssuer:string;scope:SyncScope;online:()=>boolean;now?:()=>number}) {
+    if(!deps.authIssuer)throw Error('SYNC_AUTH_ISSUER_REQUIRED');
+  }
   cancel():void { this.epoch++; this.controller?.abort(); }
   run():Promise<SyncRun> {
     if(this.running) return this.running;
@@ -21,7 +23,7 @@ export class PostgresSyncEngine {
     if(now()<this.retryAt) return {state:'retry_later',acknowledged:0};
     const epoch=this.epoch;
     this.controller=new AbortController(); const signal=this.controller.signal;
-    const active=async()=>{const user=await d.auth.getVerifiedIdentity();if(epoch!==this.epoch || signal.aborted || user?.subject!==d.scope.ownerId)throw Error('SYNC_SESSION_CHANGED'); d.store.assertScope(d.scope);};
+    const active=async()=>{const user=await d.auth.getVerifiedIdentity();if(epoch!==this.epoch || signal.aborted || user?.subject!==d.scope.ownerId || user.issuer!==d.authIssuer)throw Error('SYNC_SESSION_CHANGED'); d.store.assertScope(d.scope);};
     let acknowledged=0,blocked=false,retry=false;
     try {
       await active();

@@ -1,0 +1,29 @@
+{
+  "date": "2026-11-04",
+  "timezone": "Asia/Dhaka",
+  "milestone": "PR-3b stable customer identity and verified contact-change Auth adapters",
+  "parent": "0f4dae9f8694bad5c2d0abfd8ec76d7aa62172d2",
+  "authFoundationSource": "75dde8280ed492083cbf40f8964f8458fa42c740",
+  "sdk": "@supabase/supabase-js@2.118.0",
+  "local": {
+    "lint": "PASS",
+    "authSdkTests": {"passed": 30, "failed": 0},
+    "pipeline": {"total": 14, "passed": 13, "failed": 0, "skipped": 1, "skipReason": "native concurrent connections run in CI"},
+    "fullAppSuite": {"total": 129, "passed": 128, "failed": 0, "skipped": 1},
+    "portableSql": {"passed": 11, "failed": 0},
+    "webBuild": "PASS; original large-chunk warning remains",
+    "bundleComparison": {"files": 17, "byteIdenticalToParent": true},
+    "sqliteContactChange": "PASS; finance snapshot and pending outbox byte-identical",
+    "postgresContactChange": "PASS in disposable WASM fixture; same-UUID access and different-UUID rejection"
+  },
+  "nativeCi": "pending",
+  "appMounted": false,
+  "apkReplaced": false,
+  "hostedAuthSettingsChanged": false,
+  "hostedSchemaChanged": false,
+  "realContactChangesOrSmsSent": false,
+  "customerFinancialDataUploaded": false,
+  "productionOrBillingChanged": false,
+  "ownerSmsDecision": "No SMS provider; phone OTP disabled until separately configured and accepted",
+  "remainingGates": ["advanced feature/runtime preservation", "account settings UI", "actual Auth provider/SMTP/manual-link configuration", "SMS provider decision", "remaining sync commands and consented legacy-ID adoption", "cross-tab/local write arbitration", "real Android/browser delivery and upgrade acceptance"]
+}
