@@ -69,7 +69,9 @@
     "installedVersion": "1.0.20-test",
     "installedVersionCode": 21,
     "adbConnection": "verified",
-    "visibleUi": "pending_owner_unlock_notification_shade_obscures_app",
+    "visibleUi": "dashboard_rendered_on_real_phone",
+    "historyUi": "not_verified_device_switched_to_settings_with_floating_app",
+    "bootSmokeCheck": "app_running_no_checked_error_signature_in_bounded_current_pid_log_scan",
     "apkInstalled": false,
     "appDataCleared": false,
     "financialEntriesCreated": false

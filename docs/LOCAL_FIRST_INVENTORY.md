@@ -16,7 +16,8 @@ source from tested behavior and does not activate financial cloud sync.
 
 PR-0 uses a separate Git worktree. Existing attachments, signing identity,
 Firebase configuration, local environment files, APKs and original worktree
-are retained. No customer database was opened or migrated by the audit.
+are retained. No customer database was exported, directly queried or migrated
+by the audit.
 
 **Do not build a replacement from `main` and install it over the tested APK.**
 Main lacks features present in the feature branch and installed test release.
@@ -107,9 +108,14 @@ describe the local run as Node 22 or CI validation.
 
 The connected TECNO CM6 reports package `com.hisabdekhtechai.app`,
 `versionName=1.0.20-test`, `versionCode=21`, and the existing application data
-directory. No APK was installed, no financial entry was created and no app data
-was cleared for PR-0. Device UI/boot results, when checked, are separate from
-source tests. A missing/locked device must never be reported as a device PASS.
+directory. The installed app's dashboard rendered on the real phone. A bounded
+current-process log scan found none of the six checked fatal/SQLite/JavaScript
+error signatures; this is a boot smoke check, not a full device regression test.
+No APK was installed, no financial entry was created and no app data was cleared
+for PR-0. History was not verified: the phone switched between Settings and a
+floating app window during observation. No additional UI input is needed for
+this inventory. Screenshots stay local under ignored `build/pr0-device/`; do
+not publish private account values as repository evidence.
 
 ## Next milestones and acceptance gates
 
