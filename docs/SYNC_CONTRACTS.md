@@ -81,6 +81,10 @@ bundle warnings and earlier feature-branch reconciliation remain separate work.
 
 ## Next gates and rollback
 
+PR-3a implementation and its explicit activation gates are now documented in
+[POSTGRES_SYNC_ENGINE.md](POSTGRES_SYNC_ENGINE.md). The PR-1 results above remain
+historical evidence for that contract-only commit.
+
 PR-2: reconcile the two already-applied Hisab migrations, add/replay portable
 SQL and Auth adapters, document `DB_PORTABILITY.md`, run isolation/balance tests
 without touching DeshPath. PR-3: implement the remote adapter and local-store

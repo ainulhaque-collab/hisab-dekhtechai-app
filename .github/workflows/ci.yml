@@ -75,6 +75,8 @@ jobs:
       - run: npm ci
       - name: Replay migrations and verify two-owner RLS, exact journal and concurrent retries
         run: npm run test:sql
+      - name: Durable SQLite outbox over HTTP, native SQL and concurrent commit order
+        run: npm run test:sync
       - name: Scoped pg_dump/pg_restore into a separate fresh database
         env:
           HISAB_TEST_PG_CONTAINER: ${{ job.services.postgres.id }}

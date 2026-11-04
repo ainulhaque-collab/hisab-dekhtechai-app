@@ -21,7 +21,7 @@ const snapshot = async client => {
   const result={};
   for (const {tablename} of tables) {
     if (!/^[a-z_]+$/.test(tablename)) throw Error('BAD_TEST_TABLE');
-    result[tablename]=(await client.query(`select count(*)::text as rows,md5(coalesce(string_agg((to_jsonb(t)-'creation_tx')::text,'|' order by id),'')) as fingerprint from hisab_cloud.${tablename} t`)).rows[0];
+    result[tablename]=(await client.query(`select count(*)::text as rows,md5(coalesce(string_agg((to_jsonb(t)-'creation_tx')::text,'|' order by (to_jsonb(t)-'creation_tx')::text),'')) as fingerprint from hisab_cloud.${tablename} t`)).rows[0];
   }
   return result;
 };

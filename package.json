@@ -11,6 +11,7 @@
     "lint": "tsc --noEmit",
     "test": "tsx --test src/test/*.test.ts",
     "test:sql": "node --test scripts/portable-postgres.test.mjs",
+    "test:sync": "node --import tsx --test src/test/postgres_sync.test.ts",
     "test:sql-restore": "node scripts/verify-postgres-restore.mjs"
   },
   "dependencies": {
