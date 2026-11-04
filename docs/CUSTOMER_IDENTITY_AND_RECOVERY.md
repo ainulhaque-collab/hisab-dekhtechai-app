@@ -109,6 +109,13 @@ The current 17 web output files are byte-identical to PR-3a: the new Auth module
 are **not mounted into App**. No APK was replaced and no hosted migration applied.
 Actual results are recorded in `qa/customer-identity-evidence.json` and PR checks.
 
+Verified source `aa239516f2fbb71449e327f58fb9d40d535c2e25` passed
+[CI 95](https://github.com/ainulhaque-collab/hisab-dekhtechai-app/actions/runs/41849451021):
+128 app tests passed (one native-only skip in the WASM job), 11 WASM SQL tests,
+12 native PostgreSQL SQL tests and 14 native HTTP/SQLite pipeline tests with no
+skips. Native contact-change/issuer/deletion guards and the 10-table dump/restore
+passed; both finance and sync cursor restore markers were verified in job logs.
+
 ## Activation gates
 
 1. Reconcile the advanced feature/runtime branch before replacing a phone APK;

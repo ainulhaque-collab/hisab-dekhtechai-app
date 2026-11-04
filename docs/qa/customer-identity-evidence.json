@@ -1,7 +1,7 @@
 {
   "date": "2026-11-04",
   "timezone": "Asia/Dhaka",
-  "milestone": "PR-3b stable customer identity and verified contact-change Auth adapters",
+  "milestone": "PR-3 Auth increment: stable customer identity and verified contact-change adapters",
   "parent": "0f4dae9f8694bad5c2d0abfd8ec76d7aa62172d2",
   "authFoundationSource": "75dde8280ed492083cbf40f8964f8458fa42c740",
   "sdk": "@supabase/supabase-js@2.118.0",
@@ -16,7 +16,21 @@
     "sqliteContactChange": "PASS; finance snapshot and pending outbox byte-identical",
     "postgresContactChange": "PASS in disposable WASM fixture; same-UUID access and different-UUID rejection"
   },
-  "nativeCi": "pending",
+  "verifiedSourceCommit": "aa239516f2fbb71449e327f58fb9d40d535c2e25",
+  "webCi": {"result": "PASS", "run": 95, "url": "https://github.com/ainulhaque-collab/hisab-dekhtechai-app/actions/runs/41849451021"},
+  "nativeCi": {
+    "result": "PASS",
+    "engine": "native PostgreSQL 17",
+    "portableSqlPassed": 12,
+    "pipelinePassed": 14,
+    "skipped": 0,
+    "contactChangeOwnershipAndIdentityDeletionGuard": "PASS",
+    "issuerFenceAndConcurrentCommitOrder": "PASS",
+    "scopedDumpRestoreTables": 10,
+    "financeSyncFingerprintsAndRestoredCursorReplay": "PASS",
+    "markers": ["NATIVE_PG_DUMP_RESTORE_PASS", "SYNC_CURSOR_RESTORE_PASS"],
+    "job": "https://github.com/ainulhaque-collab/hisab-dekhtechai-app/actions/runs/41849451021/job/126641512103"
+  },
   "appMounted": false,
   "apkReplaced": false,
   "hostedAuthSettingsChanged": false,
