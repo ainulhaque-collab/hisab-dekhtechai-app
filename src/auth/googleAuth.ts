@@ -12,6 +12,7 @@
 import { Capacitor } from '@capacitor/core';
 import { computeSha256 } from '../sync/canonical';
 import { NativeGoogleDrive } from './nativeGoogle';
+import { BrowserTokenSession } from './browserSession';
 
 export interface GoogleUserProfile {
   subjectId: string;
@@ -63,12 +64,14 @@ export class GoogleAuthManager {
 
   private currentProfile: GoogleUserProfile | null = null;
   private isSimulatedAuth = false;
+  private sessionEpoch = 0;
+  private restoreInProgress?: Promise<void>;
   public simulatedRenewSubjectHash?: string | null;
   public fetchFn: typeof fetch = (...args) => fetch(...args);
   private readonly DRIVE_SCOPE =
     'https://www.googleapis.com/auth/drive.appdata email profile openid';
 
-  constructor() {
+  constructor(private browserSession = new BrowserTokenSession()) {
     this.loadSavedProfile();
   }
 
@@ -181,7 +184,7 @@ export class GoogleAuthManager {
 
   public isTokenExpired(): boolean {
     if (!this.currentProfile?.accessToken) return true;
-    if (!this.currentProfile.tokenExpiresAt) return false;
+    if (this.currentProfile.tokenExpiresAt == null) return true;
     return Date.now() >= this.currentProfile.tokenExpiresAt - 60000; // 1 min buffer
   }
 
@@ -195,6 +198,7 @@ export class GoogleAuthManager {
    * Prompts the real Google Sign-In & Drive scope consent popup via Google Identity Services.
    */
   public async promptGoogleSignIn(): Promise<GoogleUserProfile> {
+    this.sessionEpoch++;
     if (Capacitor.getPlatform() === 'android') {
       const { accessToken } = await NativeGoogleDrive.authorize({ interactive: true });
       return this.acceptNativeToken(accessToken, false);
@@ -204,6 +208,12 @@ export class GoogleAuthManager {
     return new Promise((resolve, reject) => {
       if (typeof window === 'undefined') {
         reject(new Error('Google Sign-In is only available in a browser or WebView environment.'));
+        return;
+      }
+
+      if (window.location && window.location.protocol !== 'https:' &&
+          !['localhost', '127.0.0.1', '[::1]'].includes(window.location.hostname)) {
+        reject(new Error('GOOGLE_INSECURE_ORIGIN'));
         return;
       }
 
@@ -222,7 +232,7 @@ export class GoogleAuthManager {
           scope: this.DRIVE_SCOPE,
           callback: async (resp) => {
             if (resp.error || !resp.access_token) {
-              reject(new Error(resp.error?.message || 'Google authorization cancelled or failed'));
+              reject(new Error(typeof resp.error === 'string' ? resp.error : resp.error?.message || 'Google authorization cancelled or failed'));
               return;
             }
 
@@ -267,13 +277,14 @@ export class GoogleAuthManager {
               this.isSimulatedAuth = false;
 
               this.saveProfile();
+              await this.browserSession.save(this.currentProfile as Required<Pick<GoogleUserProfile, 'accessToken' | 'tokenExpiresAt'>>, subjectHash, clientId);
               resolve(this.currentProfile);
             } catch (err) {
               reject(err);
             }
           },
           error_callback: (err) => {
-            reject(new Error(err?.message || 'Google OAuth error occurred during authorization.'));
+            reject(new Error(err?.type || err?.message || 'Google OAuth error occurred during authorization.'));
           },
         });
 
@@ -330,6 +341,7 @@ export class GoogleAuthManager {
       throw new Error('No user profile available for simulated token renewal.');
     }
 
+    if (prompt === '') throw new Error('AUTH_REQUIRED: Reconnect Google Drive to renew browser access.');
     const clientId = this.getClientId();
     return new Promise((resolve, reject) => {
       if (typeof window === 'undefined' || !window.google?.accounts?.oauth2) {
@@ -377,10 +389,12 @@ export class GoogleAuthManager {
               }
 
               if (this.currentProfile) {
+                this.currentProfile.isDriveAuthorized = true;
                 this.currentProfile.accessToken = resp.access_token;
                 const expiresIn = resp.expires_in || 3600;
                 this.currentProfile.tokenExpiresAt = Date.now() + expiresIn * 1000;
                 this.saveProfile();
+                await this.browserSession.save(this.currentProfile as Required<Pick<GoogleUserProfile, 'accessToken' | 'tokenExpiresAt'>>, this.currentProfile.subjectHash, clientId);
               }
               resolve(resp.access_token);
             } catch (verifyErr) {
@@ -404,11 +418,23 @@ export class GoogleAuthManager {
    * If forceRenew is true (e.g. after HTTP 401 error), invalidates local token and triggers renewal.
    */
   public async getValidAccessToken(forceRenew = false): Promise<string> {
-    if (forceRenew && Capacitor.getPlatform() === 'android' && !this.isSimulatedAuth) {
-      const invalidToken = this.currentProfile?.accessToken;
-      if (this.currentProfile) this.currentProfile.accessToken = undefined;
+    if (!this.currentProfile) throw new Error('AUTH_REQUIRED: User is not signed in to Google.');
+    if (Capacitor.getPlatform() !== 'android' && !this.isSimulatedAuth && !this.currentProfile.accessToken && !forceRenew) {
+      if (!this.restoreInProgress) this.restoreInProgress = this.restoreBrowserSession().finally(() => { this.restoreInProgress = undefined; });
+      await this.restoreInProgress;
+    }
+    if (!this.currentProfile) throw new Error('AUTH_REQUIRED: User is not signed in to Google.');
+    if (Capacitor.getPlatform() === 'android' && !this.isSimulatedAuth && (forceRenew || this.isTokenExpired())) {
+      const invalidToken = forceRenew ? this.currentProfile.accessToken : undefined;
       const { accessToken } = await NativeGoogleDrive.authorize({ interactive: false, invalidToken });
       return (await this.acceptNativeToken(accessToken, true)).accessToken!;
+    }
+    if (!this.isSimulatedAuth && (forceRenew || this.isTokenExpired())) {
+      this.sessionEpoch++;
+      this.browserSession.clear();
+      this.currentProfile.accessToken = undefined;
+      this.currentProfile.isDriveAuthorized = false;
+      throw new Error('AUTH_REQUIRED: Reconnect Google Drive to renew browser access.');
     }
     if (!this.currentProfile?.accessToken && !forceRenew) {
       throw new Error('User is not signed in to Google.');
@@ -446,6 +472,8 @@ export class GoogleAuthManager {
       );
     }
 
+    this.sessionEpoch++;
+    this.browserSession.clear();
     this.isSimulatedAuth = true;
     const subjectHash = await computeOwnerSubjectHash(subjectId);
     this.currentProfile = {
@@ -462,6 +490,8 @@ export class GoogleAuthManager {
   }
 
   public revokeDriveConsent(): void {
+    this.sessionEpoch++;
+    this.browserSession.clear();
     if (this.currentProfile) {
       this.currentProfile.isDriveAuthorized = false;
       this.currentProfile.accessToken = undefined;
@@ -471,8 +501,35 @@ export class GoogleAuthManager {
   }
 
   public signOut(): void {
+    this.sessionEpoch++;
+    this.browserSession.clear();
     this.currentProfile = null;
     this.isSimulatedAuth = false;
+    this.saveProfile();
+  }
+
+  private async restoreBrowserSession(): Promise<void> {
+    const profile = this.currentProfile, epoch = this.sessionEpoch;
+    if (!profile) return;
+    const session = await this.browserSession.read(profile.subjectHash, this.getClientId());
+    if (!session || epoch !== this.sessionEpoch || profile !== this.currentProfile) return;
+    const response = await this.fetchFn('https://www.googleapis.com/oauth2/v3/userinfo', {
+      headers: { Authorization: `Bearer ${session.accessToken}` },
+      signal: AbortSignal.timeout(10_000),
+    });
+    if (epoch !== this.sessionEpoch || profile !== this.currentProfile) return;
+    if (!response.ok) {
+      if ([401, 403].includes(response.status)) this.browserSession.clear();
+      throw new Error(response.status === 401 || response.status === 403 ? 'AUTH_REQUIRED: Reconnect Google Drive.' : 'Google session verification temporarily unavailable.');
+    }
+    const info = await response.json();
+    const subjectHash = await computeOwnerSubjectHash(info.sub);
+    if (epoch !== this.sessionEpoch || profile !== this.currentProfile) return;
+    if (subjectHash !== profile.subjectHash) {
+      this.browserSession.clear();
+      throw new Error('Security Error: Restored Google session owner does not match dataset owner.');
+    }
+    this.currentProfile = { ...profile, ...session, isDriveAuthorized: true };
     this.saveProfile();
   }
 

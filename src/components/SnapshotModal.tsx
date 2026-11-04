@@ -1,158 +1,68 @@
-import React, { useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
+import { Database, Download, Upload, RotateCcw, Plus, AlertCircle, Check } from 'lucide-react';
 import { useApp } from '../context/AppContext';
-import { Database, ShieldCheck, RotateCcw, Plus, X, Check, AlertCircle } from 'lucide-react';
 import { LocalSnapshot } from '../contracts/types';
+import { ModalShell, primaryButton, secondaryButton } from './ModalShell';
+import { backupErrorMessage, openNativeBackupFile, readBackupFile, saveBackupFile, usesNativeBackupFiles } from '../storage/backupFiles';
 
-interface SnapshotModalProps {
-  isOpen: boolean;
-  onClose: () => void;
-}
-
-export const SnapshotModal: React.FC<SnapshotModalProps> = ({ isOpen, onClose }) => {
-  const { db, refreshState } = useApp();
-  const [snapshots, setSnapshots] = useState<LocalSnapshot[]>(() => db.getSnapshots());
-  const [statusMsg, setStatusMsg] = useState<{ type: 'success' | 'error'; text: string } | null>(
-    null
-  );
-  const [isCapturing, setIsCapturing] = useState(false);
-
+export function SnapshotModal({ isOpen, onClose }: { isOpen: boolean; onClose: () => void }) {
+  const { db, refreshState, language } = useApp();
+  const [snapshots, setSnapshots] = useState<LocalSnapshot[]>([]);
+  const [busy, setBusy] = useState(false);
+  const [status, setStatus] = useState<{ error?: boolean; text: string } | null>(null);
+  const input = useRef<HTMLInputElement>(null);
+  const en = language === 'en';
+  useEffect(() => { if (isOpen) { setSnapshots(db.getSnapshots()); setStatus(null); } }, [db, isOpen]);
   if (!isOpen) return null;
 
-  const handleCaptureSnapshot = async () => {
-    setIsCapturing(true);
-    try {
-      const snap = await db.captureRecoverySnapshot();
-      setSnapshots(db.getSnapshots());
-      setStatusMsg({
-        type: 'success',
-        text: `নতুন স্ন্যাপশট সংগৃহীত হয়েছে (SHA-256: ${snap.hash.slice(0, 8)}...)`,
-      });
-    } catch (err: any) {
-      setStatusMsg({ type: 'error', text: err.message });
-    } finally {
-      setIsCapturing(false);
-    }
+  const run = async (action: () => Promise<void>, message: string) => {
+    if (busy) return;
+    setBusy(true); setStatus(null);
+    try { await action(); setSnapshots(db.getSnapshots()); refreshState(); setStatus({ text: message }); }
+    catch (error) { setStatus({ error: true, text: backupErrorMessage(error, en) }); }
+    finally { setBusy(false); }
   };
-
-  const handleRestore = async (snapId: string) => {
-    if (
-      !confirm(
-        'আপনি কি নিশ্চিত যে এই স্ন্যাপশট থেকে ডাটাবেজ পুনরুদ্ধার করতে চান? বর্তমান আনসেভড পরিবর্তনগুলো রিস্টোর পয়েন্টে ফিরে যাবে।'
-      )
-    ) {
-      return;
-    }
-
-    try {
-      const ok = await db.restoreFromSnapshot(snapId);
-      if (ok) {
-        refreshState();
-        setStatusMsg({ type: 'success', text: 'ডাটাবেজ সফলভাবে রিস্টোর হয়েছে!' });
-        setTimeout(() => onClose(), 1200);
-      }
-    } catch (err: any) {
-      setStatusMsg({ type: 'error', text: `রিস্টোর ব্যর্থ: ${err.message}` });
-    }
+  const importText = async (text: string) => {
+    if (!window.confirm(en ? 'Add missing records from this backup? Current records and pending changes will be kept. Only import your own trusted backup.' : 'ব্যাকআপ থেকে অনুপস্থিত হিসাব যোগ করবেন? বর্তমান হিসাব ও পেন্ডিং পরিবর্তন রাখা হবে। নিজের বিশ্বস্ত ব্যাকআপ ব্যবহার করুন।')) throw new Error('CANCELLED');
+    await db.importBackupFile(text);
   };
-
-  return (
-    <div className="fixed inset-0 z-50 bg-black/50 backdrop-blur-xs flex items-center justify-center p-4">
-      <div className="bg-white rounded-2xl max-w-lg w-full p-5 shadow-2xl border border-slate-200 text-xs animate-in zoom-in-95 max-h-[90vh] overflow-y-auto">
-        <div className="flex items-center justify-between pb-3 border-b border-slate-100">
-          <div className="flex items-center gap-2">
-            <Database className="w-5 h-5 text-blue-700" />
-            <h2 className="text-sm font-bold text-slate-800">
-              ডাটাবেজ ব্যাকআপ ও রিকভারি স্ন্যাপশট
-            </h2>
-          </div>
-          <button
-            type="button"
-            onClick={onClose}
-            className="p-1 rounded-lg hover:bg-slate-100 text-slate-500"
-          >
-            <X className="w-4 h-4" />
-          </button>
-        </div>
-
-        <div className="space-y-4 pt-3">
-          <p className="text-slate-500 text-[11px]">
-            অ্যাপ আপডেট বা স্কিমা পরিবর্তনের সময় Hisab DekhteChai একটি অপরিবর্তনীয় স্থানীয় ব্যাকআপ
-            সংরক্ষণ করে। এটি SHA-256 ক্রিপ্টোগ্রাফিক হ্যাশ দ্বারা সুরক্ষিত।
-          </p>
-
-          {statusMsg && (
-            <div
-              className={`p-3 rounded-xl border flex items-center gap-2 ${
-                statusMsg.type === 'success'
-                  ? 'bg-emerald-50 border-emerald-200 text-emerald-800'
-                  : 'bg-rose-50 border-rose-200 text-rose-800'
-              }`}
-            >
-              {statusMsg.type === 'success' ? (
-                <Check className="w-4 h-4 text-emerald-600 shrink-0" />
-              ) : (
-                <AlertCircle className="w-4 h-4 text-rose-600 shrink-0" />
-              )}
-              <span>{statusMsg.text}</span>
-            </div>
-          )}
-
-          <div className="flex justify-between items-center">
-            <span className="font-bold text-slate-800">সংরক্ষিত স্ন্যাপশট ({snapshots.length})</span>
-            <button
-              type="button"
-              onClick={handleCaptureSnapshot}
-              disabled={isCapturing}
-              className="px-3 py-1.5 bg-blue-700 hover:bg-blue-800 text-white rounded-lg font-bold flex items-center gap-1.5 shadow-xs disabled:opacity-50"
-            >
-              <Plus className="w-3.5 h-3.5" />
-              <span>{isCapturing ? 'তৈরি হচ্ছে...' : 'এখনই স্ন্যাপশট নিন'}</span>
-            </button>
-          </div>
-
-          <div className="space-y-2.5">
-            {snapshots.map((snap) => (
-              <div
-                key={snap.id}
-                className="p-3 bg-slate-50 rounded-xl border border-slate-200 space-y-2 hover:border-blue-300 transition-colors"
-              >
-                <div className="flex items-center justify-between">
-                  <div className="flex items-center gap-1.5">
-                    <ShieldCheck className="w-4 h-4 text-emerald-600" />
-                    <span className="font-bold text-slate-800">
-                      স্কিমা v{snap.dbSchemaVersion} স্ন্যাপশট
-                    </span>
-                  </div>
-                  <span className="text-[10px] text-slate-400">
-                    {new Date(snap.createdAt).toLocaleString()}
-                  </span>
-                </div>
-
-                <div className="grid grid-cols-2 gap-2 text-[11px] text-slate-600 bg-white p-2 rounded-lg border border-slate-100">
-                  <div>মোট লেনদেন: {snap.totalTransactions}টি</div>
-                  <div>পেন্ডিং আউটবক্স: {snap.pendingOutboxCount}টি</div>
-                  <div className="col-span-2 font-mono truncate text-[10px] text-slate-400">
-                    SHA-256: {snap.hash}
-                  </div>
-                </div>
-
-                <button
-                  type="button"
-                  onClick={() => handleRestore(snap.id)}
-                  className="w-full py-1.5 bg-white hover:bg-slate-100 text-blue-700 border border-blue-200 rounded-lg font-bold flex items-center justify-center gap-1.5"
-                >
-                  <RotateCcw className="w-3.5 h-3.5" />
-                  <span>এই স্ন্যাপশটে রিস্টোর করুন</span>
-                </button>
-              </div>
-            ))}
-
-            {snapshots.length === 0 && (
-              <div className="p-8 text-center text-slate-400">কোনো স্ন্যাপশট সংরক্ষিত নেই।</div>
-            )}
-          </div>
-        </div>
+  const imported = en ? 'Backup checked and missing records added. Existing records were kept.' : 'ব্যাকআপ যাচাই করে অনুপস্থিত হিসাব যোগ হয়েছে। বর্তমান হিসাব রাখা হয়েছে।';
+  return <ModalShell title={en ? 'Backup files & restore' : 'ব্যাকআপ ফাইল ও রিস্টোর'}
+    description={en ? 'Keep a separate copy of your financial records.' : 'নিজের হিসাবের একটি আলাদা কপি রাখুন।'}
+    icon={<Database className="h-5 w-5" />} onClose={onClose} busy={busy}>
+    <div className="space-y-5">
+      {status && <div role={status.error ? 'alert' : 'status'} className={`flex gap-2 rounded-xl border p-3 text-xs leading-relaxed ${status.error ? 'border-rose-200 bg-rose-50 text-rose-800' : 'border-emerald-200 bg-emerald-50 text-emerald-800'}`}>
+        {status.error ? <AlertCircle className="h-4 w-4 shrink-0" /> : <Check className="h-4 w-4 shrink-0" />}<span>{status.text}</span>
+      </div>}
+      <div className="space-y-3 rounded-2xl border border-blue-100 bg-blue-50/40 p-4">
+        <h3 className="text-sm font-bold">{en ? 'A copy you can take with you' : 'আপনার কাছে রাখার কপি'}</h3>
+        <p className="text-xs leading-relaxed text-slate-500">{en ? 'Includes all workspaces, saved workspace photos, accounts, journals and pending sync records. Files are not encrypted; keep them private. Device security settings stay separate.' : 'সব খাতা, সংরক্ষিত খাতার ছবি, অ্যাকাউন্ট, লেনদেন ও পেন্ডিং সিঙ্ক এতে থাকবে। ফাইল এনক্রিপ্ট করা নয়—নিজের কাছে নিরাপদে রাখুন। ডিভাইসের নিরাপত্তা সেটিংস আলাদা থাকে।'}</p>
+        <button type="button" disabled={busy} className={`${primaryButton} w-full`} onClick={() => run(async () => saveBackupFile(await db.exportBackupFile()),
+          usesNativeBackupFiles() ? (en ? 'Backup file saved.' : 'ব্যাকআপ ফাইল সংরক্ষিত হয়েছে।') : (en ? 'Backup sent to your browser downloads. Check Downloads to find the file.' : 'ব্যাকআপ ব্রাউজারের ডাউনলোডে পাঠানো হয়েছে। Downloads-এ ফাইলটি দেখুন।'))}>
+          <Download className="h-4 w-4" />{busy ? (en ? 'Working…' : 'কাজ হচ্ছে…') : (en ? 'Save backup file' : 'ব্যাকআপ ফাইল সেভ করুন')}
+        </button>
+        <input ref={input} type="file" accept=".json,application/json" className="hidden" aria-label={en ? 'Choose backup file' : 'ব্যাকআপ ফাইল নির্বাচন'} onChange={event => {
+          const file = event.target.files?.[0]; event.target.value = '';
+          if (file) void run(async () => importText(await readBackupFile(file)), imported);
+        }} />
+        <button type="button" disabled={busy} className={`${secondaryButton} w-full`} onClick={() => {
+          if (usesNativeBackupFiles()) void run(async () => importText(await openNativeBackupFile()), imported);
+          else input.current?.click();
+        }}><Upload className="h-4 w-4" />{en ? 'Import backup file' : 'ব্যাকআপ ফাইল আমদানি'}</button>
       </div>
+      <div className="flex items-center justify-between gap-2"><div><h3 className="text-xs font-bold">{en ? 'On-device recovery points' : 'এই ডিভাইসের রিকভারি পয়েন্ট'}</h3><p className="mt-1 text-[11px] text-slate-400">{en ? 'These stay inside the app.' : 'এগুলো অ্যাপের ভেতরেই থাকে।'}</p></div>
+        <button type="button" disabled={busy} className={secondaryButton} onClick={() => run(async () => { await db.captureRecoverySnapshot(); }, en ? 'Recovery point saved.' : 'রিকভারি পয়েন্ট সংরক্ষিত হয়েছে।')}><Plus className="h-4 w-4" />{en ? 'Create' : 'তৈরি করুন'}</button>
+      </div>
+      <div className="space-y-3">{[...snapshots].reverse().map(snap => <div key={snap.id} className="rounded-xl border border-slate-100 p-3.5 text-xs">
+        <div className="font-semibold text-slate-700">{new Date(snap.createdAt).toLocaleString(en ? 'en-GB' : 'bn-BD')}</div>
+        <p className="mt-1.5 text-[11px] text-slate-400">{en ? `${snap.totalTransactions} transactions · ${snap.pendingOutboxCount} pending changes` : `${snap.totalTransactions}টি লেনদেন · ${snap.pendingOutboxCount}টি পেন্ডিং পরিবর্তন`}</p>
+        <button type="button" disabled={busy || !snap.dataJson} className={`${secondaryButton} mt-3 w-full`} onClick={() => {
+          if (window.confirm(en ? 'Recover missing records from this point? Newer records will remain.' : 'এই পয়েন্ট থেকে অনুপস্থিত হিসাব ফিরিয়ে আনবেন? নতুন হিসাব রাখা হবে।')) void run(async () => {
+            if (!await db.restoreFromSnapshot(snap.id)) throw new Error('BACKUP_INVALID');
+          }, imported);
+        }}><RotateCcw className="h-3.5 w-3.5" />{en ? 'Recover missing records' : 'অনুপস্থিত হিসাব ফিরিয়ে আনুন'}</button>
+      </div>)}</div>
+      {!snapshots.length && <p className="text-center text-xs text-slate-400">{en ? 'No recovery points yet.' : 'এখনও রিকভারি পয়েন্ট নেই।'}</p>}
     </div>
-  );
-};
+  </ModalShell>;
+}

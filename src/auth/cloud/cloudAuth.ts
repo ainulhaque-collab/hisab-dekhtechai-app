@@ -72,7 +72,7 @@ export class CloudAuth {
     const value = await this.readVerifiedCustomer(expectedUserId);
     return value ? { userId: value.account.customerId, email: value.account.email ?? '' } : null;
   }
-  async getCustomerAccount(expectedCustomerId: string): Promise<CustomerAccount | null> {
+  async getCustomerAccount(expectedCustomerId: string | null = this.expectedUserId): Promise<CustomerAccount | null> {
     return (await this.readVerifiedCustomer(expectedCustomerId))?.account ?? null;
   }
   /** Explicit UUID from the local binding; never infer an owner by email or phone. */

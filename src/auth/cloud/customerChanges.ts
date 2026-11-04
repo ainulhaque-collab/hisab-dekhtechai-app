@@ -1,5 +1,5 @@
 import type { SupabaseClient, User } from '@supabase/supabase-js';
-import type { CustomerAccount, CustomerAccountChanges, CustomerChangeResult } from '../../contracts/customerAccount';
+import type { CustomerAccount, CustomerAccountChanges, CustomerChangeResult, PendingCustomerChange } from '../../contracts/customerAccount';
 import { customerPhone, customerUuid, customerEmail } from '../customerIdentity';
 import { readCloudCallback, type CloudAuthConfig } from './config';
 import type { CloudSecretStorage } from './secureStorage';
@@ -30,6 +30,16 @@ export class SupabaseCustomerChanges implements CustomerAccountChanges {
     this.deps.assertOpen(); return result;
   }
   async readAccount(): Promise<CustomerAccount> { return (await this.account()).account; }
+  /** Display-only pending status; no credentials/PKCE selectors leave the Auth layer. */
+  async readPendingChange(): Promise<PendingCustomerChange | null> {
+    this.deps.assertOpen();
+    const raw = await this.deps.storage.getItem(this.pendingKey); if (!raw) return null;
+    let p: Pending;
+    try { p = JSON.parse(raw); } catch { throw Error('CUSTOMER_CHANGE_INVALID'); }
+    if (p?.customerId !== this.deps.customerId || !['email','phone','google'].includes(p.kind) || !Number.isFinite(p.issuedAt)) throw Error('CUSTOMER_CHANGE_INVALID');
+    const target = p.kind === 'phone' ? customerPhone(p.phone) : p.kind === 'email' ? customerEmail(p.email) : null;
+    return Object.freeze({kind:p.kind,target,expired:p.issuedAt>this.deps.now()||this.deps.now()-p.issuedAt>600_000});
+  }
   private async pending(kind?: Pending['kind']): Promise<Pending | null> {
     const raw = await this.deps.storage.getItem(this.pendingKey);
     if (!raw) return null;

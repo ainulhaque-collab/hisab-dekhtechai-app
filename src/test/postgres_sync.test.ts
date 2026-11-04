@@ -30,6 +30,7 @@ test(`Postgres outbox pipeline over HTTP + real SQLite files (${native?'native P
   const {readdir}=await import('node:fs/promises');
   const migration=(await readdir(new URL('../../supabase/migrations/',import.meta.url))).find(n=>n.endsWith('_hisab_durable_sync_log.sql'))!;
   await exec(await file('supabase/migrations/'+migration));
+  await exec(await file('supabase/migrations/20261104162102_hisab_sync_audit_metadata.sql'));
   const owner=generateUUID(),foreignOwner=generateUUID();await sql.query('insert into auth.users(id) values($1),($2)',[owner,foreignOwner]);
   let serial:Promise<unknown>=Promise.resolve();
   const asActor=async(actor:string,method:string,request:any,external?:any)=>{
@@ -102,16 +103,20 @@ test(`Postgres outbox pipeline over HTTP + real SQLite files (${native?'native P
     assert.equal((ops.find(op=>op.type==='account.create')?.payload.account as any).name,'Original');
     assert.equal((ops.find(op=>op.type==='category.create')?.payload.category as any).name,'Original category');
     assert.ok(ops.some(op=>op.type==='account.update'));
-    assert.equal(c.store.pendingCount({ownerId:owner,workspaceId:w.id,deviceId:c.db.getDeviceId()}),4);
+    assert.equal(c.store.pendingCount({ownerId:owner,workspaceId:w.id,deviceId:c.db.getDeviceId()}),5);
     const cs={ownerId:owner,workspaceId:w.id,deviceId:c.db.getDeviceId()};
     const e=new PostgresSyncEngine({store:c.store,provider,authIssuer:'synthetic-test-only',scope:cs,online:()=>true,auth:{getVerifiedIdentity:async()=>({subject:owner,issuer:'synthetic-test-only'}),signOut:async()=>{}}});
-    assert.equal((await e.run()).state,'blocked');assert.equal(c.store.pendingCount(cs),1);
+    assert.equal((await e.run()).state,'blocked');assert.equal(c.store.pendingCount(cs),2);
     c.db.queueSyncOp('receipt.attach',generateUUID(),{});
     await assert.rejects(c.store.readPending(cs,100),/SYNC_LOCAL_MAPPING_REQUIRED/);
   });
   await t.test('A → PostgreSQL → B and B → PostgreSQL → A preserve exact journals and balance',async()=>{
     assert.equal((await ea.run()).state,'caught_up');assert.equal(a.store.pendingCount(scope(a)),0);
     assert.equal((await eb.run()).state,'caught_up');assert.equal(b.db.getTransactions(ws.id).length,1);
+    const original=a.db.getTransactions(ws.id)[0],replica=b.db.getTransaction(original.id)!;
+    assert.equal(replica.createdAtUtc,original.createdAtUtc);assert.equal(replica.occurredTimezoneOffsetMinutes,original.occurredTimezoneOffsetMinutes);
+    const logged=(await sql.query("select envelope#>'{payload,balancedJournal,transaction}' as tx from hisab_cloud.sync_log where operation_id=$1",[original.createdOpId])).rows[0].tx;
+    assert.equal(logged.createdAtUtc,original.createdAtUtc);assert.equal(logged.occurredTimezoneOffsetMinutes,original.occurredTimezoneOffsetMinutes);
     await post(b,'expense','80');assert.equal((await eb.run()).state,'caught_up');assert.equal((await ea.run()).state,'caught_up');
     assert.equal(a.db.calculateAccountSummaries(ws.id).find(x=>x.accountId===cash.id)?.currentBalanceMinor,'12000');
     assert.deepEqual(a.db.getTransactions(ws.id).map(x=>x.id).sort(),b.db.getTransactions(ws.id).map(x=>x.id).sort());
@@ -228,6 +233,10 @@ test(`Postgres outbox pipeline over HTTP + real SQLite files (${native?'native P
     const reply=await asActor(owner,'sync_push',{requestId:generateUUID(),scope:scope(b),operations:[bad]});assert.equal(reply.outcomes[0].outcome,'rejected');
     const numeric={...bad,sequence:100};numeric.contentSha256=await operationDigest(numeric as any);
     assert.equal((await asActor(owner,'sync_push',{requestId:generateUUID(),scope:scope(b),operations:[numeric]})).outcomes[0].outcome,'rejected');
+    const invalidAudit=structuredClone(pending[0]);Object.assign(invalidAudit,{operationId:generateUUID(),sequence:'1000'});
+    (invalidAudit.payload as any).balancedJournal.transaction.occurredTimezoneOffsetMinutes=841;
+    const signedAudit={...invalidAudit,contentSha256:await operationDigest(invalidAudit)};
+    assert.equal((await asActor(owner,'sync_push',{requestId:generateUUID(),scope:scope(b),operations:[signedAudit]})).outcomes[0].outcome,'rejected');
     const malformed=structuredClone(pending[0]),transactionId=generateUUID(),operationId=generateUUID(),j=(malformed.payload as any).balancedJournal;
     const nominal=(await sql.query("select id from hisab_cloud.accounts where workspace_id=$1 and system_code='revenue_clearing'",[ws.id])).rows[0].id;
     Object.assign(malformed,{operationId,entityId:transactionId,sequence:'999'});Object.assign(j.transaction,{id:transactionId,createdOpId:operationId});

@@ -41,10 +41,10 @@ export function AppSelect({ children, value, onChange, disabled, className, id, 
       onKeyDown={e => { if (['ArrowDown', 'ArrowUp'].includes(e.key)) { e.preventDefault(); setOpen(true); } }}>
       <span className="min-w-0 truncate">{selected?.label || (bn ? 'নির্বাচন করুন' : 'Select an option')}</span><ChevronDown aria-hidden="true" className="h-3.5 w-3.5 shrink-0 text-slate-400" />
     </button>
-    {open && createPortal(<div className="fixed inset-0 z-[200] bg-slate-950/45 backdrop-blur-sm flex items-end sm:items-center justify-center p-2 sm:p-5"
+    {open && createPortal(<div className="app-modal-backdrop fixed inset-0 z-[200] bg-slate-950/45 backdrop-blur-sm flex items-end sm:items-center justify-center p-2 sm:p-5"
       onClick={e => { if (e.target === e.currentTarget) setOpen(false); }}>
       <div ref={panel} role="dialog" aria-modal="true" aria-label={String(label)}
-        className="bg-white text-slate-900 rounded-[24px] w-full max-w-md shadow-2xl ring-1 ring-white/70 flex flex-col max-h-[85dvh] overflow-hidden"
+        className="app-modal-panel bg-white text-slate-900 rounded-[24px] w-full max-w-md shadow-2xl ring-1 ring-white/70 flex flex-col max-h-[85dvh] overflow-hidden"
         onKeyDown={e => {
           if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); setOpen(false); }
           const nodes = Array.from(panel.current?.querySelectorAll<HTMLElement>('[role="option"]:not(:disabled)') || []);

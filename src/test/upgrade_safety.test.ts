@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { LocalDatabase } from '../storage/db';
-import { LocalStorageFallbackDriver } from '../storage/drivers/durableStorage';
+import { LocalStorageFallbackDriver, IndexedDBDurableDriver } from '../storage/drivers/durableStorage';
 import { buildIncomeJournal, generateUUID } from '../domain/journal';
 import { BalancedJournal, SyncOperation } from '../contracts/types';
 import { canonicalJson, computeSha256 } from '../sync/canonical';
@@ -22,12 +22,57 @@ async function postJournalHelper(db: LocalDatabase, journal: BalancedJournal, ow
   await db.commitJournalWithOutbox(journal, op);
 }
 
-test('BUG-003: SQLite Data Preservation During App Updates and Versioned Migrations', async () => {
+test('Failed ledger migration preserves the exact original durable bytes and schema', async () => {
+  const driver = new LocalStorageFallbackDriver(), key = `failed-migration-${generateUUID()}`;
+  const db = new LocalDatabase(key, driver); await db.init();
+  const journal = buildIncomeJournal({ workspaceId: 'ws-personal-default', assetAccountId: 'acc-cash-1', revenueCategoryId: 'cat-salary', amountMinor: '100', effectiveDate: '2026-10-26', opId: generateUUID() });
+  await postJournalHelper(db, journal); const data = structuredClone(db.toSerializable());
+  data.schemaVersion = 4; data.journalTransactions[0][1].lines[0].debitMinor = '101';
+  const original = JSON.stringify(data); await driver.setItem(key, original);
+  await assert.rejects(new LocalDatabase(key, driver).init(), /integrity verification/);
+  assert.equal(await driver.getItem(key), original);
+  assert.equal(await driver.getItem(`${key}_pre_migration_v5`), original);
+});
+
+test('A future schema is refused without rewriting customer records', async () => {
+  const driver = new LocalStorageFallbackDriver(), key = `future-${generateUUID()}`;
+  const db = new LocalDatabase(key, driver); await db.init();
+  const original = JSON.stringify({ ...db.toSerializable(), schemaVersion: 6, futureFinancialCollection: [['synthetic', { amountMinor: '123' }]] });
+  await driver.setItem(key, original); await assert.rejects(new LocalDatabase(key, driver).init(), /DATABASE_VERSION_UNSUPPORTED/);
+  assert.equal(await driver.getItem(key), original);
+});
+
+test('Migrated records, pending UUIDs and schema remain stable over repeated application updates', async () => {
+  const driver = new LocalStorageFallbackDriver(), key = `repeat-upgrade-${generateUUID()}`;
+  const db = new LocalDatabase(key, driver); await db.init(); db.createWorkspace('Synthetic offline records', 'business'); await db.waitForPendingWrites();
+  const data = db.toSerializable(); data.schemaVersion = 4; await driver.setItem(key, JSON.stringify(data));
+  const migrated = new LocalDatabase(key, driver); await migrated.init();
+  const saved = canonicalJson(migrated.toSerializable()), originalIds = db.getPendingOutbox().map(op => op.operationId);
+  for (let i = 0; i < 3; i++) { const next = new LocalDatabase(key, driver); await next.init(); assert.equal(canonicalJson(next.toSerializable()), saved); assert.deepEqual(next.getPendingOutbox().map(op => op.operationId), originalIds); }
+});
+
+test('IndexedDB does not acknowledge writes before transaction commit and rejects a late abort', async () => {
+  for (const action of ['setItem', 'removeItem'] as const) {
+    const driver = new IndexedDBDurableDriver(); let tx: any, request: any;
+    (driver as any).db = { transaction: () => {
+      request = {}; tx = { error: null, objectStore: () => ({ put: () => request, delete: () => request }) }; return tx;
+    } };
+    let finished = false;
+    const pending = (action === 'setItem' ? driver.setItem('qa', 'synthetic') : driver.removeItem('qa')).then(() => { finished = true; });
+    request.onsuccess?.(); await Promise.resolve(); assert.equal(finished, false);
+    tx.oncomplete(); await pending; assert.equal(finished, true);
+    const aborted = action === 'setItem' ? driver.setItem('qa', 'synthetic') : driver.removeItem('qa');
+    request.onsuccess?.(); tx.error = new Error('Synthetic late commit failure'); tx.onabort();
+    await assert.rejects(aborted, /late commit failure/);
+  }
+});
+
+test('BUG-003: synthetic v4-to-v5 migration preserves records, balances and recovery copies', async () => {
   const driver = new LocalStorageFallbackDriver();
   const dbKey = 'test_db_upgrade_safety';
   const wsId = 'ws-personal-default';
 
-  // 1. Setup a previous version database (Schema Version 4) with real customer data
+  // 1. Setup a previous-version database using synthetic financial records.
   const dbV4 = new LocalDatabase(dbKey, driver);
   await dbV4.init();
 

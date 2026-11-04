@@ -23,8 +23,9 @@ import {
 } from '../contracts/types';
 import { SYSTEM_ACCOUNTS } from '../contracts/ledger';
 import { toPaisa, paisaToDecimalString } from './money';
+import { JournalTimeInput, resolveJournalTime } from './transactionTime';
 
-export interface PostIncomeCommand {
+export interface PostIncomeCommand extends JournalTimeInput {
   workspaceId: UUID;
   assetAccountId: UUID;
   revenueCategoryId: UUID;
@@ -38,7 +39,7 @@ export interface PostIncomeCommand {
   transactionId?: UUID;
 }
 
-export interface PostExpenseCommand {
+export interface PostExpenseCommand extends JournalTimeInput {
   workspaceId: UUID;
   assetAccountId: UUID;
   expenseCategoryId: UUID;
@@ -52,7 +53,7 @@ export interface PostExpenseCommand {
   transactionId?: UUID;
 }
 
-export interface PostTransferCommand {
+export interface PostTransferCommand extends JournalTimeInput {
   workspaceId: UUID;
   fromAssetAccountId: UUID;
   toAssetAccountId: UUID;
@@ -68,7 +69,7 @@ export interface PostTransferCommand {
   transactionId?: UUID;
 }
 
-export interface PostOpeningBalanceCommand {
+export interface PostOpeningBalanceCommand extends JournalTimeInput {
   workspaceId: UUID;
   assetAccountId: UUID;
   amountMinor: PaisaString;
@@ -108,8 +109,7 @@ export function buildIncomeJournal(cmd: PostIncomeCommand): BalancedJournal {
     id: txId,
     workspaceId: cmd.workspaceId,
     transactionType: 'income',
-    effectiveDate: cmd.effectiveDate,
-    occurredAtUtc: new Date().toISOString(),
+    ...resolveJournalTime(cmd),
     note: cmd.note,
     partyId: cmd.partyId || null,
     createdOpId: cmd.opId,
@@ -164,8 +164,7 @@ export function buildExpenseJournal(cmd: PostExpenseCommand): BalancedJournal {
     id: txId,
     workspaceId: cmd.workspaceId,
     transactionType: 'expense',
-    effectiveDate: cmd.effectiveDate,
-    occurredAtUtc: new Date().toISOString(),
+    ...resolveJournalTime(cmd),
     note: cmd.note,
     partyId: cmd.partyId || null,
     createdOpId: cmd.opId,
@@ -227,8 +226,7 @@ export function buildTransferJournal(cmd: PostTransferCommand): BalancedJournal 
     id: txId,
     workspaceId: cmd.workspaceId,
     transactionType: 'transfer',
-    effectiveDate: cmd.effectiveDate,
-    occurredAtUtc: new Date().toISOString(),
+    ...resolveJournalTime(cmd),
     note: cmd.note,
     partyId: cmd.partyId || null,
     createdOpId: cmd.opId,
@@ -303,8 +301,7 @@ export function buildOpeningBalanceJournal(cmd: PostOpeningBalanceCommand): Bala
     id: txId,
     workspaceId: cmd.workspaceId,
     transactionType: 'opening',
-    effectiveDate: cmd.effectiveDate,
-    occurredAtUtc: new Date().toISOString(),
+    ...resolveJournalTime(cmd),
     note: 'প্রারম্ভিক ব্যালেন্স (Opening balance)',
     createdOpId: cmd.opId,
   };
@@ -348,8 +345,7 @@ export function buildReversalJournal(
     id: reversalTxId,
     workspaceId: original.workspaceId,
     transactionType: 'reversal',
-    effectiveDate: original.effectiveDate,
-    occurredAtUtc: new Date().toISOString(),
+    ...resolveJournalTime({ effectiveDate: original.effectiveDate }),
     note: `বাতিলকরণ (Reversal): ${reason}`,
     reversalOf: original.id,
     createdOpId: opId,

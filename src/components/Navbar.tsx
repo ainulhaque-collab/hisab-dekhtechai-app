@@ -4,7 +4,6 @@ import React, { useState, useRef, useEffect } from 'react';
 import { useApp } from '../context/AppContext';
 import { formatAccountTitle } from '../domain/money';
 import {
-  Wallet,
   Menu,
   ChevronDown,
   Cloud,
@@ -12,34 +11,25 @@ import {
   RefreshCw,
   AlertTriangle,
   CheckCircle2,
+  ShieldCheck,
   Settings,
   Plus,
-  Shield,
-  User,
   Users,
   Info,
-  HelpCircle,
-  LogOut,
-  X
 } from 'lucide-react';
 
 interface NavbarProps {
   onOpenSyncModal: () => void;
   onOpenSettingsModal: () => void;
-  onOpenSnapshotModal?: () => void;
-  onOpenProfileModal: () => void;
   onOpenTeamSharingModal: () => void;
   onOpenAboutModal: () => void;
-  onNavigateToAccounts: () => void;
 }
 
 export const Navbar: React.FC<NavbarProps> = ({
   onOpenSyncModal,
   onOpenSettingsModal,
-  onOpenProfileModal,
   onOpenTeamSharingModal,
   onOpenAboutModal,
-  onNavigateToAccounts,
 }) => {
   const {
     currentWorkspace,
@@ -47,15 +37,11 @@ export const Navbar: React.FC<NavbarProps> = ({
     setCurrentWorkspaceId,
     syncStatus,
     isOnline,
-    triggerManualSync,
     createWorkspace,
     language,
-    setLanguage,
     conflicts,
     userProfile,
     isLiveGoogleAuth,
-    auth,
-    signOut,
   } = useApp();
 
   const isEn = language === 'en';
@@ -64,12 +50,20 @@ export const Navbar: React.FC<NavbarProps> = ({
   const [showWorkspaceMenu, setShowWorkspaceMenu] = useState(false);
   const [showHamburgerMenu, setShowHamburgerMenu] = useState(false);
   const [isCreatingWorkspace, setIsCreatingWorkspace] = useState(false);
+  const [newWsDescription, setNewWsDescription] = useState('');
   const [newWsName, setNewWsName] = useState('');
   const [newWsKind, setNewWsKind] = useState<'personal' | 'business'>('business');
-  const [isSyncing, setIsSyncing] = useState(false);
 
   const hamburgerRef = useRef<HTMLDivElement>(null);
   const workspaceRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    const openCreate = () => { setShowWorkspaceMenu(true); setIsCreatingWorkspace(true); };
+    const openManage = () => setShowWorkspaceManager(true);
+    window.addEventListener('hisab-create-workspace', openCreate);
+    window.addEventListener('hisab-manage-workspaces', openManage);
+    return () => { window.removeEventListener('hisab-create-workspace', openCreate); window.removeEventListener('hisab-manage-workspaces', openManage); };
+  }, []);
 
   // Close menus on outside click or escape key
   useEffect(() => {
@@ -97,25 +91,15 @@ export const Navbar: React.FC<NavbarProps> = ({
     };
   }, []);
 
-  const handleManualSyncClick = async (e: React.MouseEvent) => {
-    e.stopPropagation();
-    if (!isOnline || isSyncing) return;
-    setIsSyncing(true);
-    try {
-      await triggerManualSync();
-    } finally {
-      setIsSyncing(false);
-    }
-  };
-
   const handleCreateWorkspaceSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!newWsName.trim()) return;
     let ws;
-    try { ws = await createWorkspace(newWsName.trim(), newWsKind); }
+    try { ws = await createWorkspace(newWsName.trim(), newWsKind, newWsDescription); }
     catch { alert(isEn ? 'Workspace could not be saved. Please retry.' : 'খাতা সংরক্ষণ হয়নি। আবার চেষ্টা করুন।'); return; }
     setCurrentWorkspaceId(ws.id);
     setNewWsName('');
+    setNewWsDescription('');
     setIsCreatingWorkspace(false);
     setShowWorkspaceMenu(false);
   };
@@ -126,6 +110,15 @@ export const Navbar: React.FC<NavbarProps> = ({
    * actual sync failures, pending changes, and confirmed durable persistence.
    */
   const getHonestSyncBadge = () => {
+    if (import.meta.env.VITE_SUPABASE_AUTH_ENABLED === 'true') {
+      return {
+        icon: ShieldCheck,
+        text: isEn ? 'Saved on device' : 'ডিভাইসে সংরক্ষিত',
+        bgColor: 'bg-slate-50 text-slate-700 border-slate-200',
+        dotColor: 'bg-slate-400',
+        title: isEn ? 'Local records · open account settings' : 'স্থানীয় হিসাব · অ্যাকাউন্ট সেটিংস খুলুন',
+      };
+    }
     if (!isOnline) {
       return {
         icon: CloudOff,
@@ -135,22 +128,13 @@ export const Navbar: React.FC<NavbarProps> = ({
         title: isEn ? 'Offline mode: changes saved locally in SQLite' : 'অফলাইন মোড: সমস্ত হিসাব ডিভাইসে সুরক্ষিত',
       };
     }
-    if (!isLiveGoogleAuth && !userProfile) {
+    if (!isLiveGoogleAuth || syncStatus.state === 'auth_required') {
       return {
         icon: CloudOff,
-        text: isEn ? 'Drive Not Connected' : 'ড্রাইভ যুক্ত নয়',
+        text: userProfile ? (isEn ? 'Reconnect Drive' : 'ড্রাইভ পুনরায় যুক্ত করুন') : (isEn ? 'Drive Not Connected' : 'ড্রাইভ যুক্ত নয়'),
         bgColor: 'bg-amber-50 text-amber-800 border-amber-300',
         dotColor: 'bg-amber-500',
         title: isEn ? 'Connect Google Drive for cross-device sync' : 'সিঙ্ক করার জন্য গুগল ড্রাইভ যুক্ত করুন',
-      };
-    }
-    if (auth.isTokenExpired() && isLiveGoogleAuth) {
-      return {
-        icon: AlertTriangle,
-        text: isEn ? 'Auth Expired' : 'লগইন মেয়াদোত্তীর্ণ',
-        bgColor: 'bg-rose-50 text-rose-800 border-rose-300',
-        dotColor: 'bg-rose-500 animate-pulse',
-        title: isEn ? 'Google token expired. Tap to reconnect.' : 'গুগল টোকেনের মেয়াদ শেষ হয়েছে। পুনরায় যুক্ত করুন।',
       };
     }
     if (conflicts.some((c) => c.status === 'needs_review')) {
@@ -162,7 +146,7 @@ export const Navbar: React.FC<NavbarProps> = ({
         title: isEn ? 'Cloud conflict requires your review' : 'ক্লাউড সংঘাত পর্যালোচনা প্রয়োজন',
       };
     }
-    if (syncStatus.state === 'syncing' || isSyncing) {
+    if (syncStatus.state === 'syncing') {
       return {
         icon: RefreshCw,
         text: isEn ? 'Syncing...' : 'সিঙ্ক হচ্ছে...',
@@ -171,13 +155,22 @@ export const Navbar: React.FC<NavbarProps> = ({
         title: isEn ? 'Synchronizing with Google Drive' : 'গুগল ড্রাইভের সাথে সিঙ্ক হচ্ছে',
       };
     }
+    if (syncStatus.state === 'quota_full') {
+      return {
+        icon: AlertTriangle,
+        text: isEn ? 'Drive storage full' : 'ড্রাইভের স্টোরেজ পূর্ণ',
+        bgColor: 'bg-amber-50 text-amber-800 border-amber-300',
+        dotColor: 'bg-amber-500',
+        title: isEn ? 'Drive storage is full. Open sync details.' : 'ড্রাইভের স্টোরেজ পূর্ণ। সিঙ্কের বিস্তারিত দেখুন।',
+      };
+    }
     if (syncStatus.state === 'error_retryable' || !!syncStatus.lastError) {
       return {
         icon: AlertTriangle,
         text: isEn ? 'Sync Failed / Retry' : 'সিঙ্ক ব্যর্থ / পুনরায় চেষ্টা',
         bgColor: 'bg-rose-50 text-rose-800 border-rose-300',
         dotColor: 'bg-rose-500',
-        title: syncStatus.lastError || (isEn ? 'Sync error occurred' : 'সিঙ্কে ত্রুটি ঘটেছে'),
+        title: isEn ? 'Sync failed. Open details to retry.' : 'সিঙ্ক ব্যর্থ। বিস্তারিত খুলে আবার চেষ্টা করুন।',
       };
     }
     if (syncStatus.pendingOutboxCount > 0) {
@@ -192,6 +185,15 @@ export const Navbar: React.FC<NavbarProps> = ({
       };
     }
 
+    if (syncStatus.state !== 'synced_verified' || !syncStatus.lastSuccessfulSyncAt) {
+      return {
+        icon: Cloud,
+        text: isEn ? 'Waiting to sync' : 'সিঙ্কের অপেক্ষায়',
+        bgColor: 'bg-slate-50 text-slate-600 border-slate-200',
+        dotColor: 'bg-slate-400',
+        title: isEn ? 'Open Google Drive sync details' : 'গুগল ড্রাইভ সিঙ্কের বিস্তারিত দেখুন',
+      };
+    }
     const lastSyncTimeStr = syncStatus.lastSuccessfulSyncAt
       ? new Date(syncStatus.lastSuccessfulSyncAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
       : '';
@@ -293,6 +295,7 @@ export const Navbar: React.FC<NavbarProps> = ({
                           className="w-full px-2.5 py-1.5 text-xs bg-white border border-slate-300 rounded-lg mb-2 focus:outline-none focus:ring-2 focus:ring-blue-600"
                           autoFocus
                         />
+                        <label className="block mb-2 text-[11px] text-slate-500">{isEn ? 'Description (optional)' : 'বিবরণ (ঐচ্ছিক)'}<textarea value={newWsDescription} maxLength={500} onChange={e => setNewWsDescription(e.target.value)} rows={2} className="mt-1 w-full rounded-lg border border-slate-200 p-2 text-slate-700" /></label>
                         <div className="flex gap-3 mb-2.5 text-xs">
                           <label className="flex items-center gap-1.5 cursor-pointer text-slate-700">
                             <input
@@ -342,54 +345,15 @@ export const Navbar: React.FC<NavbarProps> = ({
             <button
               type="button"
               onClick={onOpenSyncModal}
-              className={`flex items-center gap-1.5 px-2 py-1 text-xs font-medium rounded-lg transition-colors border ${badge.bgColor} min-h-[40px]`}
+              className={`flex items-center justify-center gap-1.5 px-2 py-1 text-xs font-medium rounded-lg transition-colors border ${badge.bgColor} min-h-[44px] min-w-[44px]`}
               title={badge.title}
-              aria-label={badge.text}
+              aria-label={`${badge.text}. ${import.meta.env.VITE_SUPABASE_AUTH_ENABLED === 'true' ? (isEn ? 'Open account settings' : 'অ্যাকাউন্ট সেটিংস খুলুন') : (isEn ? 'Open sync details' : 'সিঙ্কের বিস্তারিত খুলুন')}`}
+              aria-haspopup="dialog"
             >
               <span className={`w-1.5 h-1.5 rounded-full shrink-0 ${badge.dotColor}`} />
               <span className="hidden xs:inline text-[11px] font-medium max-w-[110px] truncate">{badge.text}</span>
-              <BadgeIcon className="w-3.5 h-3.5 shrink-0 xs:hidden text-slate-600" />
+              <BadgeIcon className={`w-3.5 h-3.5 shrink-0 xs:hidden ${syncStatus.state === 'syncing' ? 'motion-safe:animate-spin' : ''}`} />
             </button>
-
-            {/* Quick Manual Sync Refresh */}
-            <button
-              type="button"
-              onClick={handleManualSyncClick}
-              disabled={!isOnline || isSyncing}
-              className="p-2 rounded-lg text-slate-500 hover:text-slate-900 hover:bg-slate-100 transition-colors disabled:opacity-40 min-h-[44px] min-w-[44px] flex items-center justify-center"
-              title={isEn ? 'Sync Now' : 'এখনই সিঙ্ক করুন'}
-              aria-label="Sync Now"
-            >
-              <RefreshCw className={`w-4 h-4 ${isSyncing ? 'animate-spin text-blue-700' : ''}`} />
-            </button>
-
-            {/* Language Switch: EN / বাং */}
-            <div className="flex items-center rounded-lg border border-slate-200 bg-slate-100/80 p-0.5 text-[11px] font-semibold">
-              <button
-                type="button"
-                onClick={() => setLanguage('en')}
-                className={`px-1.5 py-1 rounded-md transition-all min-h-[36px] ${
-                  language === 'en'
-                    ? 'bg-white text-slate-900 shadow-2xs font-bold'
-                    : 'text-slate-500 hover:text-slate-900'
-                }`}
-                title="English"
-              >
-                EN
-              </button>
-              <button
-                type="button"
-                onClick={() => setLanguage('bn')}
-                className={`px-1.5 py-1 rounded-md transition-all min-h-[36px] ${
-                  language === 'bn'
-                    ? 'bg-white text-slate-900 shadow-2xs font-bold'
-                    : 'text-slate-500 hover:text-slate-900'
-                }`}
-                title="বাংলা"
-              >
-                বাং
-              </button>
-            </div>
 
             {/* FEAT-007: Top-Right ☰ Hamburger Menu */}
             <div className="relative" ref={hamburgerRef}>
@@ -436,76 +400,8 @@ export const Navbar: React.FC<NavbarProps> = ({
                     </div>
                   </div>
 
-                  {/* Primary Nav Actions */}
                   <div className="py-1">
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setShowHamburgerMenu(false);
-                        onOpenProfileModal();
-                      }}
-                      className="w-full px-3 py-2 text-left flex items-center gap-2.5 text-slate-700 hover:bg-slate-50 hover:text-slate-900 transition-colors min-h-[44px]"
-                      role="menuitem"
-                    >
-                      <User className="w-4 h-4 text-slate-500" />
-                      <span className="font-medium">{isEn ? 'My Profile' : 'আমার প্রোফাইল'}</span>
-                    </button>
-
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setShowHamburgerMenu(false);
-                        onNavigateToAccounts();
-                      }}
-                      className="w-full px-3 py-2 text-left flex items-center gap-2.5 text-slate-700 hover:bg-slate-50 hover:text-slate-900 transition-colors min-h-[44px]"
-                      role="menuitem"
-                    >
-                      <Wallet className="w-4 h-4 text-slate-500" />
-                      <span className="font-medium">{isEn ? 'Accounts & Workspaces' : 'অ্যাকাউন্ট ও খাতা'}</span>
-                    </button>
-
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setShowHamburgerMenu(false);
-                        onOpenSyncModal();
-                      }}
-                      className="w-full px-3 py-2 text-left flex items-center gap-2.5 text-slate-700 hover:bg-slate-50 hover:text-slate-900 transition-colors min-h-[44px]"
-                      role="menuitem"
-                    >
-                      <Cloud className="w-4 h-4 text-blue-600" />
-                      <div className="flex-1 flex items-center justify-between">
-                        <span className="font-medium">{isEn ? 'Google Drive Sync & Backup' : 'গুগল ড্রাইভ সিঙ্ক ও ব্যাকআপ'}</span>
-                        {badge.dotColor && <span className={`w-2 h-2 rounded-full ${badge.dotColor}`} />}
-                      </div>
-                    </button>
-
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setShowHamburgerMenu(false);
-                        onOpenSettingsModal();
-                      }}
-                      className="w-full px-3 py-2 text-left flex items-center gap-2.5 text-slate-700 hover:bg-slate-50 hover:text-slate-900 transition-colors min-h-[44px]"
-                      role="menuitem"
-                    >
-                      <Settings className="w-4 h-4 text-slate-500" />
-                      <span className="font-medium">{isEn ? 'Settings & Preferences' : 'সেটিংস ও পছন্দসমূহ'}</span>
-                    </button>
-
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setShowHamburgerMenu(false);
-                        onOpenSettingsModal();
-                      }}
-                      className="w-full px-3 py-2 text-left flex items-center gap-2.5 text-slate-700 hover:bg-slate-50 hover:text-slate-900 transition-colors min-h-[44px]"
-                      role="menuitem"
-                    >
-                      <Shield className="w-4 h-4 text-indigo-600" />
-                      <span className="font-medium">{isEn ? 'Security & Privacy' : 'নিরাপত্তা ও গোপনীয়তা'}</span>
-                    </button>
-
+                    <button type="button" role="menuitem" onClick={() => { setShowHamburgerMenu(false); onOpenSettingsModal(); }} className="flex min-h-12 w-full items-center gap-2.5 px-3 py-2 text-left text-slate-700 hover:bg-slate-50"><Settings className="h-4 w-4 text-slate-500" /><span className="font-medium">{isEn ? 'Settings' : 'সেটিংস'}</span></button>
                     {/* Team & Sharing (Business Workspace) */}
                     <button
                       type="button"
@@ -543,22 +439,7 @@ export const Navbar: React.FC<NavbarProps> = ({
                       <span className="font-medium">{isEn ? 'About' : 'অ্যাপ পরিচিতি'}</span>
                     </button>
 
-                    {userProfile && (
-                      <button
-                        type="button"
-                        onClick={() => {
-                          setShowHamburgerMenu(false);
-                          if (window.confirm(isEn ? 'Are you sure you want to sign out?' : 'আপনি কি সাইন আউট করতে চান?')) {
-                            signOut();
-                          }
-                        }}
-                        className="w-full px-3 py-2 text-left flex items-center gap-2.5 text-rose-600 hover:bg-rose-50 transition-colors min-h-[44px]"
-                        role="menuitem"
-                      >
-                        <LogOut className="w-4 h-4" />
-                        <span className="font-medium">{isEn ? 'Sign Out' : 'লগআউট'}</span>
-                      </button>
-                    )}
+
                   </div>
                 </div>
               )}

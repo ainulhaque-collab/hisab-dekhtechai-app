@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useMemo, useState } from 'react';
 import { useApp } from '../context/AppContext';
 import { formatBDT, formatAccountTitle } from '../domain/money';
 import { getT } from '../locales/i18n';
@@ -18,10 +18,11 @@ import {
   Building,
   Smartphone,
   Banknote,
-  PieChart
+  Target
 } from 'lucide-react';
 import { JournalTransaction } from '../contracts/types';
 import { Users, UserPlus } from 'lucide-react';
+import { DashboardCharts } from './DashboardCharts';
 
 interface DashboardTabProps {
   onNavigateToAdd: () => void;
@@ -29,6 +30,7 @@ interface DashboardTabProps {
   onSelectTransaction: (tx: JournalTransaction) => void;
   onOpenSyncModal: () => void;
   onOpenPartiesModal?: () => void;
+  onOpenSavingsGoals?: () => void;
 }
 
 export const DashboardTab: React.FC<DashboardTabProps> = ({
@@ -37,12 +39,20 @@ export const DashboardTab: React.FC<DashboardTabProps> = ({
   onSelectTransaction,
   onOpenSyncModal,
   onOpenPartiesModal,
+  onOpenSavingsGoals,
 }) => {
-  const { dashboardData, currentWorkspace, parties, language, syncStatus, isOnline, triggerManualSync } =
+  const { db, dashboardData, currentWorkspace, parties, language, syncStatus, isOnline, triggerManualSync } =
     useApp();
   const [showBalance, setShowBalance] = useState(true);
   const [isSyncing, setIsSyncing] = useState(false);
   const t = getT(language);
+  const savings = useMemo(() => {
+    if (!currentWorkspace || !dashboardData) return null;
+    try { return db.getSavingsProjection(currentWorkspace.id); } catch { return null; }
+  }, [db, currentWorkspace?.id, dashboardData]);
+  const activeGoals = savings?.goals.filter(item => !item.deleted && !item.goal.archived) || [];
+  const savedMinor = activeGoals.reduce((total, item) => total + BigInt(item.fundedMinor), 0n);
+  const shortfall = activeGoals.some(item => BigInt(item.shortfallMinor) > 0n);
 
   if (!dashboardData) {
     return (
@@ -54,8 +64,9 @@ export const DashboardTab: React.FC<DashboardTabProps> = ({
 
   const handleSyncClick = async () => {
     setIsSyncing(true);
-    await triggerManualSync();
-    setIsSyncing(false);
+    try { await triggerManualSync(); }
+    catch { onOpenSyncModal(); }
+    finally { setIsSyncing(false); }
   };
 
   const getAccountIcon = (kind: string) => {
@@ -111,24 +122,24 @@ export const DashboardTab: React.FC<DashboardTabProps> = ({
             <span className="truncate">
               {formatAccountTitle(currentWorkspace?.name || '', language)} · {t.totalBalance}
             </span>
-            <button
-              type="button"
-              onClick={() => setShowBalance(!showBalance)}
-              className="p-1 hover:text-white transition-colors"
-              aria-label={showBalance ? 'Hide balance' : 'Show balance'}
-            >
-              {showBalance ? <EyeOff className="w-3.5 h-3.5" /> : <Eye className="w-3.5 h-3.5 text-slate-400" />}
-            </button>
           </div>
           <span className="text-[10px] font-mono tracking-wider px-2 py-0.5 rounded-md bg-slate-800 text-slate-300 border border-slate-700">
             BDT
           </span>
         </div>
 
-        <div className="text-3xl sm:text-4xl font-bold tracking-tight mb-4 tabular-nums text-white">
-          {showBalance
+        <div className="mb-4 flex items-center gap-2">
+          <span className="min-w-0 break-all text-3xl sm:text-4xl font-bold tracking-tight tabular-nums text-white">{showBalance
             ? formatBDT(dashboardData.totalConsolidatedBalanceMinor, { locale: language })
-            : '৳ ••••••••'}
+            : '৳ ••••••••'}</span>
+          <button
+            type="button"
+            onClick={() => setShowBalance(value => !value)}
+            className="flex h-11 w-11 shrink-0 items-center justify-center rounded-lg text-slate-400 transition-colors hover:bg-slate-800 hover:text-white focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-400"
+            aria-label={showBalance ? (language === 'en' ? 'Hide balance' : 'ব্যালেন্স লুকান') : (language === 'en' ? 'Show balance' : 'ব্যালেন্স দেখান')}
+          >
+            {showBalance ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+          </button>
         </div>
 
         {/* 3-Metric Summary Strip */}
@@ -180,6 +191,19 @@ export const DashboardTab: React.FC<DashboardTabProps> = ({
           </div>
         </div>
       </div>
+
+      <DashboardCharts key={currentWorkspace?.id} data={dashboardData} language={language} visible={showBalance} />
+
+      {onOpenSavingsGoals && <button type="button" onClick={onOpenSavingsGoals}
+        className="flex w-full items-center gap-3 rounded-2xl border border-slate-200/80 bg-white p-4 text-left shadow-xs transition hover:border-blue-300">
+        <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-blue-50 text-blue-700"><Target className="h-5 w-5" /></span>
+        <span className="min-w-0 flex-1"><span className="block text-sm font-semibold">{language === 'en' ? 'Savings goals' : 'সঞ্চয়ের লক্ষ্য'}</span>
+          <span className={`mt-1 block text-xs ${shortfall ? 'text-amber-700' : 'text-slate-500'}`}>
+            {!savings ? (language === 'en' ? 'Open to check your savings goals' : 'লক্ষ্যের অবস্থা দেখতে খুলুন') : shortfall ? (language === 'en' ? 'Wallet balance changed · review allocations' : 'ওয়ালেটের ব্যালান্স বদলেছে · বরাদ্দ দেখুন') : activeGoals.length
+              ? `${showBalance ? formatBDT(savedMinor, { locale: language }) : '••••'} · ${activeGoals.length.toLocaleString(language === 'en' ? 'en-GB' : 'bn-BD')} ${language === 'en' ? 'active goals' : 'সক্রিয় লক্ষ্য'}`
+              : (language === 'en' ? 'Plan a purchase or build an emergency fund' : 'কেনাকাটার লক্ষ্য বা জরুরি তহবিল তৈরি করুন')}
+          </span></span><ChevronRight className="h-4 w-4 shrink-0 text-slate-400" />
+      </button>}
 
       {/* Business Workspace: Members Strip */}
       {currentWorkspace?.kind === 'business' && (
@@ -267,39 +291,6 @@ export const DashboardTab: React.FC<DashboardTabProps> = ({
           })}
         </div>
       </div>
-
-      {/* Top Expense Categories */}
-      {dashboardData.topExpenseCategories.length > 0 && (
-        <div className="bg-white p-4 rounded-xl border border-slate-200 shadow-xs">
-          <div className="flex items-center justify-between mb-3">
-            <div className="flex items-center gap-1.5 text-sm font-bold text-slate-800">
-              <PieChart className="w-4 h-4 text-blue-700" />
-              <span>{language === 'en' ? 'Top Expense Categories (This Month)' : 'শীর্ষ খরচ খাত (এই মাসে)'}</span>
-            </div>
-            <span className="text-xs text-slate-500 font-medium">{language === 'en' ? 'Share' : 'শতাংশ'}</span>
-          </div>
-
-          <div className="space-y-2.5">
-            {dashboardData.topExpenseCategories.map((cat) => (
-              <div key={cat.categoryId} className="text-xs">
-                <div className="flex items-center justify-between mb-1">
-                  <span className="font-medium text-slate-700">{cat.name}</span>
-                  <span className="font-semibold text-slate-900 tabular-nums">
-                    {formatBDT(cat.amountMinor, { locale: language, showDecimals: false })} (
-                    {cat.percentage}%)
-                  </span>
-                </div>
-                <div className="w-full h-1.5 bg-slate-100 rounded-full overflow-hidden">
-                  <div
-                    className="h-full bg-blue-600 rounded-full transition-all duration-500"
-                    style={{ width: `${Math.min(cat.percentage, 100)}%` }}
-                  />
-                </div>
-              </div>
-            ))}
-          </div>
-        </div>
-      )}
 
       {/* Recent Transactions List */}
       <div className="bg-white rounded-xl border border-slate-200/80 shadow-xs overflow-hidden">
