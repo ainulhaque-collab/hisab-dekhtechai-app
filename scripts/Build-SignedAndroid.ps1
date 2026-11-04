@@ -4,7 +4,8 @@ param(
     [Parameter(Mandatory = $true)][ValidatePattern('^[A-Za-z0-9][A-Za-z0-9.+-]{0,63}$')][string]$VersionName,
     [switch]$LowMemory,
     [switch]$BridgeTestOnly,
-    [string]$AIServiceOrigin = $env:VITE_AI_API_BASE_URL
+    [string]$AIServiceOrigin = $env:VITE_AI_API_BASE_URL,
+    [string]$LocalResourcesRoot
 )
 $ErrorActionPreference = 'Stop'
 $nativeAIOrigin = $null
@@ -23,7 +24,8 @@ if ([Security.Principal.WindowsIdentity]::GetCurrent().Name -match '\\CodexSandb
     throw 'Build under the desktop owner Windows account so the private signing credentials can be decrypted.'
 }
 $workspaceRoot = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot '..'))
-$toolsEnvironment = Join-Path $workspaceRoot '.local-tools/environment.json'
+$resourcesRoot = if ($LocalResourcesRoot) { [IO.Path]::GetFullPath($LocalResourcesRoot) } else { $workspaceRoot }
+$toolsEnvironment = Join-Path $resourcesRoot '.local-tools/environment.json'
 if (Test-Path -LiteralPath $toolsEnvironment) {
     $toolsConfig = Get-Content -LiteralPath $toolsEnvironment -Raw | ConvertFrom-Json
     $env:JAVA_HOME = $toolsConfig.javaHome
@@ -31,7 +33,7 @@ if (Test-Path -LiteralPath $toolsEnvironment) {
     $env:GRADLE_USER_HOME = $toolsConfig.gradleUserHome
     $env:PATH = "$(Join-Path $toolsConfig.javaHome 'bin');$env:PATH"
 }
-$signingRoot = Join-Path $workspaceRoot '.local-signing'
+$signingRoot = Join-Path $resourcesRoot '.local-signing'
 $storePath = Join-Path $signingRoot 'hisab-release.p12'
 $credentialsPath = Join-Path $signingRoot 'credentials.dpapi.json'
 $publicPath = Join-Path $signingRoot 'public-certificate.json'
@@ -82,7 +84,7 @@ if (!$BridgeTestOnly) {
     # Only validated public Firebase client configuration enters the APK.
     # Capture silently: never print config/credentials in build logs.
     Push-Location $workspaceRoot
-    try { $pushClientJson = & node.exe scripts/Prepare-FirebasePush.mjs --android }
+    try { $pushClientJson = & node.exe scripts/Prepare-FirebasePush.mjs --android --resources-root $resourcesRoot }
     finally { Pop-Location }
     if ($LASTEXITCODE -ne 0) { throw 'Firebase client configuration is missing or invalid. No APK was built.' }
     $pushClient = $pushClientJson | ConvertFrom-Json
