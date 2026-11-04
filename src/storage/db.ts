@@ -742,7 +742,7 @@ export class LocalDatabase {
       entityId,
       type: opType,
       createdAtUtc: new Date().toISOString(),
-      payload,
+      payload: structuredClone(payload),
       contentSha256: '',
     };
     this.state.syncOperations.set(opId, op);
@@ -1250,6 +1250,7 @@ export class LocalDatabase {
       color,
     };
     this.state.categories.set(cat.id, cat);
+    this.queueSyncOp('category.create', cat.id, { category: cat });
     this.autoPersist();
     return cat;
   }

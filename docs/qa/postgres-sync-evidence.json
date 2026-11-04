@@ -1,0 +1,40 @@
+{
+  "date": "2026-11-04",
+  "milestone": "PR-3a unmounted durable outbox and core command pipeline",
+  "parent": "a043a3046b843bc168d9f1a04387df2c527358b0",
+  "local": {
+    "lint": "PASS",
+    "appTests": {"total": 97, "passed": 96, "failed": 0, "skipped": 1, "skippedReason": "native multi-connection commit order is CI-only"},
+    "portableSqlTests": {"passed": 11, "failed": 0, "engine": "PostgreSQL WASM"},
+    "build": "PASS; existing large-chunk warning remains",
+    "storage": "real file-backed node:sqlite; not Capacitor hardware"
+  },
+  "verifiedSourceCommit": "bb22c438d40d717a35c46eaac8ac1b9917715a98",
+  "webCi": {"result": "PASS", "run": 93, "url": "https://github.com/ainulhaque-collab/hisab-dekhtechai-app/actions/runs/41823476666"},
+  "nativeCi": {
+    "result": "PASS",
+    "engine": "native PostgreSQL 17",
+    "portableSqlTestsPassed": 12,
+    "httpSqliteSyncTestsPassed": 12,
+    "skipped": 0,
+    "concurrentCommitOrder": "PASS with separate writer connections and reader",
+    "dumpRestoreTables": 10,
+    "financeAndSyncFingerprints": "PASS",
+    "restoredCursorNewPushDuplicateAndPull": "PASS",
+    "markers": ["NATIVE_PG_DUMP_RESTORE_PASS", "SYNC_CURSOR_RESTORE_PASS"],
+    "job": "https://github.com/ainulhaque-collab/hisab-dekhtechai-app/actions/runs/41823476666/job/126552170549"
+  },
+  "hostedMigrationApplied": false,
+  "appProviderMounted": false,
+  "apkReplaced": false,
+  "customerDataUploaded": false,
+  "productionChanged": false,
+  "remainingActivationGates": [
+    "advanced feature branch and native SQLite fixes reconciled",
+    "all existing domain command families preserved",
+    "verified Auth gateway/session lifecycle and workspace discovery",
+    "consented legacy-ID/owner migration and upgrade proof",
+    "application write arbitration and cross-tab fencing",
+    "hosted rollback-only isolation and device/browser acceptance"
+  ]
+}
