@@ -21,6 +21,8 @@ import { PartiesModal } from './components/PartiesModal';
 import { ProfileModal } from './components/ProfileModal';
 import { TeamSharingModal } from './components/TeamSharingModal';
 import { AboutModal } from './components/AboutModal';
+import { SavingsGoalsModal } from './components/SavingsGoalsModal';
+import { SavingsLoansModal } from './components/SavingsLoansModal';
 import { PinLockScreen } from './components/PinLockScreen';
 import { pinLock } from './security/pinLock';
 import { JournalTransaction } from './contracts/types';
@@ -77,6 +79,7 @@ class ErrorBoundary extends React.Component<ErrorBoundaryProps, ErrorBoundarySta
 }
 
 function MainApp() {
+  const { currentWorkspace, language } = useApp();
   const [activeTab, setActiveTab] = useState<TabType>('home');
   const [selectedTx, setSelectedTx] = useState<JournalTransaction | null>(null);
   const [isUnlocked, setIsUnlocked] = useState(() => !pinLock.isEnabled());
@@ -99,6 +102,9 @@ function MainApp() {
   const [isProfileModalOpen, setIsProfileModalOpen] = useState(false);
   const [isTeamSharingModalOpen, setIsTeamSharingModalOpen] = useState(false);
   const [isAboutModalOpen, setIsAboutModalOpen] = useState(false);
+  const [isSavingsGoalsOpen, setIsSavingsGoalsOpen] = useState(false);
+  const [savingsLoanGoalId, setSavingsLoanGoalId] = useState<string | undefined>();
+  const [isSavingsLoansOpen, setIsSavingsLoansOpen] = useState(false);
 
   if (!isUnlocked) {
     return <PinLockScreen onUnlocked={() => setIsUnlocked(true)} />;
@@ -115,16 +121,15 @@ function MainApp() {
       <Navbar
         onOpenSyncModal={() => setIsSyncModalOpen(true)}
         onOpenSettingsModal={() => setIsSettingsModalOpen(true)}
-        onOpenSnapshotModal={() => setIsSnapshotModalOpen(true)}
-        onOpenProfileModal={() => setIsProfileModalOpen(true)}
         onOpenTeamSharingModal={() => setIsTeamSharingModalOpen(true)}
         onOpenAboutModal={() => setIsAboutModalOpen(true)}
-        onNavigateToAccounts={() => setActiveTab('accounts')}
       />
 
       {/* Main Content Area */}
       <ErrorBoundary>
         <main className="flex-1 max-w-lg w-full mx-auto px-4 pt-4">
+          {!currentWorkspace && <div className="my-10 rounded-2xl border border-dashed border-slate-200 bg-white p-7 text-center"><h1 className="text-base font-bold">{language === 'en' ? 'Start with a workspace' : 'একটি নতুন হিসাব খাতা তৈরি করুন'}</h1><p className="my-3 text-xs leading-relaxed text-slate-500">{language === 'en' ? 'Your archived records are safe. Create a new workspace or restore one from workspace management.' : 'আর্কাইভ করা হিসাব সুরক্ষিত আছে। নতুন খাতা তৈরি করুন অথবা খাতা পরিচালনা থেকে আগের খাতা ফিরিয়ে আনুন।'}</p><button className="rounded-xl bg-blue-700 px-4 py-3 text-xs font-semibold text-white" onClick={() => window.dispatchEvent(new Event('hisab-create-workspace'))}>{language === 'en' ? 'Create workspace' : 'নতুন খাতা তৈরি করুন'}</button></div>}
+          {currentWorkspace && <>
           {activeTab === 'home' && (
             <DashboardTab
               onNavigateToAdd={() => setActiveTab('add')}
@@ -132,13 +137,14 @@ function MainApp() {
               onSelectTransaction={handleSelectTransactionFromDashboard}
               onOpenSyncModal={() => setIsSyncModalOpen(true)}
               onOpenPartiesModal={() => setIsPartiesModalOpen(true)}
+              onOpenSavingsGoals={() => setIsSavingsGoalsOpen(true)}
             />
           )}
 
           {activeTab === 'accounts' && <AccountsTab />}
 
           {activeTab === 'add' && (
-            <AddTransactionTab onSuccess={() => setActiveTab('home')} />
+            <AddTransactionTab key={currentWorkspace.id} onSuccess={() => setActiveTab('home')} />
           )}
 
           {activeTab === 'history' && (
@@ -148,7 +154,8 @@ function MainApp() {
             />
           )}
 
-          {activeTab === 'reports' && <ReportsTab />}
+          {activeTab === 'reports' && <ReportsTab onSelectTransaction={handleSelectTransactionFromDashboard} />}
+          </>}
         </main>
       </ErrorBoundary>
 
@@ -182,7 +189,9 @@ function MainApp() {
       <SettingsModal
         isOpen={isSettingsModalOpen}
         onClose={() => setIsSettingsModalOpen(false)}
-        onOpenAuthModal={() => setIsAuthModalOpen(true)}
+        onOpenProfileModal={() => setIsProfileModalOpen(true)}
+        onOpenSyncModal={() => setIsSyncModalOpen(true)}
+        onOpenSnapshotModal={() => setIsSnapshotModalOpen(true)}
       />
 
       <AuthModal
@@ -209,6 +218,8 @@ function MainApp() {
         isOpen={isAboutModalOpen}
         onClose={() => setIsAboutModalOpen(false)}
       />
+      {isSavingsGoalsOpen && <SavingsGoalsModal onClose={() => setIsSavingsGoalsOpen(false)} onOpenLoans={goalId => { setSavingsLoanGoalId(goalId); setIsSavingsGoalsOpen(false); setIsSavingsLoansOpen(true); }} />}
+      {isSavingsLoansOpen && <SavingsLoansModal initialGoalId={savingsLoanGoalId} onClose={() => { setIsSavingsLoansOpen(false); setIsSavingsGoalsOpen(true); }} />}
     </div>
   );
 }

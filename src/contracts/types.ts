@@ -7,10 +7,20 @@ export type PaisaString = string; // Integer minor units represented as string e
 
 export type WorkspaceKind = 'personal' | 'business';
 
+/** Private, non-financial workspace media. A null image retains its removal revision. */
+export interface WorkspaceImage {
+  dataUrl: string | null;
+  sha256: string | null;
+  version: number;
+  revisionId: UUID;
+}
+
 export interface Workspace {
   id: UUID;
   ownerSubjectHash: string;
   name: string;
+  description?: string;
+  image?: WorkspaceImage;
   kind: WorkspaceKind;
   currency: 'BDT';
   archivedAt?: string | null;
@@ -18,7 +28,7 @@ export interface Workspace {
   deletedAt?: string | null; // Retained tombstone prevents older clients resurrecting deleted empty workspaces.
 }
 
-import { AccountClassification } from './ledger';
+import type { AccountClassification } from './ledger.js';
 export type { AccountClassification };
 
 export type AccountKind = 'cash' | 'bank' | 'bkash' | 'nagad' | 'rocket' | 'other';
@@ -129,8 +139,10 @@ export interface JournalTransaction {
   id: UUID;
   workspaceId: UUID;
   transactionType: TransactionType;
-  effectiveDate: string; // YYYY-MM-DD in Asia/Dhaka
+  effectiveDate: string; // YYYY-MM-DD at occurrence; legacy records retain their existing date.
   occurredAtUtc: string; // ISO-8601 UTC
+  occurredTimezoneOffsetMinutes?: number; // Optional for legacy records; offset at occurrence.
+  createdAtUtc?: string; // Actual entry/audit time, distinct from a user-selected occurrence.
   note?: string;
   partyId?: UUID | null; // Associated person/party in business workspace
   reversalOf?: UUID | null; // Pointer to original transaction if reversal/correction

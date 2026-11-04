@@ -13,10 +13,14 @@ import {
   buildTransferJournal,
   generateUUID
 } from '../domain/journal';
-import { SyncOperation, Category, PartyRole } from '../contracts/types';
+import { SyncOperation, Category, PartyRole, ReceiptBlob } from '../contracts/types';
 import { canonicalJson, computeSha256 } from '../sync/canonical';
 import { AccountPickerModal } from './AccountPickerModal';
 import { soundService } from '../services/soundService';
+import { resolveJournalTime } from '../domain/transactionTime';
+import { createReceiptBlob } from '../storage/receipts';
+import { AIEntryModal } from './AIEntryModal';
+import { EntryDraft } from '../ai/entryDraft';
 import {
   TrendingDown,
   TrendingUp,
@@ -33,7 +37,8 @@ import {
   Users,
   Briefcase,
   ChevronDown,
-  Wallet
+  Wallet,
+  Sparkles
 } from 'lucide-react';
 
 interface AddTransactionTabProps {
@@ -71,9 +76,15 @@ export const AddTransactionTab: React.FC<AddTransactionTabProps> = ({ onSuccess 
   );
   const [showAccountPicker, setShowAccountPicker] = useState(false);
   const [showToAccountPicker, setShowToAccountPicker] = useState(false);
+  const [isAIForm, setIsAIForm] = useState(false);
 
   // Synchronize selected account when activeAccounts or currentWorkspace changes
   useEffect(() => {
+    if (isAIForm) {
+      if (accountId && !activeAccounts.some(account => account.id === accountId)) setAccountId('');
+      if (toAccountId && (!activeAccounts.some(account => account.id === toAccountId) || toAccountId === accountId)) setToAccountId('');
+      return;
+    }
     if (activeAccounts.length > 0) {
       if (!accountId || !activeAccounts.some((a) => a.id === accountId)) {
         setAccountId(activeAccounts[0].id);
@@ -90,7 +101,7 @@ export const AddTransactionTab: React.FC<AddTransactionTabProps> = ({ onSuccess 
       setAccountId('');
       setToAccountId('');
     }
-  }, [activeAccounts, currentWorkspace?.id]);
+  }, [activeAccounts, currentWorkspace?.id, isAIForm]);
 
   const getAccountBalance = (accId: string): string => {
     const summary = dashboardData?.accountSummaries?.find((s) => s.accountId === accId);
@@ -110,20 +121,35 @@ export const AddTransactionTab: React.FC<AddTransactionTabProps> = ({ onSuccess 
   const [categoryId, setCategoryId] = useState('');
   const [subCategoryId, setSubCategoryId] = useState('');
   const [partyId, setPartyId] = useState<string>('');
-  const [effectiveDate, setEffectiveDate] = useState(() => {
-    const d = new Date();
-    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(
-      d.getDate()
-    ).padStart(2, '0')}`;
-  });
+  const [effectiveDate, setEffectiveDate] = useState('');
+  const [effectiveTime, setEffectiveTime] = useState('');
   const [note, setNote] = useState('');
   const [feeStr, setFeeStr] = useState('');
   const [receiptName, setReceiptName] = useState<string | null>(null);
-  const [receiptBase64, setReceiptBase64] = useState<string | null>(null);
+  const [receiptBlob, setReceiptBlob] = useState<ReceiptBlob | null>(null);
+  const [isReceiptLoading, setIsReceiptLoading] = useState(false);
+  const receiptSelection = useRef(0);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
   const submissionInFlight = useRef(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [successToast, setSuccessToast] = useState(false);
+  const [showAIEntry, setShowAIEntry] = useState(false);
+  const [aiDraft, setAIDraft] = useState<EntryDraft | null>(null);
+  const [aiTypeMissing, setAITypeMissing] = useState(false);
+  const [aiCurrency, setAICurrency] = useState('BDT');
+
+  const applyAIEntry = (entry: EntryDraft, image: ReceiptBlob | null) => {
+    setIsAIForm(true);
+    setAIDraft(entry); setAITypeMissing(entry.transactionType === 'unknown');
+    setAICurrency(entry.currency === 'unknown' ? '' : entry.currency);
+    if (entry.transactionType !== 'unknown') setType(entry.transactionType);
+    setAmountStr(entry.amountDecimal || ''); setNote([entry.merchant, entry.note].filter(Boolean).join(' · ').slice(0, 1000));
+    setEffectiveDate(entry.transactionDate || ''); setEffectiveTime(entry.transactionTime || '');
+    // Keep the user's current wallet. Model output has no authority to choose accounts.
+    setPartyId(''); setFeeStr('');
+    setSubCategoryId(''); setReceiptBlob(image); setReceiptName(image?.fileName || null);
+    setErrorMsg(null); setShowAIEntry(false);
+  };
 
   // Simplified Category Modal: 'category' (top-level) or 'subcategory' (child of categoryId)
   const [categoryModalMode, setCategoryModalMode] = useState<'category' | 'subcategory' | null>(null);
@@ -175,21 +201,20 @@ export const AddTransactionTab: React.FC<AddTransactionTabProps> = ({ onSuccess 
     setAmountStr(val);
   };
 
-  const handleReceiptUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+  const handleReceiptUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
-
-    if (file.size > 2 * 1024 * 1024) {
-      setErrorMsg(isEn ? 'Receipt image size must be under 2 MB' : 'রসিদের আকার ২ মেগাবাইটের কম হতে হবে');
-      return;
+    e.target.value = '';
+    const selection = ++receiptSelection.current;
+    setReceiptName(null); setReceiptBlob(null); setIsReceiptLoading(true);
+    try {
+      const blob = await createReceiptBlob(file);
+      if (selection === receiptSelection.current) { setReceiptName(blob.fileName); setReceiptBlob(blob); setErrorMsg(null); }
+    } catch {
+      if (selection === receiptSelection.current) setErrorMsg(isEn ? 'Choose a valid JPEG, PNG or WebP receipt up to 2 MB.' : 'সর্বোচ্চ ২ মেগাবাইটের সঠিক JPEG, PNG বা WebP রসিদ বেছে নিন।');
+    } finally {
+      if (selection === receiptSelection.current) setIsReceiptLoading(false);
     }
-
-    setReceiptName(file.name);
-    const reader = new FileReader();
-    reader.onload = () => {
-      setReceiptBase64(reader.result as string);
-    };
-    reader.readAsDataURL(file);
   };
 
   // Clean, single-field Category / Sub-Category creation
@@ -233,6 +258,11 @@ export const AddTransactionTab: React.FC<AddTransactionTabProps> = ({ onSuccess 
     e.preventDefault();
     setErrorMsg(null);
 
+    if (isAIForm && (aiTypeMissing || aiCurrency !== 'BDT')) {
+      setErrorMsg(isEn ? 'Choose the transaction type and BDT currency in the form.' : 'ফর্মে লেনদেনের ধরন ও BDT মুদ্রা বেছে নিন।');
+      return;
+    }
+
     if (!currentWorkspace) {
       setErrorMsg(isEn ? 'No active workspace found' : 'কোনো সক্রিয় খাতা পাওয়া যায়নি');
       return;
@@ -266,11 +296,12 @@ export const AddTransactionTab: React.FC<AddTransactionTabProps> = ({ onSuccess 
       }
     }
 
-    if (submissionInFlight.current) return;
+    if (submissionInFlight.current || isReceiptLoading) return;
     submissionInFlight.current = true;
     setIsSubmitting(true);
 
     try {
+      const timing = resolveJournalTime({ effectiveDate, effectiveTime });
       const opId = generateUUID();
       let balancedJournal;
       let opPayload: any;
@@ -286,11 +317,11 @@ export const AddTransactionTab: React.FC<AddTransactionTabProps> = ({ onSuccess 
           assetAccountId: accountId,
           expenseCategoryId: effectiveCategoryId,
           amountMinor: parsedPaisa.toString(),
-          effectiveDate,
+          ...timing,
           note: note.trim() || undefined,
           opId,
           partyId: effectivePartyId,
-          receiptBlobSha256: receiptBase64 ? 'receipt-sha256-mock' : null,
+          receiptBlobSha256: receiptBlob?.sha256 || null,
           receiptName,
         });
         opType = 'journal.post';
@@ -300,7 +331,7 @@ export const AddTransactionTab: React.FC<AddTransactionTabProps> = ({ onSuccess 
           assetAccountId: accountId,
           expenseCategoryId: effectiveCategoryId,
           amountMinor: parsedPaisa.toString(),
-          effectiveDate,
+          effectiveDate: timing.effectiveDate,
           note: note.trim() || undefined,
           partyId: effectivePartyId,
         };
@@ -310,11 +341,11 @@ export const AddTransactionTab: React.FC<AddTransactionTabProps> = ({ onSuccess 
           assetAccountId: accountId,
           revenueCategoryId: effectiveCategoryId,
           amountMinor: parsedPaisa.toString(),
-          effectiveDate,
+          ...timing,
           note: note.trim() || undefined,
           opId,
           partyId: effectivePartyId,
-          receiptBlobSha256: receiptBase64 ? 'receipt-sha256-mock' : null,
+          receiptBlobSha256: receiptBlob?.sha256 || null,
           receiptName,
         });
         opType = 'journal.post';
@@ -324,7 +355,7 @@ export const AddTransactionTab: React.FC<AddTransactionTabProps> = ({ onSuccess 
           assetAccountId: accountId,
           revenueCategoryId: effectiveCategoryId,
           amountMinor: parsedPaisa.toString(),
-          effectiveDate,
+          effectiveDate: timing.effectiveDate,
           note: note.trim() || undefined,
           partyId: effectivePartyId,
         };
@@ -346,10 +377,12 @@ export const AddTransactionTab: React.FC<AddTransactionTabProps> = ({ onSuccess 
           amountMinor: parsedPaisa.toString(),
           feeMinor: feePaisa.toString(),
           feeExpenseCategoryId: 'cat-transfer-fee',
-          effectiveDate,
+          ...timing,
           note: note.trim() || (isEn ? 'Account Transfer' : 'অ্যাকাউন্ট স্থানান্তর'),
           opId,
           partyId: effectivePartyId,
+          receiptBlobSha256: receiptBlob?.sha256 || null,
+          receiptName,
         });
         opType = 'journal.post';
         opPayload = {
@@ -359,7 +392,7 @@ export const AddTransactionTab: React.FC<AddTransactionTabProps> = ({ onSuccess 
           toAssetAccountId: toAccountId,
           amountMinor: parsedPaisa.toString(),
           feeMinor: feePaisa.toString(),
-          effectiveDate,
+          effectiveDate: timing.effectiveDate,
           note: note.trim() || (isEn ? 'Account Transfer' : 'অ্যাকাউন্ট স্থানান্তর'),
           partyId: effectivePartyId,
         };
@@ -382,15 +415,12 @@ export const AddTransactionTab: React.FC<AddTransactionTabProps> = ({ onSuccess 
         contentSha256,
       };
 
-      await db.commitJournalWithOutbox(balancedJournal, op);
+      await db.commitJournalWithOutbox(balancedJournal, op, receiptBlob);
       await db.waitForPendingWrites();
       soundService.playTransactionSuccess(type);
       refreshState();
       setSuccessToast(true);
 
-      if (isOnline) {
-        triggerManualSync().catch(console.error);
-      }
 
       // Reset form
       setAmountStr('');
@@ -398,7 +428,11 @@ export const AddTransactionTab: React.FC<AddTransactionTabProps> = ({ onSuccess 
       setFeeStr('');
       setPartyId('');
       setReceiptName(null);
-      setReceiptBase64(null);
+      setEffectiveDate('');
+      setEffectiveTime('');
+      setReceiptBlob(null);
+      setIsAIForm(false);
+      setAIDraft(null); setAITypeMissing(false); setAICurrency('BDT');
 
       setTimeout(() => {
         setSuccessToast(false);
@@ -434,11 +468,18 @@ export const AddTransactionTab: React.FC<AddTransactionTabProps> = ({ onSuccess 
           {isEn ? 'New Transaction' : 'নতুন লেনদেন'}
         </h1>
 
+        <button type="button" disabled={isSubmitting || isReceiptLoading} onClick={() => setShowAIEntry(true)}
+          className="mb-4 flex min-h-11 w-full items-center justify-center gap-2 rounded-xl border border-blue-200 bg-blue-50 px-3 py-2.5 text-xs font-semibold text-blue-700 disabled:opacity-40">
+          <Sparkles className="h-4 w-4" />{isEn ? 'Fill from receipt or voice with AI' : 'রিসিপ্ট বা ভয়েস থেকে AI দিয়ে লিখুন'}
+        </button>
+
+        {showAIEntry && <AIEntryModal key={currentWorkspace?.id} onClose={() => setShowAIEntry(false)} onApply={applyAIEntry} />}
+
         {/* Transaction Type Segmented Switcher */}
         <div className="grid grid-cols-3 gap-1 p-1 bg-slate-100/90 rounded-xl mb-4 text-xs font-semibold">
           <button
             type="button"
-            onClick={() => setType('expense')}
+            onClick={() => { setType('expense'); setAITypeMissing(false); }}
             className={`py-2 rounded-lg flex items-center justify-center gap-1.5 transition-all ${
               type === 'expense'
                 ? 'bg-white text-rose-600 shadow-2xs'
@@ -451,7 +492,7 @@ export const AddTransactionTab: React.FC<AddTransactionTabProps> = ({ onSuccess 
 
           <button
             type="button"
-            onClick={() => setType('income')}
+            onClick={() => { setType('income'); setAITypeMissing(false); }}
             className={`py-2 rounded-lg flex items-center justify-center gap-1.5 transition-all ${
               type === 'income'
                 ? 'bg-white text-emerald-600 shadow-2xs'
@@ -464,7 +505,7 @@ export const AddTransactionTab: React.FC<AddTransactionTabProps> = ({ onSuccess 
 
           <button
             type="button"
-            onClick={() => setType('transfer')}
+            onClick={() => { setType('transfer'); setAITypeMissing(false); }}
             className={`py-2 rounded-lg flex items-center justify-center gap-1.5 transition-all ${
               type === 'transfer'
                 ? 'bg-white text-slate-900 shadow-2xs'
@@ -493,6 +534,13 @@ export const AddTransactionTab: React.FC<AddTransactionTabProps> = ({ onSuccess 
         )}
 
         <form onSubmit={handleSubmit} className="space-y-4 text-xs">
+          {aiDraft && <div className="space-y-2 rounded-xl bg-blue-50 p-3 text-blue-900">
+            <p>{isEn ? 'AI filled these details. Edit anything you need, then Save once.' : 'AI তথ্য বসিয়েছে। প্রয়োজন হলে ঠিক করে একবার Save করুন।'}</p>
+            {aiTypeMissing && <p role="alert" className="text-amber-900">{isEn ? 'Choose Expense, Income or Transfer above.' : 'উপরে খরচ, জমা বা স্থানান্তর বেছে নিন।'}</p>}
+            {aiDraft.currency === 'unknown' && <label className="block">{isEn ? 'Choose currency' : 'মুদ্রা বেছে নিন'}<AppSelect value={aiCurrency} onChange={event => setAICurrency(event.target.value)} className="mt-1 w-full rounded-lg border bg-white p-2"><option value="">{isEn ? 'Not identified' : 'বোঝা যায়নি'}</option><option value="BDT">BDT — ৳</option></AppSelect></label>}
+            {aiDraft.transcript && <details><summary className="cursor-pointer font-semibold">{isEn ? 'What AI heard' : 'AI যা শুনেছে'}</summary><p className="mt-2 whitespace-pre-wrap break-words">{aiDraft.transcript}</p></details>}
+            {aiDraft.warnings.length > 0 && <ul className="list-disc space-y-1 pl-4 text-amber-900">{aiDraft.warnings.map((warning, index) => <li key={index}>{warning}</li>)}</ul>}
+          </div>}
           {/* Amount Input */}
           <div>
             <div className="flex items-center justify-between mb-1">
@@ -732,17 +780,29 @@ export const AddTransactionTab: React.FC<AddTransactionTabProps> = ({ onSuccess 
           {/* Date & Note */}
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
             <div>
-              <label className="block text-slate-700 font-semibold mb-1">
-                {isEn ? 'Date' : 'তারিখ'}
+              <label htmlFor="transaction-date" className="block text-slate-700 font-semibold mb-1">
+                {isEn ? 'Date (optional)' : 'তারিখ (ঐচ্ছিক)'}
               </label>
               <input
                 type="date"
+                id="transaction-date"
                 value={effectiveDate}
                 onChange={(e) => setEffectiveDate(e.target.value)}
                 className="w-full px-3 py-2 bg-slate-50 border border-slate-300 rounded-xl text-xs font-medium focus:bg-white focus:outline-none focus:ring-2 focus:ring-blue-600"
               />
             </div>
 
+            <div>
+              <label htmlFor="transaction-time" className="block text-slate-700 font-semibold mb-1">
+                {isEn ? 'Time (optional)' : 'সময় (ঐচ্ছিক)'}
+              </label>
+              <input id="transaction-time" type="time" value={effectiveTime}
+                onChange={event => setEffectiveTime(event.target.value)}
+                className="w-full px-3 py-2 bg-slate-50 border border-slate-300 rounded-xl text-xs font-medium focus:bg-white focus:outline-none focus:ring-2 focus:ring-blue-600" />
+            </div>
+            <p className="sm:col-span-2 text-[11px] leading-relaxed text-slate-500">
+              {isEn ? 'Leave blank to use the date and time when you save. Selected values are kept; an unselected time uses the save-time clock.' : 'খালি রাখলে সেভ করার সময়ের তারিখ ও সময় বসবে। বেছে দেওয়া তারিখ/সময় থাকবে; সময় না বাছলে সেভের সময় বসবে।'}
+            </p>
             <div>
               <label className="block text-slate-700 font-semibold mb-1">
                 {isEn ? 'Note (Optional)' : 'বিবরণ (ঐচ্ছিক)'}
@@ -759,6 +819,7 @@ export const AddTransactionTab: React.FC<AddTransactionTabProps> = ({ onSuccess 
 
           {/* Receipt Attachment */}
           <div>
+            {isReceiptLoading && <p role="status" className="mb-2 text-xs text-slate-500">{isEn ? 'Checking receipt…' : 'রসিদ যাচাই হচ্ছে…'}</p>}
             <label className="block text-slate-700 font-semibold mb-1">
               {isEn ? 'Receipt Photo (Optional)' : 'রসিদের ছবি (ঐচ্ছিক)'}
             </label>
@@ -770,7 +831,7 @@ export const AddTransactionTab: React.FC<AddTransactionTabProps> = ({ onSuccess 
                 </span>
                 <input
                   type="file"
-                  accept="image/*"
+                  accept="image/jpeg,image/png,image/webp"
                   onChange={handleReceiptUpload}
                   className="hidden"
                 />
@@ -782,7 +843,9 @@ export const AddTransactionTab: React.FC<AddTransactionTabProps> = ({ onSuccess 
                   type="button"
                   onClick={() => {
                     setReceiptName(null);
-                    setReceiptBase64(null);
+                    receiptSelection.current++;
+                    setReceiptBlob(null);
+                    setIsReceiptLoading(false);
                   }}
                   className="p-1 hover:bg-slate-200 rounded text-slate-600"
                 >
@@ -795,7 +858,7 @@ export const AddTransactionTab: React.FC<AddTransactionTabProps> = ({ onSuccess 
           {/* Submit Button */}
           <button
             type="submit"
-            disabled={isSubmitting}
+            disabled={isSubmitting || isReceiptLoading}
             className="w-full py-3 bg-slate-900 hover:bg-slate-800 active:scale-[0.99] text-white rounded-xl text-sm font-bold shadow-xs transition-all flex items-center justify-center gap-2 disabled:opacity-50"
           >
             <Check className="w-4 h-4" />
@@ -988,7 +1051,7 @@ export const AddTransactionTab: React.FC<AddTransactionTabProps> = ({ onSuccess 
         selectedAccountId={accountId}
         onSelectAccount={(id) => {
           setAccountId(id);
-          if (type === 'transfer' && id === toAccountId) {
+          if (!isAIForm && type === 'transfer' && id === toAccountId) {
             const nextTo = activeAccounts.find((a) => a.id !== id);
             if (nextTo) setToAccountId(nextTo.id);
           }

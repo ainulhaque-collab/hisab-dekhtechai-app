@@ -18,3 +18,27 @@ android/app/src/main/assets/public/
 # Package manager — keep package-lock.json only (npm)
 bun.lock
 bun.lockb
+.qa-auto-output.txt
+.codex-remote-attachments/
+.codex-attachments/
+
+# Private Android signing identity. Never commit these or machine-bound passwords.
+.local-signing/
+.local-signing-sandbox-incomplete/
+.local-tools/
+.gradle/
+android/local.properties
+*.keystore
+*.jks
+*.p12
+*.pfx
+*.key
+
+# Firebase local setup inputs; service credentials must never enter Git.
+.local-firebase/
+android/app/google-services.json
+
+# Local Supabase CLI cache, never migration source.
+supabase/.temp/
+
+.qa-current-sync-output.txt

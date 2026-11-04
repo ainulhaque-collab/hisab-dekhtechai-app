@@ -23,7 +23,7 @@ test('Database migrations: snapshot capture, integrity verification, and non-des
 
   const op: SyncOperation = {
     protocolVersion: 1,
-    ownerHash: 'owner-test',
+    ownerHash: 'local-owner',
     deviceId: db.getDeviceId(),
     seq: db.getNextDeviceSeq(),
     operationId: opId,
@@ -54,7 +54,7 @@ test('Database migrations: snapshot capture, integrity verification, and non-des
   // Restore from snapshot
   const restored = await db.restoreFromSnapshot(snapshot.id);
   assert.ok(restored, 'Restore must succeed with valid hash');
-  assert.equal(db.getAccounts(wsId).length, 3, 'Restored database must revert to snapshot state');
+  assert.equal(db.getAccounts(wsId).length, 4, 'Recovery must preserve accounts created after the snapshot');
   assert.equal(db.getTransactions(wsId).length, 1, 'Transaction must be preserved');
-  assert.equal(db.getPendingOutbox().length, 1, 'Pending outbox must be preserved');
+  assert.equal(db.getPendingOutbox().length, 2, 'Both original and newer pending operations must be preserved');
 });

@@ -113,6 +113,7 @@ test('RealGoogleDriveTransport: 401 Unauthorized triggers tokenProvider renewal 
   let fetchCallCount = 0;
 
   const mockTokenProvider = async (forceRenew?: boolean) => {
+    if (!forceRenew) return 'expired-token';
     renewCallCount++;
     forceRenewParam = forceRenew;
     return 'new-valid-token';
@@ -120,7 +121,7 @@ test('RealGoogleDriveTransport: 401 Unauthorized triggers tokenProvider renewal 
 
   const mockFetch = (async (input: RequestInfo | URL, init?: RequestInit): Promise<Response> => {
     fetchCallCount++;
-    const authHeader = (init?.headers as Record<string, string>)?.['Authorization'];
+    const authHeader = new Headers(init?.headers).get('Authorization');
 
     // First call has expired token -> return 401
     if (fetchCallCount === 1) {

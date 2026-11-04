@@ -158,6 +158,7 @@ test('OAuth HTTP 401 recovery: forces legitimate renewal rather than returning c
   let forceRenewFlags: boolean[] = [];
 
   const mockTokenProvider = async (forceRenew?: boolean) => {
+    if (!forceRenew) return 'initial-token';
     renewCallCount++;
     forceRenewFlags.push(Boolean(forceRenew));
     return `fresh-token-${renewCallCount}`;
@@ -166,7 +167,7 @@ test('OAuth HTTP 401 recovery: forces legitimate renewal rather than returning c
   let fetchCallCount = 0;
   const mockFetch = (async (input: RequestInfo | URL, init?: RequestInit): Promise<Response> => {
     fetchCallCount++;
-    const authHeader = (init?.headers as Record<string, string>)?.['Authorization'];
+    const authHeader = new Headers(init?.headers).get('Authorization');
 
     // First call has initial token -> rejected by Google with 401 (e.g. revoked on server)
     if (fetchCallCount === 1) {
@@ -210,6 +211,7 @@ test('OAuth infinite retry loop prevention: 401 with failing renewal stops after
   let fetchCallCount = 0;
 
   const mockTokenProvider = async (forceRenew?: boolean) => {
+    if (!forceRenew) return 'initial-token';
     renewCallCount++;
     return 'still-invalid-token';
   };
@@ -604,7 +606,7 @@ test('AppContext tokenProvider: forwards forceRenew on 401 and rejects mismatche
   let fetchCountA = 0;
   const mockFetchA = (async (input: RequestInfo | URL, init?: RequestInit): Promise<Response> => {
     fetchCountA++;
-    const authHeader = (init?.headers as Record<string, string>)?.['Authorization'];
+    const authHeader = new Headers(init?.headers).get('Authorization');
     if (fetchCountA === 1) {
       assert.equal(authHeader, 'Bearer initial-unexpired-token');
       // Server returns 401 (token revoked or invalidated on server side)

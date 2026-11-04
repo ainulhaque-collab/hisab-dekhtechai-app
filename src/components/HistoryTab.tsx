@@ -20,9 +20,12 @@ import {
   AlertTriangle,
   User,
   Users,
-  Phone
+  Phone,
+  Bookmark
 } from 'lucide-react';
 import { JournalTransaction, PartyRole } from '../contracts/types';
+import { localDate, transactionTimeLabel } from '../domain/transactionTime';
+import { receiptImageUrl } from '../storage/receipts';
 
 interface HistoryTabProps {
   selectedTransaction?: JournalTransaction | null;
@@ -59,6 +62,9 @@ export const HistoryTab: React.FC<HistoryTabProps> = ({
   const [partyFilter, setPartyFilter] = useState<string>('all');
   const [accountFilter, setAccountFilter] = useState<string>('all');
   const [categoryFilter, setCategoryFilter] = useState<string>('all');
+  const [bookmarkedOnly, setBookmarkedOnly] = useState(false);
+  const [bookmarkBusy, setBookmarkBusy] = useState(false);
+  const [bookmarkError, setBookmarkError] = useState<string | null>(null);
 
   const [activeModalTx, setActiveModalTx] = useState<JournalTransaction | null>(null);
   const [isEditing, setIsEditing] = useState(false);
@@ -71,6 +77,7 @@ export const HistoryTab: React.FC<HistoryTabProps> = ({
   const [editCategoryId, setEditCategoryId] = useState('');
   const [editPartyId, setEditPartyId] = useState<string>('');
   const [editEffectiveDate, setEditEffectiveDate] = useState('');
+  const [editEffectiveTime, setEditEffectiveTime] = useState('');
   const [editNote, setEditNote] = useState('');
   const [editError, setEditError] = useState<string | null>(null);
 
@@ -84,6 +91,16 @@ export const HistoryTab: React.FC<HistoryTabProps> = ({
   const accountsMap = useMemo(() => new Map(accounts.map((a) => [a.id, a])), [accounts]);
   const categoriesMap = useMemo(() => new Map(categories.map((c) => [c.id, c])), [categories]);
   const partiesMap = useMemo(() => new Map(parties.map((p) => [p.id, p])), [parties]);
+  const bookmarkState = useMemo(() => {
+    try { return { ids:new Set(currentWorkspace ? [...db.getReportMetadata(currentWorkspace.id).bookmarks].filter(([,value])=>value.enabled).map(([id])=>id) : []), unavailable:false }; }
+    catch { return {ids:new Set<string>(),unavailable:true}; }
+  },[db,currentWorkspace,transactions]);
+  const receiptPreview = useMemo(() => {
+    const hash = activeModalTx?.receiptBlobSha256;
+    const blob = hash ? db.getReceiptBlob(hash) : undefined;
+    if (!blob) return null;
+    try { return receiptImageUrl(blob); } catch { return null; }
+  }, [activeModalTx, transactions, db]);
 
   const getRoleLabel = (r: PartyRole) => {
     switch (r) {
@@ -102,11 +119,12 @@ export const HistoryTab: React.FC<HistoryTabProps> = ({
 
   // Filter transactions
   const filteredTransactions = useMemo(() => {
-    const todayStr = new Date().toISOString().slice(0, 10);
+    const todayStr = localDate();
     const now = new Date();
     const currentMonthPrefix = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
 
     return transactions.filter((tx) => {
+      if (bookmarkedOnly && !bookmarkState.ids.has(tx.id)) return false;
       // Period filter
       if (periodFilter === 'today' && tx.effectiveDate !== todayStr) return false;
       if (periodFilter === 'month' && !tx.effectiveDate.startsWith(currentMonthPrefix)) return false;
@@ -157,13 +175,14 @@ export const HistoryTab: React.FC<HistoryTabProps> = ({
 
       return true;
     });
-  }, [transactions, periodFilter, typeFilter, partyFilter, accountFilter, categoryFilter, searchTerm, categoriesMap, accountsMap, partiesMap]);
+  }, [transactions, periodFilter, typeFilter, partyFilter, accountFilter, categoryFilter, searchTerm, categoriesMap, accountsMap, partiesMap, bookmarkedOnly, bookmarkState]);
 
   const handleOpenDetail = (tx: JournalTransaction) => {
     setActiveModalTx(tx);
     setIsEditing(false);
     setShowDeleteConfirm(false);
     setEditError(null);
+    setBookmarkError(null);
 
     // Find original amount
     const primaryLine = tx.lines.find((l) => l.debitMinor !== '0' || l.creditMinor !== '0');
@@ -179,6 +198,7 @@ export const HistoryTab: React.FC<HistoryTabProps> = ({
     setEditCategoryId(tx.lines.find((l) => l.categoryId)?.categoryId || categories[0]?.id || '');
     setEditPartyId(tx.partyId || '');
     setEditEffectiveDate(tx.effectiveDate);
+    setEditEffectiveTime('');
     setEditNote(tx.note || '');
   };
 
@@ -222,6 +242,7 @@ export const HistoryTab: React.FC<HistoryTabProps> = ({
       await editTransaction(activeModalTx.id, {
         amountMinor: parsedPaisa.toString(),
         effectiveDate: editEffectiveDate,
+        effectiveTime: editEffectiveTime,
         assetAccountId: editAccountId,
         categoryId: editCategoryId,
         partyId: editPartyId || null,
@@ -244,6 +265,8 @@ export const HistoryTab: React.FC<HistoryTabProps> = ({
       </div>
 
       {/* Search Bar */}
+      <button type="button" aria-pressed={bookmarkedOnly} disabled={bookmarkState.unavailable} onClick={()=>setBookmarkedOnly(value=>!value)} className={`inline-flex min-h-11 items-center gap-2 rounded-xl border px-3 text-xs font-semibold ${bookmarkedOnly?'border-blue-700 bg-blue-700 text-white':'border-slate-200 bg-white text-slate-600'}`}><Bookmark className="h-4 w-4" />{isEn?'Bookmarked only':'শুধু বুকমার্ক'} · {bookmarkState.ids.size.toLocaleString(isEn?'en-GB':'bn-BD')}</button>
+      {bookmarkState.unavailable && <p role="alert" className="rounded-xl bg-rose-50 p-3 text-xs text-rose-800">{isEn?'Bookmarks could not load. Your entries are saved.':'বুকমার্ক লোড হয়নি। আপনার হিসাব সংরক্ষিত আছে।'}</p>}
       <div className="relative">
         <Search className="w-4 h-4 absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-400" />
         <input
@@ -462,7 +485,7 @@ export const HistoryTab: React.FC<HistoryTabProps> = ({
                       )}
                     </div>
                     <div className="text-[11px] text-slate-500 truncate flex items-center gap-1.5 mt-0.5">
-                      <span>{tx.effectiveDate}</span>
+                      <span>{transactionTimeLabel(tx)}</span>
                       <span>•</span>
                       <span>{primaryAcc?.name || 'Account'}</span>
                       {tx.note && <span className="truncate max-w-[140px] text-slate-400">• {tx.note}</span>}
@@ -518,7 +541,8 @@ export const HistoryTab: React.FC<HistoryTabProps> = ({
               <button
                 type="button"
                 onClick={handleCloseModal}
-                className="p-1 rounded-lg text-slate-400 hover:bg-slate-100"
+                aria-label={isEn?'Close transaction details':'লেনদেনের বিস্তারিত বন্ধ করুন'}
+                className="min-h-11 min-w-11 flex items-center justify-center p-1 rounded-lg text-slate-400 hover:bg-slate-100"
               >
                 <X className="w-4 h-4" />
               </button>
@@ -532,7 +556,11 @@ export const HistoryTab: React.FC<HistoryTabProps> = ({
                     <span className="text-slate-400 text-[10px] font-medium">
                       {isEn ? 'Date' : 'তারিখ'}
                     </span>
-                    <div className="font-semibold text-slate-800">{activeModalTx.effectiveDate}</div>
+                    <div className="font-semibold text-slate-800">{transactionTimeLabel(activeModalTx)}</div>
+                    {activeModalTx.createdAtUtc && <div className="mt-1 text-[11px] text-slate-500">
+                      {isEn ? 'Recorded: ' : 'এন্ট্রির সময়: '}
+                      {new Date(activeModalTx.createdAtUtc).toLocaleString(isEn ? 'en-GB' : 'bn-BD')}
+                    </div>}
                   </div>
                   <div>
                     <span className="text-slate-400 text-[10px] font-medium">
@@ -543,6 +571,12 @@ export const HistoryTab: React.FC<HistoryTabProps> = ({
                     </div>
                   </div>
 
+                  {activeModalTx.receiptBlobSha256 && <div className="col-span-2 space-y-2">
+                    <span className="text-xs font-semibold text-slate-700">{isEn ? 'Receipt' : 'রসিদ'}</span>
+                    {receiptPreview
+                      ? <img src={receiptPreview} alt={activeModalTx.receiptName || (isEn ? 'Transaction receipt' : 'লেনদেনের রসিদ')} className="max-h-80 w-full rounded-xl object-contain bg-white" />
+                      : <p className="text-xs text-amber-800">{isEn ? 'Receipt is not available on this device yet. Sync with the device holding the original image.' : 'রসিদটি এখনও এই ডিভাইসে নেই। মূল ছবি থাকা ডিভাইসের সঙ্গে সিঙ্ক করুন।'}</p>}
+                  </div>}
                   {/* Associated Member */}
                   {activeModalTx.partyId && partiesMap.get(activeModalTx.partyId) && (
                     <div className="col-span-2 p-2.5 bg-white border border-slate-200 rounded-lg">
@@ -619,6 +653,10 @@ export const HistoryTab: React.FC<HistoryTabProps> = ({
                 </div>
 
                 {/* Action Buttons: Edit and Delete */}
+                <button type="button" disabled={bookmarkBusy || bookmarkState.unavailable} aria-pressed={bookmarkState.ids.has(activeModalTx.id)}
+                  onClick={async()=>{setBookmarkBusy(true);setBookmarkError(null);try{await db.setTransactionBookmark(activeModalTx.id,!bookmarkState.ids.has(activeModalTx.id));refreshState();}catch{setBookmarkError(isEn?'Bookmark could not be saved. Please try again.':'বুকমার্ক সংরক্ষণ হয়নি। আবার চেষ্টা করুন।');}finally{setBookmarkBusy(false);}}}
+                  className="flex min-h-11 w-full items-center justify-center gap-2 rounded-xl border border-blue-100 bg-blue-50 p-3 text-xs font-semibold text-blue-800 disabled:opacity-40"><Bookmark className="h-4 w-4" fill={bookmarkState.ids.has(activeModalTx.id)?'currentColor':'none'}/>{bookmarkState.ids.has(activeModalTx.id)?(isEn?'Remove bookmark':'বুকমার্ক সরান'):(isEn?'Bookmark this entry':'এই লেনদেন বুকমার্ক করুন')}</button>
+                {bookmarkError && <p role="alert" className="text-xs text-rose-700">{bookmarkError}</p>}
                 {activeModalTx.transactionType !== 'reversal' && !(activeModalTx as any).isDeleted && (
                   <div className="flex gap-2 pt-2">
                     <button
@@ -790,6 +828,15 @@ export const HistoryTab: React.FC<HistoryTabProps> = ({
                   />
                 </div>
 
+                <div>
+                  <label htmlFor="edit-transaction-time" className="block text-slate-700 font-semibold mb-1">
+                    {isEn ? 'Change time (optional)' : 'সময় পরিবর্তন (ঐচ্ছিক)'}
+                  </label>
+                  <input id="edit-transaction-time" type="time" value={editEffectiveTime}
+                    onChange={event => setEditEffectiveTime(event.target.value)}
+                    className="w-full px-3 py-2 bg-slate-50 border border-slate-300 rounded-xl focus:bg-white focus:outline-none focus:ring-2 focus:ring-blue-600" />
+                  <p className="mt-1 text-[11px] text-slate-500">{isEn ? 'With the same date, leaving this blank keeps the original time.' : 'তারিখ একই থাকলে সময় খালি রাখলে আগের সময় থাকবে।'}</p>
+                </div>
                 <div>
                   <label className="block text-slate-700 font-semibold mb-1">
                     {isEn ? 'Note / Description' : 'বিবরণ / নোট'}

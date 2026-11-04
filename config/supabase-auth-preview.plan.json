@@ -1,0 +1,24 @@
+{
+  "projectId": "sfzitbasxrpmtmldujbm",
+  "environment": "Hisab Preview in owner-selected shared development project",
+  "operation": "append_exact_redirect_urls",
+  "siteUrlChange": false,
+  "removeExistingRedirects": false,
+  "existingRedirectsObserved": [
+    "https://comfy-hamster-f7ac99.netlify.app/",
+    "https://deshpath.vercel.app/",
+    "http://127.0.0.1:4173/",
+    "http://localhost:4173/"
+  ],
+  "proposedRedirects": [
+    "http://localhost:3000/auth/callback",
+    "https://hisab-dekhtechai-app-git-codex-supabas-3396bf-ainulhaque-collab.vercel.app/auth/callback",
+    "com.hisabdekhtechai.app://auth/callback"
+  ],
+  "wildcards": false,
+  "clientFlow": "PKCE S256; explicit flow ID; encrypted verifier/session storage",
+  "applicationActivation": false,
+  "financialDataMigration": false,
+  "productionOrPaidResourceChange": false,
+  "approvalStatus": "pending owner action-time confirmation"
+}

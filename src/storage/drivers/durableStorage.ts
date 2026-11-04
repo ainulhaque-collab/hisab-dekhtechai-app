@@ -7,6 +7,7 @@
  */
 
 import { Capacitor } from '@capacitor/core';
+import { NativeSqliteConnections, nativeSqliteConnections } from './nativeSqliteConnections';
 
 export type StorageType = 'sqlite-native' | 'indexeddb-durable' | 'localstorage-fallback';
 
@@ -27,11 +28,11 @@ export interface DurableStorageDriver {
  */
 export class CapacitorSqliteDriver implements DurableStorageDriver {
   private dbName: string;
-  private sqliteConnection: any = null;
   private db: any = null;
   private isInitialized = false;
+  private transactionActive = false;
 
-  constructor(dbName = 'hisab_dekhtechai_db') {
+  constructor(dbName = 'hisab_dekhtechai_db', private connections: NativeSqliteConnections = nativeSqliteConnections) {
     this.dbName = dbName;
   }
 
@@ -39,25 +40,7 @@ export class CapacitorSqliteDriver implements DurableStorageDriver {
     if (this.isInitialized) return;
 
     try {
-      const { CapacitorSQLite, SQLiteConnection } = await import('@capacitor-community/sqlite');
-      this.sqliteConnection = new SQLiteConnection(CapacitorSQLite);
-
-      const isConsistent = await this.sqliteConnection.checkConnectionsConsistency();
-      const isConnected = await this.sqliteConnection.isConnection(this.dbName, false);
-
-      if (isConsistent.result && isConnected.result) {
-        this.db = await this.sqliteConnection.retrieveConnection(this.dbName, false);
-      } else {
-        this.db = await this.sqliteConnection.createConnection(
-          this.dbName,
-          false,
-          'no-encryption',
-          1,
-          false
-        );
-      }
-
-      await this.db.open();
+      this.db = await this.connections.open(this.dbName);
 
       // Create durable key-value store table and transaction journal tables
       await this.db.execute(`
@@ -91,7 +74,8 @@ export class CapacitorSqliteDriver implements DurableStorageDriver {
     const now = new Date().toISOString();
     await this.db.run(
       'INSERT OR REPLACE INTO durable_kv (key, value, updated_at) VALUES (?, ?, ?);',
-      [key, value, now]
+      [key, value, now],
+      !this.transactionActive
     );
   }
 
@@ -99,25 +83,29 @@ export class CapacitorSqliteDriver implements DurableStorageDriver {
     if (!this.db) {
       throw new Error('SQLite database is not initialized or connection was lost.');
     }
-    await this.db.run('DELETE FROM durable_kv WHERE key = ?;', [key]);
+    await this.db.run('DELETE FROM durable_kv WHERE key = ?;', [key], !this.transactionActive);
   }
 
   public async beginTransaction(): Promise<void> {
     if (!this.db) await this.init();
     if (this.db && typeof this.db.beginTransaction === 'function') {
+      if (this.transactionActive) throw new Error('SQLite transaction already active.');
       await this.db.beginTransaction();
+      this.transactionActive = true;
     }
   }
 
   public async commitTransaction(): Promise<void> {
     if (this.db && typeof this.db.commitTransaction === 'function') {
       await this.db.commitTransaction();
+      this.transactionActive = false;
     }
   }
 
   public async rollbackTransaction(): Promise<void> {
     if (this.db && typeof this.db.rollbackTransaction === 'function') {
       await this.db.rollbackTransaction();
+      this.transactionActive = false;
     }
   }
 
@@ -208,10 +196,8 @@ export class IndexedDBDurableDriver implements DurableStorageDriver {
         const transaction = this.db!.transaction(this.storeName, 'readwrite');
         const store = transaction.objectStore(this.storeName);
         const request = store.put(value, key);
-
-        request.onsuccess = () => {
-          resolve();
-        };
+        transaction.oncomplete = () => resolve();
+        transaction.onabort = transaction.onerror = () => reject(transaction.error || new Error('IndexedDB write did not commit.'));
         request.onerror = () => {
           reject(request.error);
         };
@@ -228,10 +214,8 @@ export class IndexedDBDurableDriver implements DurableStorageDriver {
         const transaction = this.db!.transaction(this.storeName, 'readwrite');
         const store = transaction.objectStore(this.storeName);
         const request = store.delete(key);
-
-        request.onsuccess = () => {
-          resolve();
-        };
+        transaction.oncomplete = () => resolve();
+        transaction.onabort = transaction.onerror = () => reject(transaction.error || new Error('IndexedDB delete did not commit.'));
         request.onerror = () => {
           reject(request.error);
         };

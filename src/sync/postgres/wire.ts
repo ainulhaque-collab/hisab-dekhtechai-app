@@ -2,6 +2,7 @@ import type { FinancialSyncOperation } from '../../contracts/financialSync';
 import { assertPushRequest, syncMinorUnits } from '../financialSyncBoundary';
 import { assertJournalBalanced } from '../../domain/journal';
 import { SYSTEM_ACCOUNTS } from '../../contracts/ledger';
+import { validateTransactionTime } from '../../domain/transactionTime';
 import type { BalancedJournal } from '../../contracts/types';
 
 export const syncCommands = ['workspace.create','account.create','category.create','journal.post'] as const;
@@ -53,7 +54,7 @@ export function validatePayload(op: FinancialSyncOperation, owner: string): void
       ['nameEn','icon','color'].some(k=>c[k]!=null&&!text(c[k],0,120))) syncError();
   } else if(op.type==='journal.post') {
     fields(p,['balancedJournal']); const j=p.balancedJournal; fields(j,['transaction','lines']); const t=j.transaction;
-    fields(t,['id','workspaceId','transactionType','effectiveDate','occurredAtUtc','note','createdOpId','partyId','receiptBlobSha256','receiptName','reversalOf','isDeleted','isReplacedBy']);
+    fields(t,['id','workspaceId','transactionType','effectiveDate','occurredAtUtc','createdAtUtc','occurredTimezoneOffsetMinutes','note','createdOpId','partyId','receiptBlobSha256','receiptName','reversalOf','isDeleted','isReplacedBy']);
     if(!isUuid(t.id) || t.id!==op.entityId || t.workspaceId!==ws || t.createdOpId!==op.operationId ||
       !['opening','income','expense','transfer'].includes(t.transactionType) || !instant(t.occurredAtUtc) ||
       !text(t.effectiveDate,10,10) || !/^\d{4}-\d\d-\d\d$/.test(t.effectiveDate) ||
@@ -61,6 +62,8 @@ export function validatePayload(op: FinancialSyncOperation, owner: string): void
       (t.note!=null&&!text(t.note,0,1000)) || t.partyId!=null || t.receiptBlobSha256!=null || t.receiptName!=null || t.reversalOf!=null ||
       (t.isDeleted!==undefined&&t.isDeleted!==false) || t.isReplacedBy!=null ||
       !Array.isArray(j.lines) || j.lines.length<2 || j.lines.length>100) syncError();
+    if(t.createdAtUtc!==undefined&&!instant(t.createdAtUtc))syncError();
+    validateTransactionTime(t as any);
     const ids=new Set<string>();
     for(const l of j.lines) {
       fields(l,['id','transactionId','accountId','debitMinor','creditMinor','categoryId']);
