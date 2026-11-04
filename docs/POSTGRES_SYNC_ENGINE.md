@@ -118,6 +118,15 @@ conflict preservation; another owner/foreign cursor; malformed JSON/HTTP errors;
 timeouts ignoring cancellation; canonical hash parity; and immutable metadata
 snapshots. No customer data or API key is used.
 
+Verified source `bb22c438d40d717a35c46eaac8ac1b9917715a98` passed
+[CI 93](https://github.com/ainulhaque-collab/hisab-dekhtechai-app/actions/runs/41823476666):
+96 app tests passed (one native-only test skipped in the WASM job), 11 WASM SQL
+tests, and native PostgreSQL 17 SQL (12) plus HTTP/SQLite sync tests (12, no skips).
+The 10-table scoped dump/restore preserved finance/sync fingerprints, then proved
+a restored cursor can push, replay a duplicate and pull the next event. The
+initial CI found a missing `@types/pg`; it is now an exact pinned dev dependency
+with its lockfile entry, and the clean Node 22 type check passed.
+
 ## Required before App activation / PR-3 completion
 
 1. Reconcile the advanced feature branch (`75dde8280ed492083cbf40f8964f8458fa42c740`)

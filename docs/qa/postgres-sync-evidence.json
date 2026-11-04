@@ -9,7 +9,21 @@
     "build": "PASS; existing large-chunk warning remains",
     "storage": "real file-backed node:sqlite; not Capacitor hardware"
   },
-  "nativeCi": "pending; not yet a PASS",
+  "verifiedSourceCommit": "bb22c438d40d717a35c46eaac8ac1b9917715a98",
+  "webCi": {"result": "PASS", "run": 93, "url": "https://github.com/ainulhaque-collab/hisab-dekhtechai-app/actions/runs/41823476666"},
+  "nativeCi": {
+    "result": "PASS",
+    "engine": "native PostgreSQL 17",
+    "portableSqlTestsPassed": 12,
+    "httpSqliteSyncTestsPassed": 12,
+    "skipped": 0,
+    "concurrentCommitOrder": "PASS with separate writer connections and reader",
+    "dumpRestoreTables": 10,
+    "financeAndSyncFingerprints": "PASS",
+    "restoredCursorNewPushDuplicateAndPull": "PASS",
+    "markers": ["NATIVE_PG_DUMP_RESTORE_PASS", "SYNC_CURSOR_RESTORE_PASS"],
+    "job": "https://github.com/ainulhaque-collab/hisab-dekhtechai-app/actions/runs/41823476666/job/126552170549"
+  },
   "hostedMigrationApplied": false,
   "appProviderMounted": false,
   "apkReplaced": false,
