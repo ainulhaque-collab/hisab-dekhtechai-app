@@ -144,6 +144,15 @@ test(`Postgres outbox pipeline over HTTP + real SQLite files (${native?'native P
     const poisoned={...page,changes:[{changeId:'999',operation:{...op,contentSha256:'0'.repeat(64)}}],nextCursor:'tampered'};
     await assert.rejects(a.store.applyPullPageAtomically(scope(a),cursor,poisoned),/SYNC_HASH_MISMATCH/);
     assert.equal(await a.store.readCursor(scope(a)),cursor);assert.equal(a.store.pendingCount(scope(a)),pending.length+1);
+    const categoryId=generateUUID(),deviceId=generateUUID();
+    const body={protocolVersion:1 as const,operationId:generateUUID(),entityId:categoryId,workspaceId:ws.id,deviceId,sequence:'1',
+      type:'category.create' as const,createdAtUtc:new Date().toISOString(),payload:{category:{id:categoryId,workspaceId:ws.id,name:'Cursor race',kind:'expense'}}};
+    await asActor(owner,'sync_push',{requestId:generateUUID(),scope:{...scope(a),deviceId},operations:[{...body,contentSha256:await operationDigest(body)}]});
+    const raced=await provider.pull({requestId:generateUUID(),scope:scope(a),cursor,limit:100});assert.equal(raced.changes.length,1);
+    const gap={...raced,changes:[{...raced.changes[0],changeId:'999'}]};
+    await assert.rejects(a.store.applyPullPageAtomically(scope(a),cursor,gap),/SYNC_STREAM_GAP/);
+    await a.store.applyPullPageAtomically(scope(a),cursor,raced);
+    await assert.rejects(a.store.applyPullPageAtomically(scope(a),cursor,raced),/SYNC_CURSOR_STALE/);
     assert.equal((await ea.run()).state,'caught_up');
   });
   await t.test('repeated run calls share one task and logout fences a delayed server response',async()=>{

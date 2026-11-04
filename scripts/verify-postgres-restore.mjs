@@ -75,7 +75,34 @@ try {
     assert.equal((await target.query(sql,args)).rows[0].result.replayed,true);
     await target.query('commit');
   } catch(error) { await target.query('rollback'); throw error; }
+  let syncReplayAfterRestore=false;
+  if(before.sync_log){
+    const restored=(await target.query('select owner_id,workspace_id,head::text from hisab_cloud.sync_heads order by head desc limit 1')).rows[0];assert.ok(restored);
+    const scope={ownerId:restored.owner_id,workspaceId:restored.workspace_id,deviceId:randomUUID()},cursor=`h1:${restored.owner_id}:${restored.workspace_id}:${restored.head}`;
+    const id=randomUUID(),body={protocolVersion:1,operationId:randomUUID(),entityId:id,workspaceId:scope.workspaceId,deviceId:scope.deviceId,sequence:'1',type:'category.create',
+      createdAtUtc:'2026-11-04T08:00:00.000Z',payload:{category:{id,workspaceId:scope.workspaceId,name:'Restore replay fixture',kind:'expense'}}};
+    await target.query('begin');
+    try{
+      await target.query('set local role authenticated');await target.query("select set_config('hisab.actor_id',$1,true)",[scope.ownerId]);
+      const pull=async()=> (await target.query('select hisab_cloud.sync_pull($1::jsonb) as reply',[JSON.stringify({requestId:randomUUID(),scope,cursor,limit:100})])).rows[0].reply;
+      const empty=await pull();assert.equal(empty.changes.length,0);assert.equal(empty.nextCursor,cursor);
+      const digest=(await target.query("select encode(sha256(convert_to(hisab_internal.wire_json($1::jsonb),'UTF8')),'hex') as hash",[JSON.stringify(body)])).rows[0].hash;
+      const request=JSON.stringify({requestId:randomUUID(),scope,operations:[{...body,contentSha256:digest}]});
+      const push=async()=> (await target.query('select hisab_cloud.sync_push($1::jsonb) as reply',[request])).rows[0].reply;
+      assert.equal((await push()).outcomes[0].outcome,'accepted');assert.equal((await push()).outcomes[0].outcome,'duplicate');
+      await target.query('commit');
+    }catch(error){await target.query('rollback');throw error;}
+    await target.query('begin');
+    try{
+      await target.query('set local role authenticated');await target.query("select set_config('hisab.actor_id',$1,true)",[scope.ownerId]);
+      const page=(await target.query('select hisab_cloud.sync_pull($1::jsonb) as reply',[JSON.stringify({requestId:randomUUID(),scope,cursor,limit:100})])).rows[0].reply;
+      assert.equal(page.changes.length,1);assert.equal(page.changes[0].operation.operationId,body.operationId);
+      assert.equal(page.nextCursor,`h1:${scope.ownerId}:${scope.workspaceId}:${BigInt(restored.head)+1n}`);assert.equal(page.hasMore,false);
+      syncReplayAfterRestore=true;
+    }finally{await target.query('rollback');}
+  }
   await mkdir(new URL('../build/pr2/',import.meta.url),{recursive:true});
-  await writeFile(new URL('../build/pr2/native-restore-evidence.json',import.meta.url),JSON.stringify({result:'PASS',engine:'native PostgreSQL 17',tables:Object.keys(before).length,financeFingerprintsMatched:true,oldTransactionMarkersSealed:true,twoOwnerRlsAfterRestore:true,newPostAndReplayAfterRestore:true,unrelatedTablesExcluded:true},null,2));
+  await writeFile(new URL('../build/pr2/native-restore-evidence.json',import.meta.url),JSON.stringify({result:'PASS',engine:'native PostgreSQL 17',tables:Object.keys(before).length,financeFingerprintsMatched:true,oldTransactionMarkersSealed:true,twoOwnerRlsAfterRestore:true,newPostAndReplayAfterRestore:true,syncReplayAfterRestore,unrelatedTablesExcluded:true},null,2));
   console.log('NATIVE_PG_DUMP_RESTORE_PASS: finance fingerprints, sealed history, RLS and scoped export');
+  if(syncReplayAfterRestore)console.log('SYNC_CURSOR_RESTORE_PASS: restored cursor, new push, duplicate replay and pull');
 } finally { if(target) await target.end(); await source.end(); }
