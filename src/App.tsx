@@ -26,6 +26,8 @@ import { SavingsLoansModal } from './components/SavingsLoansModal';
 import { PinLockScreen } from './components/PinLockScreen';
 import { pinLock } from './security/pinLock';
 import { JournalTransaction } from './contracts/types';
+import { hasAccountCallback } from './auth/cloud/callbackLocation';
+const accountAuthEnabled=import.meta.env.VITE_SUPABASE_AUTH_ENABLED==='true';
 
 interface ErrorBoundaryProps {
   children: React.ReactNode;
@@ -96,7 +98,8 @@ function MainApp() {
   const [isSyncModalOpen, setIsSyncModalOpen] = useState(false);
   const [isConflictModalOpen, setIsConflictModalOpen] = useState(false);
   const [isSnapshotModalOpen, setIsSnapshotModalOpen] = useState(false);
-  const [isSettingsModalOpen, setIsSettingsModalOpen] = useState(false);
+  const [isSettingsModalOpen, setIsSettingsModalOpen] = useState(hasAccountCallback);
+  const [settingsSection,setSettingsSection]=useState<'home'|'account'>(()=>hasAccountCallback()?'account':'home');
   const [isAuthModalOpen, setIsAuthModalOpen] = useState(false);
   const [isPartiesModalOpen, setIsPartiesModalOpen] = useState(false);
   const [isProfileModalOpen, setIsProfileModalOpen] = useState(false);
@@ -105,6 +108,25 @@ function MainApp() {
   const [isSavingsGoalsOpen, setIsSavingsGoalsOpen] = useState(false);
   const [savingsLoanGoalId, setSavingsLoanGoalId] = useState<string | undefined>();
   const [isSavingsLoansOpen, setIsSavingsLoansOpen] = useState(false);
+  const openConnectionSettings=()=>{
+    if(accountAuthEnabled){setSettingsSection('account');setIsSettingsModalOpen(true);}
+    else setIsSyncModalOpen(true);
+  };
+
+  useEffect(()=>{
+    if(!accountAuthEnabled)return;
+    let stopped=false;
+    const show=()=>{if(!stopped){setSettingsSection('account');setIsSettingsModalOpen(true);}};
+    let refresh=()=>{};
+    const visible=()=>{if(!document.hidden)refresh();};
+    window.addEventListener('hisab-account-callback',show);
+    window.addEventListener('online',visible);window.addEventListener('offline',visible);
+    document.addEventListener('visibilitychange',visible);
+    void import('./auth/cloud/accountSettingsRuntime').then(({accountSettingsSession:session})=>{
+      if(stopped)return;refresh=()=>{void session.refresh();};void session.start();
+    });
+    return()=>{stopped=true;window.removeEventListener('hisab-account-callback',show);window.removeEventListener('online',visible);window.removeEventListener('offline',visible);document.removeEventListener('visibilitychange',visible);};
+  },[]);
 
   if (!isUnlocked) {
     return <PinLockScreen onUnlocked={() => setIsUnlocked(true)} />;
@@ -119,8 +141,8 @@ function MainApp() {
     <div className="min-h-screen bg-slate-50 text-slate-900 flex flex-col font-sans selection:bg-blue-100">
       {/* Top Header Navbar */}
       <Navbar
-        onOpenSyncModal={() => setIsSyncModalOpen(true)}
-        onOpenSettingsModal={() => setIsSettingsModalOpen(true)}
+        onOpenSyncModal={openConnectionSettings}
+        onOpenSettingsModal={() => {setSettingsSection('home');setIsSettingsModalOpen(true);}}
         onOpenTeamSharingModal={() => setIsTeamSharingModalOpen(true)}
         onOpenAboutModal={() => setIsAboutModalOpen(true)}
       />
@@ -135,7 +157,7 @@ function MainApp() {
               onNavigateToAdd={() => setActiveTab('add')}
               onNavigateToHistory={() => setActiveTab('history')}
               onSelectTransaction={handleSelectTransactionFromDashboard}
-              onOpenSyncModal={() => setIsSyncModalOpen(true)}
+              onOpenSyncModal={openConnectionSettings}
               onOpenPartiesModal={() => setIsPartiesModalOpen(true)}
               onOpenSavingsGoals={() => setIsSavingsGoalsOpen(true)}
             />
@@ -188,9 +210,10 @@ function MainApp() {
 
       <SettingsModal
         isOpen={isSettingsModalOpen}
+        initialSection={settingsSection}
         onClose={() => setIsSettingsModalOpen(false)}
         onOpenProfileModal={() => setIsProfileModalOpen(true)}
-        onOpenSyncModal={() => setIsSyncModalOpen(true)}
+        onOpenSyncModal={openConnectionSettings}
         onOpenSnapshotModal={() => setIsSnapshotModalOpen(true)}
       />
 

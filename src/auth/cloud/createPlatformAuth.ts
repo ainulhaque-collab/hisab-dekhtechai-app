@@ -5,7 +5,7 @@ import { cloudAuthConfig } from './config';
 import { AndroidCloudStorage } from './nativeStorage';
 import { EncryptedCloudStorage } from './secureStorage';
 
-/** Staged adapter: not mounted by AppProvider until migration/onboarding acceptance. */
+/** Used by account settings. Financial provider/adoption remains separately gated. */
 export async function createPlatformCloudAuth(): Promise<CloudAuth | null> {
   const platform = Capacitor.getPlatform();
   const config = cloudAuthConfig({

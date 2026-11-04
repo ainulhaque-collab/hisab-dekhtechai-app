@@ -182,9 +182,12 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   );
 
   const auth = useMemo(() => new GoogleAuthManager(), []);
+  // Account preview never starts the retired Drive transport or binds legacy data.
+  const accountPreview = import.meta.env.VITE_SUPABASE_AUTH_ENABLED === 'true';
 
   const createSecureTokenProvider = (targetDb: LocalDatabase = db) => {
     return async (forceRenew?: boolean): Promise<string> => {
+      if (accountPreview) throw new Error('LEGACY_SYNC_DISABLED');
       const token = await auth.getValidAccessToken(forceRenew);
       const activeOwnerHash = targetDb.getIdentity()?.ownerSubjectHash;
       const currentAuthOwnerHash = auth.getProfile()?.subjectHash;
@@ -207,7 +210,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     return new SimulatedGoogleDriveTransport();
   }, [simulation, auth, db]);
 
-  const [sync, setSync] = useState<SyncOrchestrator>(() => new SyncOrchestrator(db, sharedTransport, { cloudBackups: !simulation }));
+  const [sync, setSync] = useState<SyncOrchestrator>(() => new SyncOrchestrator(db, sharedTransport, { cloudBackups: !simulation && !accountPreview }));
 
   const [currentWorkspaceId, setCurrentWorkspaceId] = useState<UUID>('ws-personal-default');
   const [workspaces, setWorkspaces] = useState<Workspace[]>([]);
@@ -309,6 +312,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   const automatic = useRef<AutomaticSync | null>(null);
 
   const authorizeAutomaticSync = async (): Promise<boolean> => {
+    if (accountPreview) { sync.setAuthorized(false); return false; }
     const owner = db.getIdentity()?.ownerSubjectHash;
     if (!owner || auth.isTestMode() || auth.getProfile()?.subjectHash !== owner) { sync.setAuthorized(false); return false; }
     try { await auth.getValidAccessToken(); sync.setAuthorized(true); return true; }
@@ -316,13 +320,13 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   };
 
   useEffect(() => {
-    sync.setAuthorized(auth.isRealGoogleAuthenticated() && !!db.getIdentity());
+    sync.setAuthorized(!accountPreview && auth.isRealGoogleAuthenticated() && !!db.getIdentity());
     const unsub = sync.subscribe((status) => {
       setSyncStatus(status);
       refreshRef.current();
     });
     return unsub;
-  }, [db, sync]);
+  }, [db, sync, accountPreview]);
 
   useEffect(() => { refreshRef.current(); }, [currentWorkspaceId]);
 
@@ -337,6 +341,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
   useEffect(() => {
     if (!storageReady || simulation) return;
+    if (accountPreview) return;
     const worker = new AutomaticSync(db, sync, {
       enabled: () => (typeof navigator === 'undefined' || navigator.onLine) &&
         (typeof document === 'undefined' || document.visibilityState === 'visible') && !!auth.getProfile(),
@@ -355,7 +360,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       window.removeEventListener('focus', foreground);
       window.removeEventListener('hisab-foreground', foreground);
     };
-  }, [db, sync, auth, storageReady, simulation, userProfile?.subjectHash]);
+  }, [db, sync, auth, storageReady, simulation, userProfile?.subjectHash, accountPreview]);
 
   // Automatic sync on network connectivity restoration
   useEffect(() => {
@@ -606,6 +611,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   };
 
   const signInWithGoogle = async (): Promise<GoogleUserProfile> => {
+    if (accountPreview) throw new Error('LEGACY_SYNC_DISABLED');
     // Invoke GIS within the original tap. Awaiting storage first loses popup permission on mobile.
     const needsBinding = !db.getIdentity() && !db.hasOnlyUntouchedStarters();
     if (needsBinding && !window.confirm(language === 'en'

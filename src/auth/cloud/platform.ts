@@ -1,6 +1,6 @@
 import { App } from '@capacitor/app';
 import { Browser } from '@capacitor/browser';
-import { Capacitor } from '@capacitor/core';
+import { Capacitor, type PluginListenerHandle } from '@capacitor/core';
 import { CloudAuth } from './cloudAuth';
 import { CLOUD_CALLBACK_PATH, NATIVE_CLOUD_CALLBACK } from './config';
 
@@ -15,14 +15,19 @@ export async function attachNativeCloudCallbacks(auth: CloudAuth, onResult: (err
     if (seen.size > 8) seen.delete(seen.values().next().value!);
     try { await auth.handleCallback(url); onResult(); }
     catch (error) { onResult(error instanceof Error ? error : new Error('CLOUD_SIGN_IN_UNAVAILABLE')); }
+    finally { await Browser.close().catch(() => {}); }
   };
   const listener = await App.addListener('appUrlOpen', ({ url }) => { void receive(url); });
-  const lifecycle = await App.addListener('appStateChange', ({ isActive }) => {
-    void (isActive ? auth.resume() : auth.suspend()).catch(() => {});
-  });
-  const launch = await App.getLaunchUrl();
-  if (launch?.url) await receive(launch.url);
-  return async () => { await listener.remove(); await lifecycle.remove(); await auth.suspend(); };
+  let lifecycle:PluginListenerHandle|undefined;
+  const detach=async()=>{await Promise.allSettled([listener.remove(),lifecycle?.remove(),auth.suspend()]);};
+  try{
+    lifecycle = await App.addListener('appStateChange', ({ isActive }) => {
+      void (isActive ? auth.resume() : auth.suspend()).catch(() => {});
+    });
+    const launch = await App.getLaunchUrl();
+    if (launch?.url) await receive(launch.url);
+    return detach;
+  }catch(error){await detach();throw error;}
 }
 
 export async function openCloudGoogleSignIn(auth: CloudAuth, expectedUserId: string | null = null) {

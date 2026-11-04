@@ -210,7 +210,7 @@ export const ProfileModal: React.FC<ProfileModalProps> = ({ isOpen, onClose }) =
 
               <div>
                 <label className="block text-xs font-semibold text-slate-700 mb-1">
-                  {language === 'bn' ? 'ফোন নম্বর (ঐচ্ছিক)' : 'Phone Number (Optional)'}
+                  {language === 'bn' ? 'যোগাযোগের নম্বর (ঐচ্ছিক)' : 'Contact number (optional)'}
                 </label>
                 <input
                   type="tel"

@@ -11,9 +11,15 @@ export interface CustomerChangeResult {
   readonly status: CustomerChangeStatus;
   readonly account: CustomerAccount;
 }
+export interface PendingCustomerChange {
+  readonly kind: 'email' | 'phone' | 'google';
+  readonly target: string | null;
+  readonly expired: boolean;
+}
 
 export interface CustomerAccountChanges {
   readAccount(): Promise<CustomerAccount>;
+  readPendingChange(): Promise<PendingCustomerChange | null>;
   requestEmailChange(email: string): Promise<CustomerChangeResult>;
   checkEmailChange(): Promise<CustomerChangeResult>;
   requestPhoneChange(phone: string): Promise<CustomerChangeResult>;

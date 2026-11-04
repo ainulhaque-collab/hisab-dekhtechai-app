@@ -1,5 +1,7 @@
 # Stable customer identity — phone / Gmail changes
 
+**Follow-up milestone:** [Account settings integration](ACCOUNT_SETTINGS_INTEGRATION.md) mounts the panel while keeping contact changes, SMS and financial adoption gated. The staged-adapter results below describe PR14, not a completed production rollout.
+
 Owner requirement and SMS decision: **2026-11-04 (Asia/Dhaka)**. Continuing PR-3
 on top of `0f4dae9f8694bad5c2d0abfd8ec76d7aa62172d2`.
 

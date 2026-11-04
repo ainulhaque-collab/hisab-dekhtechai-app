@@ -11,6 +11,7 @@ import {
   RefreshCw,
   AlertTriangle,
   CheckCircle2,
+  ShieldCheck,
   Settings,
   Plus,
   Users,
@@ -109,6 +110,15 @@ export const Navbar: React.FC<NavbarProps> = ({
    * actual sync failures, pending changes, and confirmed durable persistence.
    */
   const getHonestSyncBadge = () => {
+    if (import.meta.env.VITE_SUPABASE_AUTH_ENABLED === 'true') {
+      return {
+        icon: ShieldCheck,
+        text: isEn ? 'Saved on device' : 'ডিভাইসে সংরক্ষিত',
+        bgColor: 'bg-slate-50 text-slate-700 border-slate-200',
+        dotColor: 'bg-slate-400',
+        title: isEn ? 'Local records · open account settings' : 'স্থানীয় হিসাব · অ্যাকাউন্ট সেটিংস খুলুন',
+      };
+    }
     if (!isOnline) {
       return {
         icon: CloudOff,
@@ -337,7 +347,7 @@ export const Navbar: React.FC<NavbarProps> = ({
               onClick={onOpenSyncModal}
               className={`flex items-center justify-center gap-1.5 px-2 py-1 text-xs font-medium rounded-lg transition-colors border ${badge.bgColor} min-h-[44px] min-w-[44px]`}
               title={badge.title}
-              aria-label={`${badge.text}. ${isEn ? 'Open sync details' : 'সিঙ্কের বিস্তারিত খুলুন'}`}
+              aria-label={`${badge.text}. ${import.meta.env.VITE_SUPABASE_AUTH_ENABLED === 'true' ? (isEn ? 'Open account settings' : 'অ্যাকাউন্ট সেটিংস খুলুন') : (isEn ? 'Open sync details' : 'সিঙ্কের বিস্তারিত খুলুন')}`}
               aria-haspopup="dialog"
             >
               <span className={`w-1.5 h-1.5 rounded-full shrink-0 ${badge.dotColor}`} />
