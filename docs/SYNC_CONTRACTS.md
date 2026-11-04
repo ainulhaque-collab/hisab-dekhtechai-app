@@ -69,7 +69,11 @@ cover exact money, foreign/stale/partial replies, duplicates, conflicts, opaque
 cursors, routing errors and a real LocalDatabase + synthetic durable-driver
 offline journal/outbox reload while fetch is unavailable.
 
-Run `npm run lint`, `npm test`, `npm run build`. Local logs are in ignored
+Observed locally on Windows Node 26.13.0/npm 11.20.0: clean install and
+`npm run lint` passed; `npm test` passed **81 tests** (73 baseline + 8 new,
+zero failed/skipped); `npm run build` passed. All **17 built output files** are
+byte-identical to the PR-0 baseline, confirming these unmounted modules have no
+current UI bundle effect. Local logs/comparison hashes are in ignored
 `build/pr1/`. These are local/synthetic protocol tests, **not hosted Postgres
 sync, device SQLite crash, two-user RLS or real multi-device acceptance**. The
 installed APK is not replaced for this unmounted contract milestone. Current
