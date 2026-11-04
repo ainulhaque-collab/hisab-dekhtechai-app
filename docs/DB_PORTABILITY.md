@@ -3,6 +3,22 @@
 2026-11-04. Scope: portable SQL/RLS foundation and restore evidence, not live
 financial sync, account migration or a public release. Parent: PR #11.
 
+## Verified delivery
+
+Local lint, **81 app tests**, **11 PostgreSQL WASM tests** and web build passed.
+Native PG17 replay, two-owner isolation, concurrent retries and real scoped
+pg_dump/restore passed in [CI #90](https://github.com/ainulhaque-collab/hisab-dekhtechai-app/actions/runs/41815562610).
+The forward migration was then applied only to the bound development project;
+the hosted rollback-only verification passed, with no fixture users/journals or
+media references left behind. All eight Hisab tables have RLS and FORCE RLS.
+The 554 inspected foreign schema-object signatures stayed unchanged.
+
+Actual hosted version: `20261104104123_hisab_portable_money_media`. The CLI
+initially created `20261104102355`; after MCP applied it, only the new filename
+was aligned to the **server-recorded** version, keeping SQL bytes identical.
+The two historical files remain unchanged. Sanitized evidence and hashes are in
+`qa/portable-postgres-evidence.json`; final-head CI results are linked on PR #12.
+
 ## Existing hosted schema and forward migration
 
 Development project: `sfzitbasxrpmtmldujbm`, `hisab-dekhte-chai`, Postgres 17.

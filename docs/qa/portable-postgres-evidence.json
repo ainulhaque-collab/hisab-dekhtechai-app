@@ -1,0 +1,59 @@
+{
+  "date": "2026-11-04",
+  "timezone": "Asia/Dhaka",
+  "milestone": "PR-2",
+  "project": "sfzitbasxrpmtmldujbm",
+  "migration": {
+    "name": "hisab_portable_money_media",
+    "version": "20261104104123",
+    "cli": "3.0.0",
+    "originalCliFilename": "20261104102355_hisab_portable_money_media.sql",
+    "historyFilename": "20261104104123_hisab_portable_money_media.sql",
+    "filenameReason": "CLI-created file aligned to the actual version recorded by Supabase apply_migration; SQL bytes unchanged",
+    "sqlSha256": "9d732bd278d522f39242cd5934aea74f5c97794d16801dca8ab9b6e02c6af4a6",
+    "applied": true
+  },
+  "preservedHistoricalBlobs": {
+    "20261029152851_hisab_cloud_foundation.sql": "7e457796f1f429769bc63ab89d30cbc90081e627",
+    "20261029154151_hisab_private_storage_guards.sql": "421be1b036c8d2e38b375312b39c48338d001ad8"
+  },
+  "hostedVerification": {
+    "result": "HISAB_PORTABLE_ROLLBACK_PASS",
+    "rlsAndForceRlsTables": 8,
+    "remainingSyntheticAuthUsers": 0,
+    "remainingJournals": 0,
+    "remainingMediaReferences": 0,
+    "foreignObjectsCompared": 554,
+    "foreignFingerprintBefore": "dd033a32eb619e30e89f1248661bcffe",
+    "foreignFingerprintAfter": "dd033a32eb619e30e89f1248661bcffe",
+    "securityAdvisoryChange": "none; inherited 29 INFO and 2 unrelated WARN findings unchanged"
+  },
+  "localChecks": {
+    "runtime": "Windows Node 26.13.0 / npm 11.20.0",
+    "lint": "PASS",
+    "appTests": { "passed": 81, "failed": 0, "skipped": 0 },
+    "sqlWasmTests": { "passed": 11, "failed": 0, "skipped": 0 },
+    "webBuild": "PASS",
+    "existingLockedPackageVersionsChanged": 0
+  },
+  "nativeRecoveryProof": {
+    "sourceCommit": "5b41b2094b5708f87350a7d541a0b257f66c8f96",
+    "workflowRun": 41815562610,
+    "job": 126525299548,
+    "engine": "native PostgreSQL 17 in disposable CI service",
+    "replayAndConcurrentRetry": "PASS",
+    "scopedPgDumpAndRestore": "PASS",
+    "exactFinancialFingerprints": "PASS",
+    "twoOwnerRlsAfterRestore": "PASS",
+    "lateAppendRejectionAfterMarkerSeal": "PASS",
+    "newPostAndIdempotentRetryAfterRestore": "PASS"
+  },
+  "boundaries": {
+    "realFinancialRecordsUploaded": false,
+    "binaryMediaTransferred": false,
+    "appRuntimeSourceChanged": false,
+    "apkInstalled": false,
+    "productionPromoted": false,
+    "billingChanged": false
+  }
+}
