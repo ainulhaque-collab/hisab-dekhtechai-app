@@ -1,0 +1,81 @@
+{
+  "auditDate": "2026-11-04",
+  "timezone": "Asia/Dhaka",
+  "milestone": "PR-0",
+  "baseCommit": "ede7e03ec9b168a2fc79f3b65260e4a969a2b9d8",
+  "runtime": {
+    "node": "v26.13.0",
+    "npm": "11.20.0",
+    "platform": "win32",
+    "arch": "x64",
+    "ciNode": "22",
+    "ciResult": "not_yet_observed"
+  },
+  "checks": [
+    {
+      "command": "npm ci --ignore-scripts --no-audit --no-fund",
+      "initialResult": "FAIL_EUSAGE_INCOMPLETE_LOCKFILE",
+      "afterLockRepair": "PASS",
+      "logSha256": "2d2b1fb6bce6797845940aff9b0f276e9200bb2227a4b7360097145d563672a0"
+    },
+    {
+      "command": "npm run lint",
+      "result": "PASS",
+      "logSha256": "6b30c42644c8a3e5877b9f39d6755947f5c0ced72e5ae8a96e530bc3f3c73aef"
+    },
+    {
+      "command": "npm test",
+      "result": "PASS",
+      "tests": 73,
+      "failed": 0,
+      "skipped": 0,
+      "logSha256": "0849807d3a538da1d98fcdcf8d22519d0c87d0e62a17d5ce9fecfa36e5f637fc",
+      "scope": "main baseline, not feature-branch suite or hardware durability"
+    },
+    {
+      "command": "npm run build",
+      "result": "PASS",
+      "logSha256": "d6a7e2806fc12668fc42fc1c62dd81e888ebafc2250e3b53bcab88c7ebd15905",
+      "warnings": [
+        "guarded node:crypto import externalized",
+        "main minified chunk exceeds 500 kB"
+      ]
+    }
+  ],
+  "lockfile": {
+    "beforeSha256": "003ac108383b9be4fc04be4cd27eea1a38ee4638c3b15e18cb6714d7f1cc3253",
+    "afterSha256": "6214581c3338066f2d377ec6c75d0e78a228914a13bf4d4f7531e11bdcb756a4",
+    "retainedPackages": 248,
+    "changedRetainedVersionOrIntegrity": 0,
+    "addedEntries": 74,
+    "removedObsoleteEntries": 83
+  },
+  "hostedInspection": {
+    "project": "sfzitbasxrpmtmldujbm",
+    "name": "hisab-dekhte-chai",
+    "status": "ACTIVE_HEALTHY",
+    "postgres": "17.11.0.003",
+    "mode": "read_only_catalogs",
+    "hisabTables": 7,
+    "tablesWithRlsAndForceRls": 7,
+    "privateHisabBuckets": 2,
+    "unrelatedDeshpathTables": 17,
+    "migrationsAppliedByThisMilestone": 0,
+    "rowContentsRead": false
+  },
+  "device": {
+    "model": "TECNO CM6",
+    "package": "com.hisabdekhtechai.app",
+    "installedVersion": "1.0.20-test",
+    "installedVersionCode": 21,
+    "adbConnection": "verified",
+    "visibleUi": "dashboard_rendered_on_real_phone",
+    "historyUi": "not_verified_device_switched_to_settings_with_floating_app",
+    "bootSmokeCheck": "app_running_no_checked_error_signature_in_bounded_current_pid_log_scan",
+    "apkInstalled": false,
+    "appDataCleared": false,
+    "financialEntriesCreated": false
+  },
+  "financialRuntimeSourceChanged": false,
+  "logs": "Ignored build/pr0 in the isolated PR-0 worktree; log hashes identify the exact observed runs."
+}
