@@ -146,7 +146,7 @@ test(`access SQL commands on ${native?'isolated native PostgreSQL':'PGlite'}`,as
   await store.directory.manage(admin,randomUUID(),[bob],'unblock');await store.directory.observe({...b,verifiedEmails:[bobEmail]});assert.equal((await store.status(b)).active,false,'cancelled invitations cannot be claimed');
   await assert.rejects(()=>store.directory.manage(admin,randomUUID(),[alice,owner],'block'),/ACCESS_OWNER_PROTECTED/);assert.equal((await store.status(a)).blocked,false,'invalid batch is atomic');
   await assert.rejects(()=>store.directory.manage(admin,randomUUID(),[alice,randomUUID()],'block'),/ACCESS_CUSTOMER_NOT_FOUND/);assert.equal((await store.status(a)).blocked,false);
-  const listed=await store.directory.list(admin,'alice.second',null,'active');assert.equal(listed.customers.length,1);assert.deepEqual(listed.customers[0].emails,[...aliceEmails].sort());
+  const listed=await store.directory.list(admin,'alice.second',null,'active');assert.equal(listed.customers.length,1);assert.deepEqual([...listed.customers[0].emails].sort(),[...aliceEmails].sort(),'verified contacts are identical across database collations');
   assert.equal((await store.directory.list(admin,"%' OR true --",null,'all')).customers.length,0);
   for(const table of ['codes','providers','commands','audit']){const data=JSON.stringify((await sql.query('SELECT * FROM hisab_access.'+table)).rows);assert.ok(!data.includes(secret));assert.ok(!data.includes(issued.code));}
   const role='hisab_access_test_reader';await exec(`CREATE ROLE ${role}; GRANT USAGE ON SCHEMA hisab_access TO ${role}; GRANT SELECT ON ALL TABLES IN SCHEMA hisab_access TO ${role}; SET ROLE ${role}`);
