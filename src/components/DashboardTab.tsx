@@ -124,7 +124,7 @@ export const DashboardTab: React.FC<DashboardTabProps> = ({
       )}
 
       {/* Primary Balance Card (Modern Deep Slate Navy) */}
-      <div className="bg-slate-900 text-white rounded-2xl p-5 shadow-sm border border-slate-800 relative overflow-hidden">
+      <div className="app-balance-card bg-slate-900 text-white rounded-2xl p-5 shadow-sm border border-slate-800 relative overflow-hidden">
         <div className="flex items-center justify-between mb-1.5">
           <div className="flex items-center gap-1.5 text-slate-400 text-xs font-medium">
             <span className="truncate">

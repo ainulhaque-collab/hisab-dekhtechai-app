@@ -3,6 +3,7 @@ import { WorkspaceAvatar } from './WorkspaceAvatar';
 import React, { lazy, Suspense, useState, useRef, useEffect } from 'react';
 import { useApp } from '../context/AppContext';
 import { formatAccountTitle } from '../domain/money';
+import { mobileUiEnabled } from '../appearance/mobileAppearance';
 import {
   Menu,
   ChevronDown,
@@ -215,7 +216,7 @@ export const Navbar: React.FC<NavbarProps> = ({
   const BadgeIcon = badge.icon;
 
   return (
-    <header className="sticky top-0 z-40 bg-white/95 backdrop-blur-md border-b border-slate-200/80 pt-safe header-safe">
+    <header className="app-navbar sticky top-0 z-40 bg-white/95 backdrop-blur-md border-b border-slate-200/80 pt-safe header-safe">
       <div className="max-w-xl mx-auto px-3 sm:px-4 py-2">
         <div className="flex items-center justify-between gap-2">
           {/* Brand & Workspace Switcher */}
@@ -232,7 +233,7 @@ export const Navbar: React.FC<NavbarProps> = ({
               >
                 <div className="min-w-0 max-w-[120px] xs:max-w-[150px] sm:max-w-[220px]">
                   <div className="flex items-center gap-1">
-                    <span className="font-bold text-slate-900 text-xs sm:text-sm tracking-tight truncate">
+                    <span className={`font-bold text-slate-900 ${mobileUiEnabled ? "text-sm" : "text-xs sm:text-sm"} tracking-tight truncate`}>
                       {formatAccountTitle(currentWorkspace?.name || '', language) ||
                         (isEn ? 'Hisab DekhteChai' : 'হিসাব দেখতে চাই')}
                     </span>
@@ -347,14 +348,14 @@ export const Navbar: React.FC<NavbarProps> = ({
             <button
               type="button"
               onClick={onOpenSyncModal}
-              className={`flex items-center justify-center gap-1.5 px-2 py-1 text-xs font-medium rounded-lg transition-colors border ${badge.bgColor} min-h-[44px] min-w-[44px]`}
+              className={mobileUiEnabled ? "app-mobile-header-control flex min-h-12 min-w-12 flex-col items-center justify-center gap-1 rounded-xl px-2 text-[10px]" : `flex items-center justify-center gap-1.5 px-2 py-1 text-xs font-medium rounded-lg transition-colors border ${badge.bgColor} min-h-[44px] min-w-[44px]`}
               title={badge.title}
               aria-label={`${badge.text}. ${import.meta.env.VITE_SUPABASE_AUTH_ENABLED === 'true' ? (isEn ? 'Open account settings' : 'অ্যাকাউন্ট সেটিংস খুলুন') : (isEn ? 'Open sync details' : 'সিঙ্কের বিস্তারিত খুলুন')}`}
               aria-haspopup="dialog"
             >
-              <span className={`w-1.5 h-1.5 rounded-full shrink-0 ${badge.dotColor}`} />
-              <span className="hidden xs:inline text-[11px] font-medium max-w-[110px] truncate">{badge.text}</span>
-              <BadgeIcon className={`w-3.5 h-3.5 shrink-0 xs:hidden ${syncStatus.state === 'syncing' ? 'motion-safe:animate-spin' : ''}`} />
+              <span className={mobileUiEnabled ? "sr-only" : `w-1.5 h-1.5 rounded-full shrink-0 ${badge.dotColor}`} />
+              <span className={mobileUiEnabled ? "order-2" : "hidden xs:inline text-[11px] font-medium max-w-[110px] truncate"}>{mobileUiEnabled ? (isEn ? "Account" : "অ্যাকাউন্ট") : badge.text}</span>
+              <BadgeIcon className={`${mobileUiEnabled ? "h-4 w-4" : "w-3.5 h-3.5 shrink-0 xs:hidden"} ${syncStatus.state === 'syncing' ? 'motion-safe:animate-spin' : ''}`} />
             </button>
 
             {/* FEAT-007: Top-Right ☰ Hamburger Menu */}
@@ -362,18 +363,18 @@ export const Navbar: React.FC<NavbarProps> = ({
               <button
                 type="button"
                 onClick={() => setShowHamburgerMenu(!showHamburgerMenu)}
-                className={`p-2 rounded-lg transition-colors min-h-[44px] min-w-[44px] flex items-center justify-center ${
+                className={`${mobileUiEnabled ? "app-mobile-header-control flex-col gap-1 rounded-xl min-h-12 min-w-12" : "rounded-lg min-h-[44px] min-w-[44px]"} p-2 transition-colors flex items-center justify-center ${
                   showHamburgerMenu
                     ? 'bg-slate-900 text-white'
                     : 'text-slate-700 hover:text-slate-900 hover:bg-slate-100'
                 }`}
                 title={isEn ? 'Main Menu' : 'প্রধান মেন্যু'}
-                aria-label="Menu"
+                aria-label={mobileUiEnabled ? (isEn ? 'Menu' : 'মেনু') : 'Menu'}
                 aria-haspopup="true"
                 aria-expanded={showHamburgerMenu}
               >
                 {/* ☰ Hamburger Icon (Three horizontal lines) */}
-                <Menu className="w-5 h-5" strokeWidth={2.2} />
+                <Menu className="w-5 h-5" strokeWidth={2.2} />{mobileUiEnabled && <span className="text-[10px]">{isEn ? "Menu" : "মেনু"}</span>}
               </button>
 
               {/* Right-Aligned Downward Compact Dropdown Menu */}

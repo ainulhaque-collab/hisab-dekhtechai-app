@@ -477,7 +477,7 @@ export const AddTransactionTab: React.FC<AddTransactionTabProps> = ({ onSuccess 
         {showAIEntry && <AIEntryModal key={currentWorkspace?.id} onClose={() => setShowAIEntry(false)} onApply={applyAIEntry} />}
 
         {/* Transaction Type Segmented Switcher */}
-        <div className="grid grid-cols-3 gap-1 p-1 bg-slate-100/90 rounded-xl mb-4 text-xs font-semibold">
+        <div className="app-entry-type grid grid-cols-3 gap-1 p-1 bg-slate-100/90 rounded-xl mb-4 text-xs font-semibold">
           <button
             type="button"
             onClick={() => { setType('expense'); setAITypeMissing(false); }}

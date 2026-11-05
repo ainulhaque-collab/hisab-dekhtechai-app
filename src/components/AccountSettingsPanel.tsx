@@ -4,6 +4,7 @@ import {accountSettingsSession} from '../auth/cloud/accountSettingsRuntime';
 import type {AccountSettingsSession} from '../auth/cloud/accountSettingsSession';
 import {fieldClass,primaryButton,secondaryButton} from './ModalShell';
 import {accountSettingsError} from './accountSettingsText';
+import {mobileUiEnabled} from '../appearance/mobileAppearance';
 
 export default function AccountSettingsPanel({en,session=accountSettingsSession}:{en:boolean;session?:AccountSettingsSession}){
   const state=useSyncExternalStore(session.subscribe,session.getSnapshot,session.getSnapshot);
@@ -16,10 +17,11 @@ export default function AccountSettingsPanel({en,session=accountSettingsSession}
     removed:en?'The selected Google sign-in was removed.':'নির্বাচিত Google লগইন সরানো হয়েছে।',cancelled:en?'The pending request was cleared on this device.':'এই ডিভাইসের অপেক্ষমাণ অনুরোধ বাতিল হয়েছে।',
     local_sign_out:en?'Signed out on this device. The server could not confirm revocation.':'এই ডিভাইসে সাইন আউট হয়েছে। সার্ভার থেকে সেশন বন্ধ হওয়ার নিশ্চয়তা পাওয়া যায়নি।'};
   return <div className="space-y-5 text-sm leading-relaxed">
-    <div className="rounded-2xl border border-blue-100 bg-blue-50 p-4">
+    {mobileUiEnabled&&!account&&state.phase!=='loading'&&<section className="app-balance-card rounded-3xl border p-5 text-white"><ShieldCheck className="mb-4 h-9 w-9 text-emerald-300" aria-hidden="true"/><h3 className="text-xl font-bold">{en?'Your account, connected':'নিজের অ্যাকাউন্টে লগইন করুন'}</h3><p className="mt-3 text-sm leading-relaxed text-blue-100">{en?'Continue securely with Google. You can link another Google sign-in to this same account later.':'Google দিয়ে নিরাপদে লগইন করুন। পরে একই অ্যাকাউন্টে আরও একটি Google লগইন যুক্ত করতে পারবেন।'}</p></section>}
+    {(!mobileUiEnabled||account)&&<div className="rounded-2xl border border-blue-100 bg-blue-50 p-4">
       <div className="flex items-center gap-2 font-semibold"><ShieldCheck aria-hidden="true" className="h-5 w-5 text-blue-700"/><span>{en?'One account, even when details change':'লগইন বদলালেও একই অ্যাকাউন্ট'}</span></div>
       <p className="mt-2 text-xs text-slate-600">{en?'Verified sign-ins belong to your permanent account. Your local records are kept when you sign out.':'যাচাইকৃত লগইন আপনার স্থায়ী অ্যাকাউন্টের অংশ। সাইন আউট করলেও স্থানীয় হিসাব থাকবে।'}</p>
-    </div>
+    </div>}
     <p role="status" aria-live="polite" className="flex items-center gap-2 text-xs font-semibold text-slate-600">
       {busy?<LoaderCircle aria-hidden="true" className="h-4 w-4 motion-safe:animate-spin"/>:state.phase==='connected'?<CheckCircle2 aria-hidden="true" className="h-4 w-4 text-emerald-700"/>:null}
       {busy?(en?'Checking account…':'অ্যাকাউন্ট যাচাই হচ্ছে…'):offline?(en?'Offline · last account details':'অফলাইন · আগের অ্যাকাউন্টের তথ্য'):state.phase==='error'&&account?(en?'Last verified account · check connection':'আগের যাচাইকৃত অ্যাকাউন্ট · সংযোগ যাচাই করুন'):state.phase==='opening'?(en?'Continue on the Google screen':'Google-এর পর্দায় লগইন শেষ করুন'):account?(en?'Account verified':'অ্যাকাউন্ট যাচাইকৃত'):(en?'Sign in to manage your account':'অ্যাকাউন্ট পরিচালনা করতে লগইন করুন')}

@@ -27,6 +27,9 @@ import { PinLockScreen } from './components/PinLockScreen';
 import { pinLock } from './security/pinLock';
 import { JournalTransaction } from './contracts/types';
 import { hasAccountCallback } from './auth/cloud/callbackLocation';
+import { offerFirstRunWelcome, rememberWelcomeSeen } from './appearance/welcome';
+import { mobileUiEnabled } from './appearance/mobileAppearance';
+const MobileWelcome=lazy(()=>import('./components/MobileWelcome'));
 const accountAuthEnabled=import.meta.env.VITE_SUPABASE_AUTH_ENABLED==='true';
 const AllWalletsPage=lazy(()=>import('./components/AllWalletsPage'));
 
@@ -82,7 +85,9 @@ class ErrorBoundary extends React.Component<ErrorBoundaryProps, ErrorBoundarySta
 }
 
 function MainApp() {
-  const { currentWorkspace, language, auth, signOut } = useApp();
+  const { currentWorkspace, language, auth, signOut, db } = useApp();
+  const [showWelcome,setShowWelcome]=useState(()=>!hasAccountCallback()&&offerFirstRunWelcome(db));
+  useEffect(()=>{if(mobileUiEnabled)document.documentElement.lang=language;},[language]);
   const legacySignOut=useRef(signOut);
   legacySignOut.current=signOut;
   const [activeTab, setActiveTab] = useState<TabType>('home');
@@ -150,8 +155,10 @@ function MainApp() {
     setActiveTab('history');
   };
 
+  if(showWelcome)return <Suspense fallback={<p role="status" className="p-6 text-slate-500">{language==='en'?'Opening…':'খোলা হচ্ছে…'}</p>}><MobileWelcome onStart={()=>{rememberWelcomeSeen();setShowWelcome(false);}} onSignIn={()=>{rememberWelcomeSeen();setShowWelcome(false);openConnectionSettings();}}/></Suspense>;
+
   return (
-    <div className="min-h-screen bg-slate-50 text-slate-900 flex flex-col font-sans selection:bg-blue-100">
+    <div className="app-layout min-h-screen bg-slate-50 text-slate-900 flex flex-col font-sans selection:bg-blue-100">
       {/* Top Header Navbar */}
       <Navbar
         onOpenSyncModal={openConnectionSettings}
