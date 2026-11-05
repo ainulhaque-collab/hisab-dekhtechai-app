@@ -56,7 +56,7 @@ export function AppSelect({ children, value, onChange, disabled, className, id, 
         <div className="flex items-center gap-3 px-5 py-4 border-b border-slate-100">
           <div className="h-9 w-9 rounded-xl bg-blue-50 text-blue-700 flex items-center justify-center"><ListFilter className="h-4 w-4" /></div>
           <div className="flex-1"><div className="text-sm font-bold">{label}</div><p className="mt-0.5 text-[11px] text-slate-400">{bn ? 'একটি অপশন নির্বাচন করুন' : 'Choose an option to continue'}</p></div>
-          <button type="button" aria-label={bn ? 'বন্ধ করুন' : 'Close picker'} onClick={() => setOpen(false)} className="p-2 rounded-full text-slate-400 hover:bg-slate-100"><X className="h-4 w-4" /></button>
+          <button type="button" aria-label={bn ? 'বন্ধ করুন' : 'Close picker'} onClick={() => setOpen(false)} className="app-modal-close p-2 rounded-full text-slate-400 hover:bg-slate-100"><X className="h-4 w-4" /></button>
         </div>
         {options.length > 6 && <div className="relative mx-4 mt-3 mb-1"><Search className="absolute left-3 top-3 h-4 w-4 text-slate-400" /><input aria-label={bn ? 'খুঁজুন' : 'Search options'} placeholder={bn ? 'অপশন খুঁজুন…' : 'Search options…'} value={query}
           onChange={e => setQuery(e.target.value)} className="w-full py-2.5 pl-9 pr-3 border border-slate-200 rounded-xl text-xs text-slate-900 bg-slate-50 outline-none focus:border-blue-400 focus:ring-4 focus:ring-blue-50" /></div>}

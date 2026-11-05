@@ -22,7 +22,7 @@ Source baseline: installed/accepted `af63493148fb1272261bebbf73bc887ad9be398f`, 
 
 Status: implementation started. No claim that mobile redesign, cloud sync, Admin/licensing, or public release is complete. Keep separate reviewable milestone PRs and evidence; do not tick owner acceptance from code/build success.
 
-## First local milestone — implemented, device acceptance pending
+## First local milestone — implemented; History/page accepted on device
 
 - Immutable wallet create/link metadata and protected paired allocation journals. Exact integer paisa, atomic local write/outbox, stable retry IDs, one allocation per workspace per wallet, owner isolation, missing-reference spending guard, physical shortfall cap and archived-balance inclusion.
 - First Personal **All wallets** is a dedicated mobile page, with Cash/bKash/Nagad/Bank totals, wallet codes, per-workspace available/reserved funds and date-filtered income/expense. Link existing accounts only after an explicit balance preview; no name-based matching or automatic customer-data changes.
@@ -36,7 +36,7 @@ Status: implementation started. No claim that mobile redesign, cloud sync, Admin
 - TypeScript checks pass. Full suite: **389 tests, 388 pass, 1 native-Postgres-only skip, 0 failures**. Separate isolated SQL/RLS suite: **11/11 pass**. Compiled AI API runtime verification and web bundle build pass. These generic SQL checks do **not** establish portable wallet-command support.
 - Fifteen wallet tests cover exact large paisa, isolated spending/reserves, paired transfers, retry/conflict, durable-write rollback, concurrent requests, owner/tampered-leg rejection, missing references, legacy adoption/reload/backup, schema-5 retention, Personal goal loans/partial repayment, stale corrections, legacy physical deficits, fees and period filters.
 - Actual 390×844 Bangla UI: create a synthetic bKash with BDT10,000; link a zero Business allocation; transfer BDT6,000; post one BDT100 Personal expense. Result: Personal BDT3,900, Business BDT6,000, physical bKash BDT9,900; only Personal expense BDT100. Page/back/footer and contextual picker labels checked. No Google sign-in or real-data upload in this test.
-- Screenshots and raw tool logs remain in ignored `build/qa/`; only synthetic examples may be shared. Signed APK/device evidence will be appended after it is actually verified.
+- Screenshots and raw tool logs remain in ignored `build/qa/`; only synthetic examples may be shared. Same-key `1.0.23-rc3/code24`, source `fe2c4fb`, installed in place: schema5→6, native media, normal launch and exact old-finance/outbox retention pass. Owner confirmed old History and All wallets both appear. APK SHA-256 `CBEB14E3C6FB3D9107A149800D58465F129734A1C45D85BE797C08EF6ECDEADF`. Explicit real-wallet linking and publication acceptance remain separate. Next UI milestone is documented in `MOBILE_APPEARANCE_NAVIGATION.md`.
 
 ### Still open before release
 

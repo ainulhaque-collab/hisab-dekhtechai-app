@@ -35,7 +35,7 @@ export function DashboardCharts({ data, language, visible }: { data: DashboardDa
       <div className="flex items-center gap-2"><span className="rounded-lg bg-blue-50 p-2 text-blue-700"><PieChart className="h-4 w-4" /></span><div><h2 className="text-sm font-bold text-slate-900">{en ? 'Where your money goes' : 'কোন খাতে কত খরচ'}</h2><p className="mt-0.5 text-[11px] text-slate-400">{en ? 'This month · Tap a category' : 'এই মাস · খাতে চাপ দিয়ে দেখুন'}</p></div></div>
       <div className="relative mx-auto my-4 h-40 w-40">
         <svg viewBox="0 0 120 120" className="h-full w-full -rotate-90" role="img" aria-label={en ? 'Monthly expenses by category; amounts are listed below' : 'মাসের খরচের খাতভিত্তিক চার্ট; পরিমাণ নিচে দেওয়া আছে'}>
-          <circle cx="60" cy="60" r="46" fill="none" stroke="#f1f5f9" strokeWidth="13" />
+          <circle className="app-chart-track" cx="60" cy="60" r="46" fill="none" stroke="#f1f5f9" strokeWidth="13" />
           {segments.map((cat, index) => { const share = ratio(cat.amount, expense), start = offset; offset += share;
             return <circle key={cat.id} cx="60" cy="60" r="46" pathLength="100" fill="none" stroke={colors[index % colors.length]} strokeWidth={active?.id === cat.id ? '17' : '13'} strokeDasharray={`${share} ${100 - share}`} strokeDashoffset={-start} opacity={active && active.id !== cat.id ? 0.3 : 1} className="motion-safe:transition-opacity"><title>{cat.name}: {money(cat.amount.toString())}</title></circle>;
           })}

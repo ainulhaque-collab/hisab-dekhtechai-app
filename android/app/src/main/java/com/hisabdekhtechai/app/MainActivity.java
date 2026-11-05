@@ -37,6 +37,7 @@ public class MainActivity extends BridgeActivity {
         registerPlugin(AIMediaAccessPlugin.class);
         registerPlugin(ReportPrintPlugin.class);
         registerPlugin(CloudSessionVaultPlugin.class);
+        registerPlugin(DeviceAppearancePlugin.class);
         super.onCreate(savedInstanceState);
         Log.i("HisabAuth", "Google plugin registered=" + (getBridge().getPlugin("NativeGoogleDrive") != null));
         getOnBackPressedDispatcher().addCallback(this, new OnBackPressedCallback(true) {
