@@ -1,4 +1,5 @@
 import { AppSelect } from './AppSelect';
+import {walletError} from './walletText';
 import React, { useState, useMemo } from 'react';
 import { useApp } from '../context/AppContext';
 import { formatBDT, parsePaisaString, normalizeNumericAmountInput } from '../domain/money';
@@ -220,7 +221,7 @@ export const HistoryTab: React.FC<HistoryTabProps> = ({
       );
       handleCloseModal();
     } catch (err: any) {
-      alert(err.message || 'Failed to delete transaction');
+      alert(typeof err?.message==='string'&&err.message.startsWith('WALLET_')?walletError(err,isEn):(err.message || 'Failed to delete transaction'));
     } finally {
       setIsDeleting(false);
     }
@@ -252,7 +253,7 @@ export const HistoryTab: React.FC<HistoryTabProps> = ({
 
       handleCloseModal();
     } catch (err: any) {
-      setEditError(err.message || (isEn ? 'Failed to update transaction' : 'লেনদেন আপডেট ব্যর্থ হয়েছে'));
+      setEditError(typeof err?.message==='string'&&err.message.startsWith('WALLET_')?walletError(err,isEn):(err.message || (isEn ? 'Failed to update transaction' : 'লেনদেন আপডেট ব্যর্থ হয়েছে')));
     }
   };
 

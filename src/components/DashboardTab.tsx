@@ -23,6 +23,8 @@ import {
 import { JournalTransaction } from '../contracts/types';
 import { Users, UserPlus } from 'lucide-react';
 import { DashboardCharts } from './DashboardCharts';
+import {walletFeatureEnabled} from './walletText';
+import {personalWalletHome} from '../storage/walletBook';
 
 interface DashboardTabProps {
   onNavigateToAdd: () => void;
@@ -31,6 +33,7 @@ interface DashboardTabProps {
   onOpenSyncModal: () => void;
   onOpenPartiesModal?: () => void;
   onOpenSavingsGoals?: () => void;
+  onOpenAllWallets?:()=>void;
 }
 
 export const DashboardTab: React.FC<DashboardTabProps> = ({
@@ -40,6 +43,7 @@ export const DashboardTab: React.FC<DashboardTabProps> = ({
   onOpenSyncModal,
   onOpenPartiesModal,
   onOpenSavingsGoals,
+  onOpenAllWallets,
 }) => {
   const { db, dashboardData, currentWorkspace, parties, language, syncStatus, isOnline, triggerManualSync } =
     useApp();
@@ -53,6 +57,9 @@ export const DashboardTab: React.FC<DashboardTabProps> = ({
   const activeGoals = savings?.goals.filter(item => !item.deleted && !item.goal.archived) || [];
   const savedMinor = activeGoals.reduce((total, item) => total + BigInt(item.fundedMinor), 0n);
   const shortfall = activeGoals.some(item => BigInt(item.shortfallMinor) > 0n);
+  const spendableMinor=savings?.accounts.reduce((total,a)=>total+BigInt(a.availableMinor),0n).toString();
+  const reservedMinor=savings?.accounts.reduce((total,a)=>total+BigInt(a.allocatedMinor),0n).toString()||'0';
+  const localFinanceOnly=import.meta.env.VITE_SUPABASE_AUTH_ENABLED==='true';
 
   if (!dashboardData) {
     return (
@@ -85,6 +92,7 @@ export const DashboardTab: React.FC<DashboardTabProps> = ({
 
   return (
     <div className="space-y-4 pb-20 animate-in fade-in">
+      {walletFeatureEnabled&&currentWorkspace?.id===personalWalletHome(db.getRawState().workspaces.values(),db.getIdentity()?.ownerSubjectHash||'local-owner')?.id&&<button type="button" onClick={onOpenAllWallets} className="flex min-h-14 w-full items-center gap-3 rounded-2xl border border-blue-100 bg-blue-50 p-4 text-left"><span className="flex h-10 w-10 items-center justify-center rounded-xl bg-white text-blue-700"><Banknote className="h-5 w-5"/></span><span className="min-w-0 flex-1"><strong className="block text-sm text-slate-900">{language==='en'?'All wallets':'সব ওয়ালেট'}</strong><span className="mt-1 block text-xs text-slate-600">{language==='en'?'See total cash and each workspace’s share':'মোট টাকা ও প্রতিটি খাতার বরাদ্দ দেখুন'}</span></span><ChevronRight className="h-4 w-4 text-blue-700"/></button>}
       {/* Offline or Pending Sync Notice */}
       {(!isOnline || syncStatus.pendingOutboxCount > 0 || syncStatus.state === 'conflict') && (
         <div
@@ -98,10 +106,10 @@ export const DashboardTab: React.FC<DashboardTabProps> = ({
                 ? (language === 'en' ? 'Offline · Changes saved locally' : 'অফলাইন · ডাটা ডিভাইসে সংরক্ষিত')
                 : syncStatus.state === 'conflict'
                 ? (language === 'en' ? 'Conflict review required' : 'সংঘাত পর্যালোচনা প্রয়োজন')
-                : (language === 'en' ? `${syncStatus.pendingOutboxCount} pending sync` : `${syncStatus.pendingOutboxCount}টি সিঙ্ক অপেক্ষমান`)}
+                : localFinanceOnly?(language==='en'?'Saved on this device · cloud sync not enabled':'ডিভাইসে সংরক্ষিত · ক্লাউড সিঙ্ক চালু হয়নি'):(language === 'en' ? `${syncStatus.pendingOutboxCount} pending sync` : `${syncStatus.pendingOutboxCount}টি সিঙ্ক অপেক্ষমান`)}
             </span>
           </div>
-          <button
+          {!localFinanceOnly&&<button
             type="button"
             onClick={(e) => {
               e.stopPropagation();
@@ -111,7 +119,7 @@ export const DashboardTab: React.FC<DashboardTabProps> = ({
             className="px-2 py-0.5 bg-amber-700 text-white rounded-md font-medium text-[11px] shrink-0 hover:bg-amber-800 disabled:opacity-50"
           >
             {language === 'en' ? 'Sync' : 'সিঙ্ক'}
-          </button>
+          </button>}
         </div>
       )}
 
@@ -120,7 +128,7 @@ export const DashboardTab: React.FC<DashboardTabProps> = ({
         <div className="flex items-center justify-between mb-1.5">
           <div className="flex items-center gap-1.5 text-slate-400 text-xs font-medium">
             <span className="truncate">
-              {formatAccountTitle(currentWorkspace?.name || '', language)} · {t.totalBalance}
+              {formatAccountTitle(currentWorkspace?.name || '', language)} · {walletFeatureEnabled?(language==='en'?'Spendable allocation':'খরচযোগ্য বরাদ্দ'):t.totalBalance}
             </span>
           </div>
           <span className="text-[10px] font-mono tracking-wider px-2 py-0.5 rounded-md bg-slate-800 text-slate-300 border border-slate-700">
@@ -130,7 +138,7 @@ export const DashboardTab: React.FC<DashboardTabProps> = ({
 
         <div className="mb-4 flex items-center gap-2">
           <span className="min-w-0 break-all text-3xl sm:text-4xl font-bold tracking-tight tabular-nums text-white">{showBalance
-            ? formatBDT(dashboardData.totalConsolidatedBalanceMinor, { locale: language })
+            ? formatBDT(walletFeatureEnabled&&spendableMinor!==undefined?spendableMinor:dashboardData.totalConsolidatedBalanceMinor, { locale: language })
             : '৳ ••••••••'}</span>
           <button
             type="button"
@@ -141,6 +149,8 @@ export const DashboardTab: React.FC<DashboardTabProps> = ({
             {showBalance ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
           </button>
         </div>
+
+        {walletFeatureEnabled&&<div className="mb-4 flex flex-wrap gap-x-4 gap-y-2 text-xs text-slate-300"><span>{language==='en'?'Workspace total':'খাতার মোট'}: {showBalance?formatBDT(dashboardData.totalConsolidatedBalanceMinor,{locale:language}):'••••'}</span><span>{language==='en'?'Goal savings':'Goal-এ'}: {showBalance?formatBDT(reservedMinor,{locale:language}):'••••'}</span></div>}
 
         {/* 3-Metric Summary Strip */}
         <div className="grid grid-cols-3 gap-2 pt-3 border-t border-slate-800 text-xs">
@@ -177,7 +187,7 @@ export const DashboardTab: React.FC<DashboardTabProps> = ({
           <div>
             <div className="flex items-center gap-1.5 text-slate-400 text-[11px] font-medium">
               <span className="w-1.5 h-1.5 rounded-full bg-blue-400" />
-              <span>{t.netSavings}</span>
+              <span>{walletFeatureEnabled?(language==='en'?'Income − expense':'আয় − ব্যয়'):t.netSavings}</span>
             </div>
             <div className="font-semibold text-slate-100 mt-1 tabular-nums text-sm">
               {showBalance

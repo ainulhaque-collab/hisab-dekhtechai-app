@@ -265,6 +265,8 @@ export async function issueSavingsLoan(db: LocalDatabase, input: NewSavingsLoan,
         savingsEvent: { version: 1, action: 'allocation.release', goalId: terms.goalId, allocationId: contribution.allocationId, amountMinor: amount.toString() } });
       releases.push(op.operationId); remaining -= amount;
     }
+    const physical=db.getWalletOutflowLimit(terms.sourceAccountId,terms.borrowerAccountId);
+    if(physical!==null&&BigInt(terms.principalMinor)>BigInt(physical))return fail('WALLET_PHYSICAL_SHORTFALL');
     const issue: Issue = { version: 1, action: 'issue', terms, purpose: input.purpose.trim(), executorDeviceId: db.getDeviceId(), autoRepay: input.autoRepay ?? false, releases };
     internalAccount(db, terms, 'receivable', now); internalAccount(db, terms, 'payable', now);
     for (const p of postings(issue)) appendJournal(db, p, terms.issuedDate, `Savings loan: ${issue.purpose}`, now);
@@ -302,7 +304,9 @@ export async function repaySavingsLoan(db: LocalDatabase, loanId: string, reques
     if (!goal || goal.deleted || goal.goal.archived) return fail('LOAN_GOAL_UNAVAILABLE');
     const projection = db.getSavingsProjection(t.borrowerWorkspaceId);
     if (projection.orphanAllocationCount || projection.orphanReleaseCount) return fail('LOAN_SYNC_INCOMPLETE');
-    const available = BigInt(projection.accounts.find(a => a.accountId === t.borrowerAccountId)?.availableMinor || '0');
+    const allocationAvailable = BigInt(projection.accounts.find(a => a.accountId === t.borrowerAccountId)?.availableMinor || '0');
+    const physical=db.getWalletOutflowLimit(t.borrowerAccountId,t.sourceAccountId);
+    const available=physical!==null&&BigInt(physical)<allocationAvailable?BigInt(physical):allocationAvailable;
     const due = BigInt(row.balance.totalDueMinor), maximum = available < due ? available : due;
     const amount = amountMinor === undefined ? maximum : zero(amountMinor) ? BigInt(amountMinor) : fail();
     if (amount <= 0n || amount > available) return fail('LOAN_INSUFFICIENT_AVAILABLE');

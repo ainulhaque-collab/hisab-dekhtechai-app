@@ -1,6 +1,6 @@
 import { DELETE_CONFIRMATION } from '../domain/confirmation';
 import { AppSelect } from './AppSelect';
-import React, { useState } from 'react';
+import React, { lazy, Suspense, useState } from 'react';
 import { useApp } from '../context/AppContext';
 import {
   formatBDT,
@@ -30,8 +30,12 @@ import {
   ShieldAlert,
 } from 'lucide-react';
 import { Account, AccountGroup, AccountKind, UUID } from '../contracts/types';
+import {walletFeatureEnabled} from './walletText';
+import {personalWalletHome,readWalletBook} from '../storage/walletBook';
+const WalletLinkModal=lazy(()=>import('./WalletLinkModal').then(m=>({default:m.WalletLinkModal})));
+const WalletTransferModal=lazy(()=>import('./WalletTransferModal').then(m=>({default:m.WalletTransferModal})));
 
-export const AccountsTab: React.FC = () => {
+export const AccountsTab: React.FC<{onOpenAllWallets:()=>void}> = ({onOpenAllWallets}) => {
   const {
     db,
     dashboardData,
@@ -55,6 +59,7 @@ export const AccountsTab: React.FC = () => {
   } = useApp();
 
   const isEn = language === 'en';
+  const [walletScreen,setWalletScreen]=useState<'link'|'transfer'|null>(null);
 
   const [accountView, setAccountView] = useState<'active' | 'archived'>('active');
   const [accountBusy, setAccountBusy] = useState(false);
@@ -92,6 +97,8 @@ export const AccountsTab: React.FC = () => {
   if (!dashboardData || !currentWorkspace) return null;
 
   const allWorkspaceAccounts = db.getAllAccounts(currentWorkspace.id);
+  const allocationProjection=walletFeatureEnabled?db.getSavingsProjection(currentWorkspace.id):null;
+  const walletBook=walletFeatureEnabled?readWalletBook(db.getRawState()):null;
   const visibleSummaries = dashboardData.accountSummaries.filter(summary => {
     const account = allWorkspaceAccounts.find(a => a.id === summary.accountId);
     return account && (accountView === 'archived' ? !!account.archivedAt : !account.archivedAt);
@@ -210,6 +217,20 @@ export const AccountsTab: React.FC = () => {
 
   return (
     <div className="space-y-4 pb-24 animate-in fade-in">
+      {walletFeatureEnabled&&<>
+        <section className="space-y-3 rounded-2xl border border-blue-100 bg-blue-50 p-4">
+          <p className="text-xs leading-relaxed text-slate-700">{isEn?'Only this workspace’s allocation is spendable here. Goals stay reserved.':'এখানে শুধু এই খাতার বরাদ্দ খরচ করা যাবে। Goal-এর টাকা সংরক্ষিত থাকবে।'}</p>
+          <div className="flex flex-wrap gap-2">
+            {personalWalletHome(db.getRawState().workspaces.values(),db.getIdentity()?.ownerSubjectHash||'local-owner')?.id===currentWorkspace.id&&<button type="button" className="min-h-12 rounded-xl bg-blue-700 px-4 py-3 text-xs font-semibold text-white" onClick={onOpenAllWallets}>{isEn?'All wallets · total cash':'সব ওয়ালেট · মোট টাকা'}</button>}
+            <button type="button" className="min-h-12 rounded-xl border border-blue-200 bg-white px-3 py-3 text-xs font-semibold text-blue-700" onClick={()=>setWalletScreen('link')}>{isEn?'Link by code':'কোড দিয়ে যুক্ত করুন'}</button>
+            <button type="button" className="min-h-12 rounded-xl border border-blue-200 bg-white px-3 py-3 text-xs font-semibold text-blue-700" onClick={()=>setWalletScreen('transfer')}>{isEn?'Transfer allocation':'বরাদ্দ স্থানান্তর'}</button>
+          </div>
+        </section>
+        <Suspense fallback={<p role="status" className="text-xs text-slate-500">{isEn?'Opening…':'খুলছে…'}</p>}>
+          {walletScreen==='link'&&<WalletLinkModal onClose={()=>setWalletScreen(null)}/>}
+          {walletScreen==='transfer'&&<WalletTransferModal onClose={()=>setWalletScreen(null)}/>}
+        </Suspense>
+      </>}
       {/* Header with Title and Creation Actions */}
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
         <div>
@@ -305,6 +326,9 @@ export const AccountsTab: React.FC = () => {
                 ? accountGroups.find((g) => g.id === fullAccount.groupId)
                 : null;
               const formattedName = formatAccountTitle(accSummary.name, language);
+              const allocation=allocationProjection?.accounts.find(a=>a.accountId===accSummary.accountId);
+              const walletLink=walletBook?.links.get(accSummary.accountId);
+              const master=walletLink?walletBook?.wallets.get(walletLink.walletId):undefined;
 
               return (
                 <div
@@ -335,13 +359,15 @@ export const AccountsTab: React.FC = () => {
                     </div>
                     <div className="text-right">
                       <div className="text-base font-bold text-slate-900 tabular-nums">
-                        {formatBDT(accSummary.currentBalanceMinor, { locale: language })}
+                        {formatBDT(allocation?.availableMinor||accSummary.currentBalanceMinor, { locale: language })}
                       </div>
                       <div className="text-[10px] text-slate-400 font-medium">
-                        {isEn ? 'Current Balance' : 'বর্তমান ব্যালেন্স'}
+                        {allocation?(isEn?'Spendable allocation':'খরচযোগ্য বরাদ্দ'):(isEn ? 'Current Balance' : 'বর্তমান ব্যালেন্স')}
                       </div>
                     </div>
                   </div>
+
+                  {allocation&&<div className="flex flex-wrap gap-x-4 gap-y-1 text-[11px] text-slate-500"><span>{isEn?'Allocation total':'খাতার মোট'} {formatBDT(allocation.balanceMinor,{locale:language})}</span><span>{isEn?'Goal savings':'Goal-এ'} {formatBDT(allocation.allocatedMinor,{locale:language})}</span>{master&&<code className="break-all text-blue-700">{master.code}</code>}</div>}
 
                   {/* Summary Metric Row */}
                   <div className="grid grid-cols-3 gap-2 pt-2.5 border-t border-slate-100 text-xs">
@@ -365,7 +391,7 @@ export const AccountsTab: React.FC = () => {
                     <div>
                       <div className="flex items-center gap-0.5 text-rose-600 text-[10px]">
                         <ArrowUpRight className="w-2.5 h-2.5" />
-                        <span>{isEn ? 'Total Out' : 'মোট খরচ'}</span>
+                        <span>{isEn ? 'Total Out' : 'মোট বের হয়েছে'}</span>
                       </div>
                       <div className="font-semibold text-slate-700 tabular-nums">
                         {formatBDT(accSummary.totalCreditsMinor, { locale: language, showDecimals: false })}
@@ -775,6 +801,7 @@ export const AccountsTab: React.FC = () => {
                 </label>
                 <AppSelect aria-label={isEn ? 'Account Type' : 'অ্যাকাউন্টের ধরন'}
                   value={editKind}
+                  disabled={!!editingAccount&&!!walletBook?.links.has(editingAccount.id)}
                   onChange={(e) => setEditKind(e.target.value as AccountKind)}
                   className="w-full px-3 py-2 bg-slate-50 border border-slate-300 rounded-xl font-medium focus:bg-white focus:outline-none focus:ring-2 focus:ring-blue-600"
                 >

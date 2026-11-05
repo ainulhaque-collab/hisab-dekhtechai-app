@@ -83,7 +83,7 @@ test('Savings earmarks preserve schema 5, journals, balances and existing operat
   const balances = canonicalJson(db.calculateAccountSummaries(workspaceId));
   const goal = await db.saveSavingsGoal(workspaceId, { name: 'Synthetic car goal', kind: 'general', targetMinor: '50000' });
   await db.allocateSavingsGoal(workspaceId, goal.id, account.id, '4000', 'Synthetic allocation');
-  assert.equal(db.getSchemaVersion(), 5);
+  assert.equal(db.getSchemaVersion(), 6);
   assert.equal(canonicalJson(db.calculateAccountSummaries(workspaceId)), balances);
   assert.equal(canonicalJson(db.toSerializable().journalTransactions), canonicalJson(before.journalTransactions));
   assert.equal(canonicalJson(db.toSerializable().journalLines), canonicalJson(before.journalLines));
@@ -305,7 +305,7 @@ test('Retained old-client workspace updates rebuild savings after hydration with
   await upgraded.loadFromSerializable(legacyData);
   assert.equal(canonicalJson(upgraded.getWorkspace(workspaceId)), workspaceBefore);
   assert.equal(upgraded.getSavingsProjection(workspaceId).goals[0].fundedMinor, '4500');
-  assert.equal(upgraded.getSchemaVersion(), 5);
+  assert.equal(upgraded.getSchemaVersion(), 6);
   assert.equal(upgraded.getTransactions(workspaceId).length, 0);
 });
 

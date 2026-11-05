@@ -241,7 +241,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       const saved = localStorage.getItem('hisab_language');
       if (saved === 'bn' || saved === 'en') return saved;
     }
-    return 'en'; // Default US English
+    return 'bn'; // Bangla first; retain any explicitly saved language choice.
   });
 
   const setLanguage = (lang: 'bn' | 'en') => {

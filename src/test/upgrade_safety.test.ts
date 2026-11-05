@@ -37,7 +37,7 @@ test('Failed ledger migration preserves the exact original durable bytes and sch
 test('A future schema is refused without rewriting customer records', async () => {
   const driver = new LocalStorageFallbackDriver(), key = `future-${generateUUID()}`;
   const db = new LocalDatabase(key, driver); await db.init();
-  const original = JSON.stringify({ ...db.toSerializable(), schemaVersion: 6, futureFinancialCollection: [['synthetic', { amountMinor: '123' }]] });
+  const original = JSON.stringify({ ...db.toSerializable(), schemaVersion: db.getSchemaVersion()+1, futureFinancialCollection: [['synthetic', { amountMinor: '123' }]] });
   await driver.setItem(key, original); await assert.rejects(new LocalDatabase(key, driver).init(), /DATABASE_VERSION_UNSUPPORTED/);
   assert.equal(await driver.getItem(key), original);
 });
@@ -101,12 +101,12 @@ test('BUG-003: synthetic v4-to-v5 migration preserves records, balances and reco
   delete parsed.accountPermissions;
   await driver.setItem(dbKey, JSON.stringify(parsed));
 
-  // 2. Perform APK Upgrade / Database Re-initialization to Schema Version 5
+  // 2. Perform APK Upgrade / Database Re-initialization to the guarded wallet schema.
   const upgradedDb = new LocalDatabase(dbKey, driver);
   await upgradedDb.init();
 
   // 3. Verify Version Bump
-  assert.equal(upgradedDb.getSchemaVersion(), 5, 'Database must be upgraded to version 5');
+  assert.equal(upgradedDb.getSchemaVersion(), 6, 'Database must be upgraded to version 6');
 
   // 4. Verify NON-DESTRUCTIVE PRESERVATION of existing financial records
   const accountsAfter = upgradedDb.getAccounts(wsId);

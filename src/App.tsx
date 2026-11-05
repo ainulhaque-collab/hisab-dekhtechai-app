@@ -3,7 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import React, { useState, useEffect, useRef } from 'react';
+import React, { lazy, Suspense, useState, useEffect, useRef } from 'react';
 import { AppProvider, useApp } from './context/AppContext';
 import { Navbar } from './components/Navbar';
 import { BottomNav, TabType } from './components/BottomNav';
@@ -28,6 +28,7 @@ import { pinLock } from './security/pinLock';
 import { JournalTransaction } from './contracts/types';
 import { hasAccountCallback } from './auth/cloud/callbackLocation';
 const accountAuthEnabled=import.meta.env.VITE_SUPABASE_AUTH_ENABLED==='true';
+const AllWalletsPage=lazy(()=>import('./components/AllWalletsPage'));
 
 interface ErrorBoundaryProps {
   children: React.ReactNode;
@@ -108,6 +109,9 @@ function MainApp() {
   const [isTeamSharingModalOpen, setIsTeamSharingModalOpen] = useState(false);
   const [isAboutModalOpen, setIsAboutModalOpen] = useState(false);
   const [isSavingsGoalsOpen, setIsSavingsGoalsOpen] = useState(false);
+  const [isAllWalletsOpen,setIsAllWalletsOpen]=useState(false);
+  useEffect(()=>{setIsAllWalletsOpen(false);},[currentWorkspace?.id]);
+  const openAllWallets=()=>{setIsAllWalletsOpen(true);window.scrollTo({top:0});};
   const [savingsLoanGoalId, setSavingsLoanGoalId] = useState<string | undefined>();
   const [isSavingsLoansOpen, setIsSavingsLoansOpen] = useState(false);
   const openConnectionSettings=()=>{
@@ -160,7 +164,7 @@ function MainApp() {
       <ErrorBoundary>
         <main className="flex-1 max-w-lg w-full mx-auto px-4 pt-4">
           {!currentWorkspace && <div className="my-10 rounded-2xl border border-dashed border-slate-200 bg-white p-7 text-center"><h1 className="text-base font-bold">{language === 'en' ? 'Start with a workspace' : 'একটি নতুন হিসাব খাতা তৈরি করুন'}</h1><p className="my-3 text-xs leading-relaxed text-slate-500">{language === 'en' ? 'Your archived records are safe. Create a new workspace or restore one from workspace management.' : 'আর্কাইভ করা হিসাব সুরক্ষিত আছে। নতুন খাতা তৈরি করুন অথবা খাতা পরিচালনা থেকে আগের খাতা ফিরিয়ে আনুন।'}</p><button className="rounded-xl bg-blue-700 px-4 py-3 text-xs font-semibold text-white" onClick={() => window.dispatchEvent(new Event('hisab-create-workspace'))}>{language === 'en' ? 'Create workspace' : 'নতুন খাতা তৈরি করুন'}</button></div>}
-          {currentWorkspace && <>
+          {currentWorkspace && (isAllWalletsOpen?<Suspense fallback={<p role="status" className="p-5 text-sm text-slate-500">{language==='en'?'Opening wallets…':'ওয়ালেটের হিসাব খুলছে…'}</p>}><AllWalletsPage onClose={()=>{setIsAllWalletsOpen(false);window.scrollTo({top:0});}}/></Suspense>:<>
           {activeTab === 'home' && (
             <DashboardTab
               onNavigateToAdd={() => setActiveTab('add')}
@@ -169,10 +173,11 @@ function MainApp() {
               onOpenSyncModal={openConnectionSettings}
               onOpenPartiesModal={() => setIsPartiesModalOpen(true)}
               onOpenSavingsGoals={() => setIsSavingsGoalsOpen(true)}
+              onOpenAllWallets={openAllWallets}
             />
           )}
 
-          {activeTab === 'accounts' && <AccountsTab />}
+          {activeTab === 'accounts' && <AccountsTab onOpenAllWallets={openAllWallets}/>}
 
           {activeTab === 'add' && (
             <AddTransactionTab key={currentWorkspace.id} onSuccess={() => setActiveTab('home')} />
@@ -186,12 +191,12 @@ function MainApp() {
           )}
 
           {activeTab === 'reports' && <ReportsTab onSelectTransaction={handleSelectTransactionFromDashboard} />}
-          </>}
+          </>)}
         </main>
       </ErrorBoundary>
 
       {/* 5-Tab Mobile Navigation Bar */}
-      <BottomNav activeTab={activeTab} onChangeTab={setActiveTab} />
+      <BottomNav activeTab={isAllWalletsOpen?'accounts':activeTab} onChangeTab={tab=>{setIsAllWalletsOpen(false);setActiveTab(tab);window.scrollTo({top:0});}} />
 
       {/* Interactive Modals */}
       <SyncModal

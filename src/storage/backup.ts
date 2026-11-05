@@ -5,6 +5,7 @@ import { mergeWorkspaceImage, validateWorkspaceImage } from './workspaceImages';
 import { SYSTEM_ACCOUNTS } from '../contracts/ledger';
 import { validateSavingsOperations } from './savingsOperations';
 import { readSavingsLoans } from './loanBook';
+import { readWalletBook } from './walletBook';
 import { validateReportOperations } from './reportMetadata';
 
 export const MAX_BACKUP_BYTES = 40 * 1024 * 1024;
@@ -37,7 +38,7 @@ export async function decodeBackup(text: string): Promise<Data> {
 
 /** Current records win. Derived operation checksums may be absent in older local copies. */
 export function mergeBackup(current: Data, incoming: Data, replaceUntouchedStarters = false): Data {
-  if (!incoming || ![4, 5].includes(incoming.schemaVersion)) throw new Error('BACKUP_VERSION');
+  if (!incoming || ![4, 5, 6].includes(incoming.schemaVersion)) throw new Error('BACKUP_VERSION');
   if (!Array.isArray(incoming.workspaces) || !Array.isArray(incoming.accounts) ||
       !Array.isArray(incoming.journalTransactions) || !Array.isArray(incoming.journalLines)) throw new Error('BACKUP_INVALID');
   const owner = current.localIdentity?.ownerSubjectHash || null;
@@ -137,9 +138,10 @@ export function mergeBackup(current: Data, incoming: Data, replaceUntouchedStart
   validateSavingsOperations(ops.values(), ws, accounts);
   validateReportOperations(ops.values(), ws, accounts, journals);
   readSavingsLoans({ syncOperations: ops, workspaces: ws, accounts, journalTransactions: journals });
+  readWalletBook({syncOperations:ops,workspaces:ws,accounts,journalTransactions:journals});
   if (!Array.isArray(incoming.appliedOperations || [])) throw new Error('BACKUP_INVALID');
   result.appliedOperations = [...new Set([...(current.appliedOperations || []), ...(incoming.appliedOperations || [])])];
-  result.schemaVersion = 5;
+  result.schemaVersion = 6;
   // Never reuse the imported device identity or roll its counter backwards.
   result.deviceIdentity = { ...current.deviceIdentity };
   for (const op of ops.values()) {

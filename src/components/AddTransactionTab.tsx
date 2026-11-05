@@ -21,6 +21,7 @@ import { resolveJournalTime } from '../domain/transactionTime';
 import { createReceiptBlob } from '../storage/receipts';
 import { AIEntryModal } from './AIEntryModal';
 import { EntryDraft } from '../ai/entryDraft';
+import {walletError} from './walletText';
 import {
   TrendingDown,
   TrendingUp,
@@ -405,7 +406,7 @@ export const AddTransactionTab: React.FC<AddTransactionTabProps> = ({ onSuccess 
         protocolVersion: 1,
         ownerHash: db.getIdentity()?.ownerSubjectHash || 'local-owner',
         deviceId: db.getDeviceId(),
-        seq: db.getNextDeviceSeq(),
+        seq: 0, // Assigned atomically by commitJournalWithOutbox after validation.
         operationId: opId,
         entityId: balancedJournal.transaction.id,
         type: opType,
@@ -439,7 +440,7 @@ export const AddTransactionTab: React.FC<AddTransactionTabProps> = ({ onSuccess 
         onSuccess();
       }, 700);
     } catch (err: any) {
-      setErrorMsg(err.message || (isEn ? 'Failed to save transaction' : 'লেনদেন সংরক্ষণ ব্যর্থ হয়েছে'));
+      setErrorMsg(typeof err?.message==='string'&&err.message.startsWith('WALLET_')?walletError(err,isEn):(err.message || (isEn ? 'Failed to save transaction' : 'লেনদেন সংরক্ষণ ব্যর্থ হয়েছে')));
     } finally {
       submissionInFlight.current = false;
       setIsSubmitting(false);
