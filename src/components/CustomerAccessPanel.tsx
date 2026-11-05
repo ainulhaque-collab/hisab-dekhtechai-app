@@ -10,7 +10,7 @@ interface Status {customerId:string;active:boolean;blocked:boolean;expiresAt:str
 export function CustomerAccessPanel({en=false}:{en?:boolean}){
   const {auth}=useApp(),{identity,enabled}=useServiceIdentity(auth);
   let endpoint='';try{endpoint=accessEndpoint(import.meta.env.VITE_AI_API_BASE_URL||'',location.origin,Capacitor.isNativePlatform());}catch{}
-  return <CustomerAccessForm en={en} identity={identity} enabled={enabled} endpoint={endpoint}/>;
+  return <CustomerAccessForm key={identity.getProfile()?.subjectHash??'signed-out'} en={en} identity={identity} enabled={enabled} endpoint={endpoint}/>;
 }
 export function CustomerAccessForm({en=false,identity,enabled,endpoint}:{en?:boolean;identity:AIIdentity;enabled:boolean;endpoint:string}){
   const [status,setStatus]=useState<Status|null>(null),[code,setCode]=useState(''),[error,setError]=useState(''),[busy,setBusy]=useState(false);

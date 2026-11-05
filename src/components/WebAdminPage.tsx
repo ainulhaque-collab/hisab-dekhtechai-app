@@ -18,7 +18,8 @@ export default function WebAdminPage({session=accountSettingsSession,enabled=cus
   const state=useSyncExternalStore(session.subscribe,session.getSnapshot);
   const generation=session.serviceGeneration(),id=state.account?.customerId??null;
   const identity=useMemo(()=>customerRequestIdentity(session,id),[session,id,generation,state.phase]);
-  const [admin,setAdmin]=useState(false),[provider,setProvider]=useState<ProviderStatus|null>(null),[error,setError]=useState(''),[notice,setNotice]=useState(''),[busy,setBusy]=useState(false);
+  const [adminCustomerId,setAdminCustomerId]=useState<string|null>(null),[provider,setProvider]=useState<ProviderStatus|null>(null),[error,setError]=useState(''),[notice,setNotice]=useState(''),[busy,setBusy]=useState(false);
+  const admin=!!id&&adminCustomerId===id&&state.phase==='connected';
   const [apiKey,setApiKey]=useState(''),[model,setModel]=useState('auto'),[days,setDays]=useState('30'),[code,setCode]=useState(''),[target,setTarget]=useState(''),[targetResult,setTargetResult]=useState('');
   const [confirmation,setConfirmation]=useState<'block'|'disable'|null>(null);
   const pending=useRef(false),current=useRef(identity);current.current=identity;
@@ -32,10 +33,10 @@ export default function WebAdminPage({session=accountSettingsSession,enabled=cus
     return()=>{detach();window.removeEventListener('online',refresh);document.removeEventListener('visibilitychange',refresh);};
   },[session]);
   useEffect(()=>{
-    const controller=new AbortController();setAdmin(false);setProvider(null);setApiKey('');setCode('');setTarget('');setTargetResult('');setConfirmation(null);setError('');setNotice('');
+    const controller=new AbortController();setAdminCustomerId(null);setProvider(null);setApiKey('');setCode('');setTarget('');setTargetResult('');setConfirmation(null);setError('');setNotice('');
     if(enabled&&identity.getProfile())void(async()=>{
       try{const status=await accessRequest(identity,endpoint,{action:'status'},controller.signal);if(status.isAdmin!==true)throw Error('ACCESS_ADMIN_REQUIRED');
-        const value=await accessRequest(identity,endpoint,{action:'providerStatus'},controller.signal);if(!controller.signal.aborted){setAdmin(true);setProvider(value);setModel(value.model);}
+        const value=await accessRequest(identity,endpoint,{action:'providerStatus'},controller.signal);if(!controller.signal.aborted){setAdminCustomerId(id);setProvider(value);setModel(value.model);}
       }catch(reason){if(!controller.signal.aborted)setError(accessErrorMessage(reason));}
     })();return()=>controller.abort();
   },[identity,endpoint,enabled]);
