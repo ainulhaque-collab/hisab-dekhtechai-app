@@ -17,6 +17,7 @@ import { validateEntryDraft } from '../ai/entryDraft';
 import { AccountSettingsSession,type AccountSettingsRuntime } from '../auth/cloud/accountSettingsSession';
 import { customerRequestIdentity,customerServiceHash as browserHash } from '../access/identity';
 import { accessRequest } from '../access/client';
+import { extractEntry } from '../ai/client';
 import { accessDatabaseConfig } from '../../server/access/database';
 import { SUPABASE_DATABASE_CA } from '../../server/access/supabaseCA';
 
@@ -24,6 +25,20 @@ const owner='11111111-1111-4111-8111-111111111111',alice='22222222-2222-4222-822
 const customer=(id:string):ServiceCustomer=>({customerId:id,ownerHash:customerServiceHash(id)});
 const master='ad'.repeat(32),secret='synthetic-provider-key-never-real-123456789';
 const native=process.env.HISAB_TEST_PG_URL;
+
+test('protected same-origin Preview reaches verified app auth instead of an HTML hosting login',async()=>{
+  const hash=customerServiceHash(alice),identity={isTestMode:()=>false,getProfile:()=>({subjectHash:hash}),getValidAccessToken:async()=>'synthetic-jwt'};
+  const protectedFetch:typeof fetch=async(url,init)=>{
+    // Emulate the hosting gate that precedes the application router. Cookie
+    // inclusion alone does not confer Admin or subscription authority.
+    if(init?.credentials!=='same-origin')return new Response('<html>Hosting login</html>',{status:401,headers:{'Content-Type':'text/html'}});
+    assert.equal(new Headers(init.headers).get('Authorization'),'Bearer synthetic-jwt');
+    assert.equal(init.redirect,'error');assert.equal(init.cache,'no-store');
+    return String(url).endsWith('/access')?Response.json({active:false,isAdmin:false}):Response.json({error:'AI_SUBSCRIPTION_REQUIRED'},{status:403});
+  };
+  assert.deepEqual(await accessRequest(identity,'https://preview.example.invalid/api/access',{action:'status'},undefined,protectedFetch),{active:false,isAdmin:false});
+  await assert.rejects(()=>extractEntry({source:'receipt',consentToProcess:true,receipt:receiptFromBytes(Uint8Array.from([137,80,78,71,13,10,26,10,1]),'image/png','synthetic.png')},hash,identity,{endpoint:'https://preview.example.invalid/api/ai/extract',fetchFn:protectedFetch}),/AI_SUBSCRIPTION_REQUIRED/);
+});
 
 test('Supabase connection verifies the official CA and hostname without changing other PostgreSQL trust',async()=>{
   const certificate=new X509Certificate(SUPABASE_DATABASE_CA);

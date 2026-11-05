@@ -54,9 +54,11 @@ Approved Admin URL: `https://hisab-dekhtechai-app-git-codex-verifie-f9b531-ainul
 
 Configuration changes require a new deployment. Current hosted acceptance/source/CI evidence is tracked in PR #19 and Notion; configuration existing is not proof that an older deployment is enabled. The owner enters the real Gemini key directly in Admin after deployment. No real key has been imported or generation charged by this setup.
 
+Protected-preview browser requests use `credentials: same-origin` for access, extraction and guide calls. `omit` passed Google login but dropped the same-site hosting-protection cookie before requests reached the API. Cross-origin/native requests still omit ambient cookies; verified bearer identity and server-side entitlement remain mandatory. Redirects stay rejected and responses stay uncached. A regression covers reaching the application denial instead of an HTML hosting login.
+
 ## Verification and release gates
 
-Local checks cover verified UUIDs, sign-out fencing, role/RLS denial, code expiry/replay/concurrency, encryption/tamper/revisions, safe errors, CA/TLS, callback return allowlist/expiry and storage denial. Native CI also covers exact private access/vault/audit dump/restore and key decryption with the retained wrapping key. Existing finance sync/RLS/restore tests remain separate.
+Local checks cover verified UUIDs, sign-out fencing, role/RLS denial, code expiry/replay/concurrency, encryption/tamper/revisions, safe errors, CA/TLS, callback return allowlist/expiry, storage denial and protected same-origin API transport. Latest local suite: 400 tests, 399 passed, one native-only skip; lint and bundle passed. Native CI at `7693708` also covers exact private access/vault/audit dump/restore and key decryption with the retained wrapping key. That is not evidence for later commits until their CI runs. Existing finance sync/RLS/restore tests remain separate.
 
 Synthetic-only browser tests demonstrated masked key save, code issuance and customer activation/expiry without real data/provider calls. Browser-native confirmation was replaced with inline confirmation. Final inline/responsive UI and real owner Google-to-Admin acceptance, actual provider-key entry, optional management-helper retirement and the new deployment checks remain to be recorded. Do not claim live/production PASS from synthetic tests.
 

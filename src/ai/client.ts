@@ -38,7 +38,9 @@ export async function extractEntry(input: ExtractionInput, ownerHash: string, id
   try {
     response = await (settings.fetchFn || fetch)(settings.endpoint, {
       method: 'POST', headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
-      body: JSON.stringify({ ownerHash, requestId, input }), credentials: 'omit', cache: 'no-store', redirect: 'error',
+      // Same-site deployment protection is separate from verified app auth.
+      // Cross-origin/native requests still receive no ambient cookies.
+      body: JSON.stringify({ ownerHash, requestId, input }), credentials: 'same-origin', cache: 'no-store', redirect: 'error',
       signal: settings.signal ? AbortSignal.any([settings.signal, AbortSignal.timeout(60_000)]) : AbortSignal.timeout(60_000),
     });
   } catch {

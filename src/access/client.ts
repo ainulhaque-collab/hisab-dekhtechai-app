@@ -7,7 +7,9 @@ export async function accessRequest(identity:AIIdentity,endpoint:string,body:Rec
   let token:string;try{token=await identity.getValidAccessToken();}catch{throw Error('ACCESS_SIGN_IN_REQUIRED');}
   if(identity.getProfile()?.subjectHash!==owner||signal?.aborted)throw Error('ACCESS_ACCOUNT_CHANGED');
   let response:Response;
-  try{response=await fetchFn(endpoint,{method:'POST',headers:{Authorization:'Bearer '+token,'Content-Type':'application/json'},body:JSON.stringify(body),credentials:'omit',cache:'no-store',redirect:'error',signal:signal?AbortSignal.any([signal,AbortSignal.timeout(20_000)]):AbortSignal.timeout(20_000)});}
+  // Keep this site's deployment-protection cookie. Cross-origin/native calls
+  // still omit cookies; the verified bearer remains the only app authority.
+  try{response=await fetchFn(endpoint,{method:'POST',headers:{Authorization:'Bearer '+token,'Content-Type':'application/json'},body:JSON.stringify(body),credentials:'same-origin',cache:'no-store',redirect:'error',signal:signal?AbortSignal.any([signal,AbortSignal.timeout(20_000)]):AbortSignal.timeout(20_000)});}
   catch{throw Error('ACCESS_UNAVAILABLE');}
   const text=await response.text();if(text.length>16_000||!response.headers.get('content-type')?.includes('application/json'))throw Error('ACCESS_UNAVAILABLE');
   if(identity.getProfile()?.subjectHash!==owner||signal?.aborted)throw Error('ACCESS_ACCOUNT_CHANGED');

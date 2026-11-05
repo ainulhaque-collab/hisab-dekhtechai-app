@@ -7,7 +7,7 @@ export async function requestFinancialGuide(input:GuideInput,owner:string,identi
   let token:string;try{token=await identity.getValidAccessToken();}catch{throw new Error('AI_AUTH_REQUIRED');}
   if(options.signal.aborted||identity.getProfile()?.subjectHash!==owner) throw new Error('AI_OWNER_MISMATCH');
   let response:Response;
-  try {response=await(options.fetchFn||fetch)(options.endpoint,{method:'POST',headers:{Authorization:`Bearer ${token}`,'Content-Type':'application/json'},body:JSON.stringify({ownerHash:owner,requestId,input}),signal:AbortSignal.any([options.signal,AbortSignal.timeout(60_000)]),credentials:'omit',cache:'no-store',redirect:'error'});}
+  try {response=await(options.fetchFn||fetch)(options.endpoint,{method:'POST',headers:{Authorization:`Bearer ${token}`,'Content-Type':'application/json'},body:JSON.stringify({ownerHash:owner,requestId,input}),signal:AbortSignal.any([options.signal,AbortSignal.timeout(60_000)]),credentials:'same-origin',cache:'no-store',redirect:'error'});}
   catch{throw new Error(options.signal.aborted?'AI_CANCELLED':'AI_NETWORK_ERROR');}
   if(options.signal.aborted||identity.getProfile()?.subjectHash!==owner) throw new Error('AI_OWNER_MISMATCH');
   if(!response.headers.get('content-type')?.includes('application/json')) throw new Error('AI_NOT_CONFIGURED');
