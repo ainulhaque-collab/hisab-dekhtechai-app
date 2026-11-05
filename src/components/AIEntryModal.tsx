@@ -11,14 +11,17 @@ import { aiConsentStore, AI_CONSENT_CHANGED } from '../ai/consent';
 import { requestAIMediaPermissions } from '../ai/nativeMedia';
 import { prepareAIReceipt } from '../ai/receiptCapture';
 import { ModalShell, primaryButton, secondaryButton } from './ModalShell';
-import { useServiceIdentity } from '../access/useServiceIdentity';
+import { useAIEntitlement } from '../access/useAIEntitlement';
+import { AIServiceAccessNotice } from './AIServiceAccessNotice';
 
 export function AIEntryModal({ onClose, onApply }: {
   onClose: () => void; onApply: (entry: EntryDraft, receipt: ReceiptBlob | null) => void;
 }) {
   const { language, auth:legacyAuth, db, isOnline } = useApp();
-  const {identity:auth,owner:serviceOwner,enabled:customerService}=useServiceIdentity(legacyAuth);
   const en = language === 'en';
+  const entitlement=useAIEntitlement(legacyAuth,en);
+  const {identity:auth,owner:serviceOwner,enabled:customerService}=entitlement;
+  const currentEntitlement=useRef(entitlement);currentEntitlement.current=entitlement;
   const owner = customerService?serviceOwner:db.getIdentity()?.ownerSubjectHash || '';
   const ownerAtOpen = useRef(owner);
   const datasetAtOpen=useRef(db.getIdentity()?.ownerSubjectHash);
@@ -36,7 +39,7 @@ export function AIEntryModal({ onClose, onApply }: {
   const locked = useRef(false);
   let endpoint = '';
   try { endpoint = aiEndpoint(import.meta.env.VITE_AI_API_BASE_URL || '', window.location.origin, Capacitor.isNativePlatform()); } catch { /* Report before opening a sensor. */ }
-  const unavailable = !endpoint || !owner || !isOnline;
+  const unavailable = !endpoint || !owner || !isOnline || !entitlement.active;
   const sameOwner = () => datasetAtOpen.current===db.getIdentity()?.ownerSubjectHash && ownerAtOpen.current === auth.getProfile()?.subjectHash;
 
   useEffect(() => {
@@ -84,6 +87,8 @@ export function AIEntryModal({ onClose, onApply }: {
     finally { locked.current = false; if (mounted.current) setBusy(false); }
   };
   const send = async (input: ExtractionInput, image: ReceiptBlob | null) => {
+    const access=currentEntitlement.current;
+    if(access.enabled&&!access.active)throw new Error(access.status?.blocked?'AI_ACCESS_BLOCKED':access.status?'AI_SUBSCRIPTION_REQUIRED':access.owner?'AI_NETWORK_ERROR':'AI_AUTH_REQUIRED');
     if (!sameOwner()) throw new Error('AI_OWNER_MISMATCH');
     if (!await (await aiConsentStore()).allowed(ownerAtOpen.current)) throw new Error('AI_MEDIA_OR_CONSENT_INVALID');
     if (!mounted.current) return;
@@ -147,7 +152,7 @@ export function AIEntryModal({ onClose, onApply }: {
     <div className="space-y-4 text-sm">
       {!endpoint && <p role="alert" className="rounded-xl bg-amber-50 p-3 text-amber-900">{en ? 'AI service is not connected to this app version yet. You can enter transactions manually.' : 'এই সংস্করণে AI সার্ভারের সংযোগ এখনও দেওয়া হয়নি। আপাতত সাধারণভাবে এন্ট্রি দিতে পারবেন।'}</p>}
       {error && <p role="alert" className="rounded-xl bg-rose-50 p-3 text-rose-700">{error}</p>}
-      {loading ? <p role="status">{en ? 'Loading…' : 'লোড হচ্ছে…'}</p> : !allowed ? <div className="space-y-4">
+      {customerService&&!entitlement.active?<AIServiceAccessNotice en={en} signedIn={!!serviceOwner} loading={entitlement.loading} status={entitlement.status} error={entitlement.error} onRefresh={entitlement.refresh} onOpenAccount={onClose}/>:loading ? <p role="status">{en ? 'Loading…' : 'লোড হচ্ছে…'}</p> : !allowed ? <div className="space-y-4">
         <p className="leading-relaxed text-slate-600">{en ? 'Send only the photo or voice you choose to Google Gemini to fill your transaction form. Remember this permission on this device. Change it anytime in Settings → Privacy.' : 'আপনার বেছে নেওয়া ছবি বা ভয়েস Google Gemini-তে পাঠিয়ে ফর্ম পূরণ হবে। এই ডিভাইসে অনুমতি মনে রাখা হবে। সেটিংস → গোপনীয়তা থেকে যেকোনো সময় বন্ধ করতে পারবেন।'}</p>
         <button type="button" className={`${primaryButton} w-full`} disabled={busy || unavailable} onClick={() => void enable()}>{en ? 'Enable AI entry' : 'AI এন্ট্রি চালু করুন'}</button>
       </div> : <>
@@ -159,7 +164,7 @@ export function AIEntryModal({ onClose, onApply }: {
           onChange={event => { const file = event.target.files?.[0]; event.target.value = ''; void chooseImage(file); }} />
         <input ref={galleryInput} className="sr-only" tabIndex={-1} aria-label={en ? 'Receipt image' : 'রিসিপ্টের ছবি'} type="file" accept="image/jpeg,image/png,image/webp" disabled={busy || unavailable}
           onChange={event => { const file = event.target.files?.[0]; event.target.value = ''; void chooseImage(file); }} />
-        <button type="button" className={`${primaryButton} min-h-14 w-full ${recording ? 'bg-rose-600 hover:bg-rose-700' : ''}`} disabled={unavailable || (busy && !recording)}
+        <button type="button" className={`${primaryButton} min-h-14 w-full ${recording ? 'bg-rose-600 hover:bg-rose-700' : ''}`} disabled={!recording && (unavailable || busy)}
           onClick={() => recording ? capture.current?.stop() : void record()}>
           {recording ? <Square className="h-5 w-5" /> : <Mic className="h-5 w-5" />}{recording ? (en ? 'Stop & fill form' : 'থামিয়ে ফর্ম পূরণ করুন') : (en ? 'Speak your entry' : 'কথা বলে এন্ট্রি দিন')}</button>
         {recording && <p role="status" className="text-center text-rose-700">{en ? 'Listening… up to 45 seconds' : 'শুনছি… সর্বোচ্চ ৪৫ সেকেন্ড'}</p>}

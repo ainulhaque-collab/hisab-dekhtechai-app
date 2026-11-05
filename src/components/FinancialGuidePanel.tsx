@@ -6,11 +6,13 @@ import { aiGuideConsentStore,AI_CONSENT_CHANGED } from '../ai/consent';
 import { requestFinancialGuide } from '../ai/guideClient';
 import { guideInputHash,type GuideInput,type FinancialGuide } from '../ai/financialGuide';
 import { primaryButton,secondaryButton } from './ModalShell';
-import { useServiceIdentity } from '../access/useServiceIdentity';
+import { useAIEntitlement } from '../access/useAIEntitlement';
+import { AIServiceAccessNotice } from './AIServiceAccessNotice';
 
 export function FinancialGuidePanel({input}:{input:GuideInput}) {
   const {auth:legacyAuth,db,isOnline,language}=useApp(),en=language==='en';
-  const {identity:auth,owner:serviceOwner,enabled:customerService}=useServiceIdentity(legacyAuth);
+  const entitlement=useAIEntitlement(legacyAuth,en);
+  const {identity:auth,owner:serviceOwner,enabled:customerService}=entitlement;
   const owner=customerService?serviceOwner:db.getIdentity()?.ownerSubjectHash||'';
   const [allowed,setAllowed]=useState(false),[loading,setLoading]=useState(true),[busy,setBusy]=useState(false);
   const [guide,setGuide]=useState<FinancialGuide|null>(null),[error,setError]=useState('');
@@ -28,7 +30,8 @@ export function FinancialGuidePanel({input}:{input:GuideInput}) {
   let endpoint='';try{endpoint=aiEndpoint(import.meta.env.VITE_AI_API_BASE_URL||'',location.origin,Capacitor.isNativePlatform()).replace(/\/extract$/,'/guide');}catch{}
   return <section className="space-y-3 rounded-2xl border border-blue-100 bg-blue-50/40 p-4"><h2 className="text-sm font-semibold">{en?'AI budgeting guide':'AI বাজেট গাইড'}</h2>
     <p className="text-xs leading-relaxed text-slate-600">{en?'When you ask, only this period’s dates, total income/expense and category totals go to Google Gemini through our service. Notes, receipts, wallet numbers and individual transactions are excluded. Permission is remembered on this device and can be removed in Privacy.':'আপনি চাইলে এই সময়ের তারিখ, মোট আয়-ব্যয় ও খাতভিত্তিক মোট খরচ আমাদের সার্ভিস দিয়ে Google Gemini-তে যাবে। নোট, রিসিপ্ট, ওয়ালেট নম্বর বা আলাদা লেনদেন যাবে না। অনুমতি এই ডিভাইসে মনে থাকবে; Privacy থেকে বন্ধ করতে পারবেন।'}</p>
-    <button type="button" className={`${primaryButton} w-full`} disabled={busy||loading||!owner||!isOnline||!endpoint} onClick={async()=>{
+    {customerService&&!entitlement.active&&<AIServiceAccessNotice en={en} signedIn={!!serviceOwner} loading={entitlement.loading} status={entitlement.status} error={entitlement.error} onRefresh={entitlement.refresh}/>}
+    <button type="button" className={`${primaryButton} w-full`} disabled={busy||loading||!owner||!isOnline||!endpoint||!entitlement.active} onClick={async()=>{
       if(lock.current)return;lock.current=true;setBusy(true);setError('');setGuide(null);
       const requestedOwner=owner,requestedHash=hash,requestedDataset=dataset,controller=new AbortController();abort.current=controller;
       const visible=()=>active.current&&current.current.owner===requestedOwner&&current.current.hash===requestedHash&&current.current.dataset===requestedDataset&&!controller.signal.aborted;

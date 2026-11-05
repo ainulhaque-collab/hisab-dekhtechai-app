@@ -1,0 +1,19 @@
+{
+  "project": "hisab-dekhtechai-app",
+  "projectId": "prj_3zLhTBZiE6SUBr05SjmxA57sq4bC",
+  "teamId": "team_GtyIJ90B2vhl4tLHJkuyyamQ",
+  "branch": "codex/verified-service-identity",
+  "apiOrigin": "https://hisab-dekhtechai-api-preview.vercel.app",
+  "authOrigin": "https://sfzitbasxrpmtmldujbm.supabase.co",
+  "protectedAdminOrigin": "https://hisab-dekhtechai-app-git-codex-verifie-f9b531-ainulhaque-collab.vercel.app",
+  "allowedApiPaths": ["/api/access", "/api/ai/extract", "/api/ai/guide"],
+  "nativeOrigin": "https://localhost",
+  "publicAliasApproval": "REQUIRED_BEFORE_ALIAS_OR_PROTECTION_OVERRIDE",
+  "adminProtection": "PRESERVE",
+  "serverAuthorization": "ONLINE_VERIFIED_CUSTOMER_UUID_AND_CURRENT_ENTITLEMENT",
+  "providerQuota": {"perMinute":3,"perCustomerDay":10,"globalDay":100},
+  "production": false,
+  "paidServiceActivation": false,
+  "installGate": "UNAUTHENTICATED_APPLICATION_JSON_401_AND_UI_404_BEFORE_INSTALL",
+  "secretsInApk": false
+}

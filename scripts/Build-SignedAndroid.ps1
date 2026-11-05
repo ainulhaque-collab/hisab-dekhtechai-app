@@ -4,6 +4,7 @@ param(
     [Parameter(Mandatory = $true)][ValidatePattern('^[A-Za-z0-9][A-Za-z0-9.+-]{0,63}$')][string]$VersionName,
     [switch]$LowMemory,
     [switch]$BridgeTestOnly,
+    [switch]$ManagedAIAccess,
     [string]$AIServiceOrigin = $env:VITE_AI_API_BASE_URL,
     [string]$LocalResourcesRoot
 )
@@ -85,6 +86,14 @@ $variables = @{
 }
 if (!$BridgeTestOnly) {
     $variables.VITE_AI_API_BASE_URL = $nativeAIOrigin
+    if ($ManagedAIAccess) {
+        Push-Location $workspaceRoot
+        try { $managedClientJson = & node.exe scripts/Prepare-NativeManagedAI.mjs --ai-origin $nativeAIOrigin }
+        finally { Pop-Location }
+        if ($LASTEXITCODE -ne 0) { throw 'Managed AI public Auth configuration is invalid. No APK was built.' }
+        $managedClient = $managedClientJson | ConvertFrom-Json
+        foreach ($property in $managedClient.PSObject.Properties) { $variables[$property.Name] = [string]$property.Value }
+    }
     # Only validated public Firebase client configuration enters the APK.
     # Capture silently: never print config/credentials in build logs.
     Push-Location $workspaceRoot

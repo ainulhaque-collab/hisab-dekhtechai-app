@@ -131,7 +131,7 @@ function MainApp() {
     let refresh=()=>{};
     let unregister=()=>{};
     const visible=()=>{if(!document.hidden)refresh();};
-    window.addEventListener('hisab-account-callback',show);
+    window.addEventListener('hisab-account-callback',show);window.addEventListener('hisab-open-account-settings',show);
     window.addEventListener('online',visible);window.addEventListener('offline',visible);
     document.addEventListener('visibilitychange',visible);
     void Promise.all([import('./auth/cloud/accountSettingsRuntime'),import('./auth/cloud/accountSignOut')]).then(([{accountSettingsSession:session},{registerAccountSignOutCleanup}])=>{
@@ -143,7 +143,7 @@ function MainApp() {
       });
       refresh=()=>{void session.refresh();};void session.start();
     });
-    return()=>{stopped=true;unregister();window.removeEventListener('hisab-account-callback',show);window.removeEventListener('online',visible);window.removeEventListener('offline',visible);document.removeEventListener('visibilitychange',visible);};
+    return()=>{stopped=true;unregister();window.removeEventListener('hisab-account-callback',show);window.removeEventListener('hisab-open-account-settings',show);window.removeEventListener('online',visible);window.removeEventListener('offline',visible);document.removeEventListener('visibilitychange',visible);};
   },[auth]);
 
   if (!isUnlocked) {
