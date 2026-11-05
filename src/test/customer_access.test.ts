@@ -2,6 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
 import { readFile } from 'node:fs/promises';
+import { spawnSync } from 'node:child_process';
 import express from 'express';
 import { ProviderKeyVault } from '../../server/access/vault';
 import { AccessError,customerServiceHash,serviceCustomerVerifier,type ServiceCustomer } from '../../server/access/identity';
@@ -93,7 +94,23 @@ test(`access SQL commands on ${native?'isolated native PostgreSQL':'PGlite'}`,as
     if(new Date(window).getTime()===new Date(after).getTime()){assert.match(failure?.message??'',/ACCESS_LIMIT_REACHED/);checkedLimit=true;}
   }
   assert.equal(checkedLimit,true);
-  if(native){const race=await store.issue(admin,randomUUID(),14);const results=await Promise.allSettled([store.redeem(a,randomUUID(),race.code),store.redeem(b,randomUUID(),race.code)]);assert.equal(results.filter(value=>value.status==='fulfilled').length,1,'one concurrent claimant only');}
+  if(native){const race=await store.issue(admin,randomUUID(),14);const results=await Promise.allSettled([store.redeem(a,randomUUID(),race.code),store.redeem(b,randomUUID(),race.code)]);assert.equal(results.filter(value=>value.status==='fulfilled').length,1,'one concurrent claimant only');
+    const container=process.env.HISAB_TEST_PG_CONTAINER;
+    if(container){
+      assert.match(container,/^[a-f0-9]{12,64}$/);
+      const docker=(args:string[],input?:Buffer)=>{const result=spawnSync('docker',['exec',...(input?['-i']:[]),container,...args],{input,maxBuffer:8*1024*1024});assert.equal(result.status,0,'isolated synthetic PostgreSQL archive command must succeed');return result.stdout;};
+      const snapshot=async(client:any)=>{const result:Record<string,unknown>={};for(const table of ['customers','codes','providers','audit','commands','throttles'])result[table]=(await client.query(`SELECT md5(coalesce(string_agg(to_jsonb(t)::text,'|' ORDER BY to_jsonb(t)::text),'')) AS digest FROM hisab_access.${table} t`)).rows[0].digest;return result;};
+      const before=await snapshot(sql),archive=docker(['pg_dump','-U','postgres','-d','hisab_contract_test','--format=custom','--schema=hisab_access','--no-owner']);
+      await sql.query('CREATE DATABASE hisab_access_restored_test');
+      const targetUrl=new URL(native);targetUrl.pathname='/hisab_access_restored_test';const {Pool}=await import('pg');const restored=new Pool({connectionString:targetUrl.href,max:2});
+      try{
+        docker(['pg_restore','-U','postgres','-d','hisab_access_restored_test','--no-owner','--exit-on-error'],archive);
+        assert.deepEqual(await snapshot(restored),before,'all access/vault/audit state survives private-schema dump/restore');
+        const recovered=new PostgresAccessStore(restored,owner,new ProviderKeyVault(master));assert.equal((await recovered.providerConfiguration()).apiKey,secret);assert.deepEqual((await recovered.status(a)).expiresAt,(await store.status(a)).expiresAt);
+        const client=await restored.connect();try{await client.query('SET ROLE hisab_access_preview');assert.equal((await client.query('SELECT customer_id FROM hisab_access.customers WHERE customer_id=$1',[alice])).rows.length,1);}finally{await client.query('RESET ROLE');client.release();}
+      }finally{await restored.query('DROP SCHEMA hisab_access CASCADE; DROP OWNED BY hisab_access_preview');await restored.end();}
+    }
+  }
 });
 
 test('AI rejects expired/blocked service access before quota and generation; legacy configuration cannot bypass access mode',async t=>{
