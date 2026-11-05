@@ -1,11 +1,12 @@
 import { createHash } from 'node:crypto';
 import type { User } from '@supabase/supabase-js';
 import { verifiedCustomer } from '../../src/auth/customerIdentity.js';
+import { customerEmail } from '../../src/auth/customerIdentity.js';
 
 export class AccessError extends Error {
   constructor(readonly code:string,readonly status=400){super(code);}
 }
-export interface ServiceCustomer {customerId:string;ownerHash:string}
+export interface ServiceCustomer {customerId:string;ownerHash:string;verifiedEmails?:readonly string[]}
 export const customerServiceHash=(customerId:string)=>createHash('sha256').update('hisab-customer:'+customerId).digest('hex');
 
 /** Only the configured Auth server can establish an identity; JWT payloads and
@@ -22,7 +23,10 @@ export function serviceCustomerVerifier(projectUrl:string,publishableKey:string,
     try{
       const text=await response.text();if(text.length>100_000)throw Error();
       const user=JSON.parse(text) as User,account=verifiedCustomer(user,user.id,null);
-      return {customerId:account.customerId,ownerHash:customerServiceHash(account.customerId)};
+      const verifiedEmails=[...new Set((user.identities??[]).filter(identity=>identity.user_id===user.id&&identity.provider==='google'&&identity.identity_data?.email_verified===true).flatMap(identity=>{
+        try{return [customerEmail(identity.identity_data!.email)];}catch{return [];}
+      }))].slice(0,20);
+      return {customerId:account.customerId,ownerHash:customerServiceHash(account.customerId),verifiedEmails};
     }catch{throw new AccessError('ACCESS_SIGN_IN_REQUIRED',401);}
   };
 }

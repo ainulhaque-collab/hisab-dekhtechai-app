@@ -20,11 +20,26 @@ import { accessRequest } from '../access/client';
 import { extractEntry } from '../ai/client';
 import { accessDatabaseConfig } from '../../server/access/database';
 import { SUPABASE_DATABASE_CA } from '../../server/access/supabaseCA';
+import { emailBatch,parseEmailBatch } from '../access/admin';
 
 const owner='11111111-1111-4111-8111-111111111111',alice='22222222-2222-4222-8222-222222222222',bob='33333333-3333-4333-8333-333333333333';
 const customer=(id:string):ServiceCustomer=>({customerId:id,ownerHash:customerServiceHash(id)});
 const master='ad'.repeat(32),secret='synthetic-provider-key-never-real-123456789';
 const native=process.env.HISAB_TEST_PG_URL;
+
+test('bulk email input is bounded and never guesses Gmail aliases or customer identity',()=>{
+  assert.deepEqual(parseEmailBatch(' A.Name+one@gmail.com, a.name@gmail.com\nA.NAME+one@gmail.com '),['a.name+one@gmail.com','a.name@gmail.com']);
+  for(const input of [[],['not-an-email'],Array(51).fill('one@example.invalid'),['x'.repeat(6001)]])assert.throws(()=>emailBatch(input),/ACCESS_EMAILS_INVALID/);
+});
+test('only freshly verified Google identity emails can locate a pending permission',async()=>{
+  const user={id:alice,email:'primary@example.invalid',email_confirmed_at:'2026-11-05T00:00:00Z',user_metadata:{email:'injected@example.invalid'},identities:[
+    {user_id:alice,identity_id:randomUUID(),provider:'google',identity_data:{email:'VALID@example.invalid',email_verified:true}},
+    {user_id:alice,identity_id:randomUUID(),provider:'google',identity_data:{email:'unverified@example.invalid',email_verified:false}},
+    {user_id:bob,identity_id:randomUUID(),provider:'google',identity_data:{email:'foreign@example.invalid',email_verified:true}}
+  ]};
+  const verify=serviceCustomerVerifier('https://tenant.example.invalid','public',async()=>Response.json(user));
+  assert.deepEqual((await verify('header.payload.signature')).verifiedEmails,['valid@example.invalid']);
+});
 
 test('protected same-origin Preview reaches verified app auth instead of an HTML hosting login',async()=>{
   const hash=customerServiceHash(alice),identity={isTestMode:()=>false,getProfile:()=>({subjectHash:hash}),getValidAccessToken:async()=>'synthetic-jwt'};
@@ -82,6 +97,7 @@ test(`access SQL commands on ${native?'isolated native PostgreSQL':'PGlite'}`,as
   await exec(await readFile(new URL('../../server/access/migrations/002-preview-login-provisioner.sql',import.meta.url),'utf8'));
   await exec(await readFile(new URL('../../server/access/migrations/003-encrypted-preview-bootstrap.sql',import.meta.url),'utf8'));
   await exec(await readFile(new URL('../../server/access/migrations/004-ciphertext-only-bootstrap.sql',import.meta.url),'utf8'));
+  await exec(await readFile(new URL('../../server/access/migrations/006-admin-directory.sql',import.meta.url),'utf8'));
   const store=new PostgresAccessStore(pool,owner,new ProviderKeyVault(master)),admin=customer(owner),a=customer(alice),b=customer(bob);
   await exec('SET ROLE hisab_access_preview');await sql.query('INSERT INTO hisab_access.customers(customer_id) VALUES($1)',[bob]);await exec('RESET ROLE');
   await exec('SET ROLE hisab_access_preview');await assert.rejects(()=>sql.query("SELECT hisab_access.provision_encrypted_preview('not-a-key')"),/permission denied/);await exec('RESET ROLE');
@@ -113,6 +129,25 @@ test(`access SQL commands on ${native?'isolated native PostgreSQL':'PGlite'}`,as
   await store.configureProvider(admin,randomUUID(),'auto',secret+'-replacement',1);assert.equal((await store.providerConfiguration()).apiKey,secret+'-replacement');
   await store.disableProvider(admin,randomUUID());await assert.rejects(()=>store.providerConfiguration(),/AI_NOT_CONFIGURED/);
   const revision=(await store.providerStatus(admin)).revision;await store.configureProvider(admin,randomUUID(),'auto',secret,revision);assert.equal((await store.providerConfiguration()).apiKey,secret);
+  const aliceEmails=['alice@example.invalid','alice.second@example.invalid'],bobEmail='bob@example.invalid',batch=randomUUID();
+  await assert.rejects(()=>store.directory.grant(a,batch,aliceEmails,7),/ACCESS_ADMIN_REQUIRED/);
+  await assert.rejects(()=>store.directory.list(a,'',null,'all'),/ACCESS_ADMIN_REQUIRED/);
+  await store.directory.grant(admin,batch,[...aliceEmails,bobEmail],7);await store.directory.grant(admin,batch,[bobEmail,...aliceEmails],7);
+  await assert.rejects(()=>store.directory.grant(admin,batch,aliceEmails,8),/ACCESS_REQUEST_CONFLICT/);
+  assert.equal((await store.directory.list(admin,'',null,'all')).counts.pending,3);assert.equal((await store.status(a)).active,false,'email alone cannot grant before verified sign-in');
+  const verifiedAlice={...a,verifiedEmails:aliceEmails};
+  if(native)await Promise.all([store.directory.observe({...a,verifiedEmails:[aliceEmails[0]]}),store.directory.observe({...a,verifiedEmails:[aliceEmails[1]]})]);else await store.directory.observe(verifiedAlice);
+  const claimedExpiry=(await store.status(a)).expiresAt;
+  assert.equal(Number((await sql.query('SELECT count(*) FROM hisab_access.email_grant_claims WHERE request_id=$1',[batch])).rows[0].count),1);
+  await store.directory.observe(verifiedAlice);assert.equal((await store.status(a)).expiresAt,claimedExpiry,'linked emails and retries add duration once per customer/batch');
+  await store.directory.manage(admin,randomUUID(),[bob],'block');await store.directory.observe({...b,verifiedEmails:[bobEmail]});assert.equal((await store.status(b)).active,false);
+  assert.equal((await store.directory.list(admin,'bob',null,'all')).pending.length,1,'pending email cannot bypass a block');
+  const cancellation=randomUUID();await store.directory.cancel(admin,cancellation,batch,bobEmail);await store.directory.cancel(admin,cancellation,batch,bobEmail);
+  await store.directory.manage(admin,randomUUID(),[bob],'unblock');await store.directory.observe({...b,verifiedEmails:[bobEmail]});assert.equal((await store.status(b)).active,false,'cancelled invitations cannot be claimed');
+  await assert.rejects(()=>store.directory.manage(admin,randomUUID(),[alice,owner],'block'),/ACCESS_OWNER_PROTECTED/);assert.equal((await store.status(a)).blocked,false,'invalid batch is atomic');
+  await assert.rejects(()=>store.directory.manage(admin,randomUUID(),[alice,randomUUID()],'block'),/ACCESS_CUSTOMER_NOT_FOUND/);assert.equal((await store.status(a)).blocked,false);
+  const listed=await store.directory.list(admin,'alice.second',null,'active');assert.equal(listed.customers.length,1);assert.deepEqual(listed.customers[0].emails,[...aliceEmails].sort());
+  assert.equal((await store.directory.list(admin,"%' OR true --",null,'all')).customers.length,0);
   for(const table of ['codes','providers','commands','audit']){const data=JSON.stringify((await sql.query('SELECT * FROM hisab_access.'+table)).rows);assert.ok(!data.includes(secret));assert.ok(!data.includes(issued.code));}
   const role='hisab_access_test_reader';await exec(`CREATE ROLE ${role}; GRANT USAGE ON SCHEMA hisab_access TO ${role}; GRANT SELECT ON ALL TABLES IN SCHEMA hisab_access TO ${role}; SET ROLE ${role}`);
   assert.equal((await sql.query('SELECT * FROM hisab_access.customers')).rows.length,0,'RLS denies a role even when SELECT is accidentally granted');await exec(`RESET ROLE; DROP OWNED BY ${role}; DROP ROLE ${role}`);
@@ -132,7 +167,7 @@ test(`access SQL commands on ${native?'isolated native PostgreSQL':'PGlite'}`,as
     if(container){
       assert.match(container,/^[a-f0-9]{12,64}$/);
       const docker=(args:string[],input?:Buffer)=>{const result=spawnSync('docker',['exec',...(input?['-i']:[]),container,...args],{input,maxBuffer:8*1024*1024});assert.equal(result.status,0,'isolated synthetic PostgreSQL archive command must succeed');return result.stdout;};
-      const snapshot=async(client:any)=>{const result:Record<string,unknown>={};for(const table of ['customers','codes','providers','audit','commands','throttles'])result[table]=(await client.query(`SELECT md5(coalesce(string_agg(to_jsonb(t)::text,'|' ORDER BY to_jsonb(t)::text),'')) AS digest FROM hisab_access.${table} t`)).rows[0].digest;return result;};
+      const snapshot=async(client:any)=>{const result:Record<string,unknown>={};for(const table of ['customers','codes','providers','audit','commands','throttles','customer_emails','email_grants','email_grant_claims','directory_events'])result[table]=(await client.query(`SELECT md5(coalesce(string_agg(to_jsonb(t)::text,'|' ORDER BY to_jsonb(t)::text),'')) AS digest FROM hisab_access.${table} t`)).rows[0].digest;return result;};
       const before=await snapshot(sql),archive=docker(['pg_dump','-U','postgres','-d','hisab_contract_test','--format=custom','--schema=hisab_access','--no-owner']);
       await sql.query('CREATE DATABASE hisab_access_restored_test');
       const targetUrl=new URL(native);targetUrl.pathname='/hisab_access_restored_test';const {Pool}=await import('pg');const restored=new Pool({connectionString:targetUrl.href,max:2});

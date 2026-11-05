@@ -11,15 +11,17 @@ export async function accessRequest(identity:AIIdentity,endpoint:string,body:Rec
   // still omit cookies; the verified bearer remains the only app authority.
   try{response=await fetchFn(endpoint,{method:'POST',headers:{Authorization:'Bearer '+token,'Content-Type':'application/json'},body:JSON.stringify(body),credentials:'same-origin',cache:'no-store',redirect:'error',signal:signal?AbortSignal.any([signal,AbortSignal.timeout(20_000)]):AbortSignal.timeout(20_000)});}
   catch{throw Error('ACCESS_UNAVAILABLE');}
-  const text=await response.text();if(text.length>16_000||!response.headers.get('content-type')?.includes('application/json'))throw Error('ACCESS_UNAVAILABLE');
+  const text=await response.text();if(text.length>64_000||!response.headers.get('content-type')?.includes('application/json'))throw Error('ACCESS_UNAVAILABLE');
   if(identity.getProfile()?.subjectHash!==owner||signal?.aborted)throw Error('ACCESS_ACCOUNT_CHANGED');
   let value:any;try{value=JSON.parse(text);}catch{throw Error('ACCESS_UNAVAILABLE');}
-  if(!response.ok){const allowed=new Set(['ACCESS_SIGN_IN_REQUIRED','ACCESS_ADMIN_REQUIRED','ACCESS_CODE_INVALID','ACCESS_CODE_ALREADY_ISSUED','ACCESS_OWNER_PROTECTED','ACCESS_REVISION_CONFLICT','ACCESS_REQUEST_CONFLICT','ACCESS_REQUEST_INVALID','ACCESS_KEY_INVALID','ACCESS_NOT_CONFIGURED','ACCESS_LIMIT_REACHED','AI_ACCESS_BLOCKED','AI_SUBSCRIPTION_REQUIRED']);throw Error(allowed.has(value?.error)?value.error:'ACCESS_UNAVAILABLE');}
+  if(!response.ok){const allowed=new Set(['ACCESS_SIGN_IN_REQUIRED','ACCESS_ADMIN_REQUIRED','ACCESS_CODE_INVALID','ACCESS_CODE_ALREADY_ISSUED','ACCESS_OWNER_PROTECTED','ACCESS_REVISION_CONFLICT','ACCESS_REQUEST_CONFLICT','ACCESS_REQUEST_INVALID','ACCESS_KEY_INVALID','ACCESS_NOT_CONFIGURED','ACCESS_LIMIT_REACHED','ACCESS_EMAILS_INVALID','ACCESS_CUSTOMER_NOT_FOUND','AI_ACCESS_BLOCKED','AI_SUBSCRIPTION_REQUIRED']);throw Error(allowed.has(value?.error)?value.error:'ACCESS_UNAVAILABLE');}
   return value;
 }
 export function accessErrorMessage(error:unknown,en=false){
   const code=error instanceof Error?error.message:'';
   const messages:Record<string,[string,string]>={
+    ACCESS_EMAILS_INVALID:['Enter up to 50 valid emails, within 6,000 characters.','সর্বোচ্চ ৫০টি সঠিক Gmail/ইমেইল দিন; মোট লেখা ৬,০০০ অক্ষরের মধ্যে রাখুন।'],
+    ACCESS_CUSTOMER_NOT_FOUND:['The customer list changed. Refresh before trying again.','গ্রাহক তালিকা বদলেছে। রিফ্রেশ করে আবার চেষ্টা করুন।'],
     ACCESS_SIGN_IN_REQUIRED:['Sign in to your account first.','আগে আপনার অ্যাকাউন্টে লগইন করুন।'],
     ACCESS_ADMIN_REQUIRED:['This account does not have Admin access.','এই অ্যাকাউন্টে অ্যাডমিন অনুমতি নেই।'],
     ACCESS_CODE_INVALID:['This code is invalid, expired or already used.','কোডটি সঠিক নয়, মেয়াদ শেষ অথবা আগেই ব্যবহার হয়েছে।'],

@@ -22,7 +22,8 @@ export function createAccessRouter(options:AccessOptions){
       if(!body||typeof body!=='object'||Array.isArray(body))throw new AccessError('ACCESS_REQUEST_INVALID');
       const fields:Record<string,string[]>={status:['action'],redeem:['action','requestId','code'],issue:['action','requestId','days'],
         grant:['action','requestId','customerId','days'],block:['action','requestId','customerId'],unblock:['action','requestId','customerId'],
-        providerStatus:['action'],configureProvider:['action','requestId','model','apiKey','expectedRevision'],disableProvider:['action','requestId']};
+        providerStatus:['action'],configureProvider:['action','requestId','model','apiKey','expectedRevision'],disableProvider:['action','requestId'],
+        directory:['action','search','cursor','filter'],grantEmails:['action','requestId','emails','days'],manageMany:['action','requestId','customerIds','operation'],cancelEmailGrant:['action','requestId','grantId','email']};
       const allowed=fields[body.action];if(!allowed||Object.keys(body).length!==allowed.length||Object.keys(body).some(key=>!allowed.includes(key)))throw new AccessError('ACCESS_REQUEST_INVALID');
       switch(body.action){
         case 'status':response.json(await store.status(customer));break;
@@ -32,6 +33,10 @@ export function createAccessRouter(options:AccessOptions){
         case 'providerStatus':response.json(await store.providerStatus(customer));break;
         case 'configureProvider':response.json(await store.configureProvider(customer,body.requestId,body.model,body.apiKey,body.expectedRevision));break;
         case 'disableProvider':response.json(await store.disableProvider(customer,body.requestId));break;
+        case 'directory':response.json(await store.directory.list(customer,body.search,body.cursor,body.filter));break;
+        case 'grantEmails':response.json(await store.directory.grant(customer,body.requestId,body.emails,body.days));break;
+        case 'manageMany':response.json(await store.directory.manage(customer,body.requestId,body.customerIds,body.operation));break;
+        case 'cancelEmailGrant':response.json(await store.directory.cancel(customer,body.requestId,body.grantId,body.email));break;
       }
     }catch(error){response.status(error instanceof AccessError?error.status:503).json({error:error instanceof AccessError?error.code:'ACCESS_UNAVAILABLE'});}
   });

@@ -2,6 +2,7 @@ import { createHash,randomBytes } from 'node:crypto';
 import { customerUuid } from '../../src/auth/customerIdentity.js';
 import { AccessError,type ServiceCustomer } from './identity.js';
 import { ProviderKeyVault,type SealedKey } from './vault.js';
+import { AdminDirectory } from './directory.js';
 
 export interface AccessConnection {query(sql:string,values?:unknown[]):Promise<{rows:any[]}>;release():void}
 export interface AccessPool {connect():Promise<AccessConnection>}
@@ -14,7 +15,8 @@ const codeDigest=(value:string)=>hash('hisab-redeem:v1:'+value);
 /** Every mutation is atomic; command IDs are globally bound to actor + payload.
  * This store never reads or changes the financial ledger or shared Auth users. */
 export class PostgresAccessStore {
-  constructor(private pool:AccessPool,private adminId:string,private vault:ProviderKeyVault){uuid(adminId);}
+  readonly directory:AdminDirectory;
+  constructor(private pool:AccessPool,private adminId:string,private vault:ProviderKeyVault){uuid(adminId);this.directory=new AdminDirectory(pool,adminId);}
   isAdmin(customer:ServiceCustomer){return customer.customerId===this.adminId;}
   private admin(customer:ServiceCustomer){if(!this.isAdmin(customer))throw new AccessError('ACCESS_ADMIN_REQUIRED',403);}
   private async connection<T>(work:(client:AccessConnection)=>Promise<T>){const client=await this.pool.connect();try{return await work(client);}finally{client.release();}}
@@ -33,8 +35,9 @@ export class PostgresAccessStore {
       const row=await this.connection(async client=>(await client.query("INSERT INTO hisab_access.throttles(bucket,minute,hits) VALUES($1,date_trunc('minute',clock_timestamp()),1) ON CONFLICT(bucket) DO UPDATE SET minute=excluded.minute,hits=CASE WHEN hisab_access.throttles.minute=excluded.minute THEN least(hisab_access.throttles.hits+1,100000) ELSE 1 END RETURNING hits",[bucket])).rows[0]);
       if(row.hits>limit)throw new AccessError('ACCESS_LIMIT_REACHED',429);
     }
+    await this.directory.observe(customer);
   }
-  async requireActive(customer:ServiceCustomer){const status=await this.status(customer);if(!status.active)throw new AccessError(status.blocked?'AI_ACCESS_BLOCKED':'AI_SUBSCRIPTION_REQUIRED',403);}
+  async requireActive(customer:ServiceCustomer){await this.directory.observe(customer);const status=await this.status(customer);if(!status.active)throw new AccessError(status.blocked?'AI_ACCESS_BLOCKED':'AI_SUBSCRIPTION_REQUIRED',403);}
   private async command(client:AccessConnection,actor:ServiceCustomer,requestId:string,description:unknown):Promise<boolean>{
     uuid(requestId);const digest=hash(JSON.stringify(description));
     await client.query('SELECT pg_advisory_xact_lock(hashtextextended($1,0))',['hisab-access:'+requestId]);
