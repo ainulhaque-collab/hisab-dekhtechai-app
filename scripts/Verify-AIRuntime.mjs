@@ -22,3 +22,14 @@ try {
   assert.equal((await disabled.json()).error, 'AI_NOT_CONFIGURED');
   console.log('Compiled Node ESM API starts and returns safe method/configuration responses.');
 } finally { server.closeAllConnections(); server.close(); }
+process.env.ACCESS_ENABLED='false';
+const {default:accessApp}=await import('../build/api-runtime/api/access.js');
+const accessServer=accessApp.listen(0,'127.0.0.1');
+await new Promise((resolve,reject)=>{accessServer.once('listening',resolve);accessServer.once('error',reject);});
+try{
+  const url=`http://127.0.0.1:${accessServer.address().port}/api/access`;
+  assert.equal((await fetch(url)).status,405);
+  const disabled=await fetch(url,{method:'POST',headers:{'Content-Type':'application/json'},body:'{}'});
+  assert.equal(disabled.status,503);assert.equal((await disabled.json()).error,'ACCESS_NOT_CONFIGURED');
+  console.log('Compiled access/Admin Node ESM API fails closed without configuration.');
+}finally{accessServer.closeAllConnections();accessServer.close();}

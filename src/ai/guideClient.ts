@@ -14,7 +14,7 @@ export async function requestFinancialGuide(input:GuideInput,owner:string,identi
   const text=await response.text();if(text.length>16000) throw new Error('AI_RESPONSE_INVALID');
   let raw:any;try{raw=JSON.parse(text);}catch{throw new Error('AI_RESPONSE_INVALID');}
   if(!response.ok) {
-    const allowed=['AI_AUTH_REQUIRED','AI_OWNER_MISMATCH','AI_LIMIT_REACHED','AI_NOT_CONFIGURED','AI_REQUEST_ALREADY_USED','AI_AUTH_UNAVAILABLE','AI_LIMIT_UNAVAILABLE','AI_PROVIDER_BUSY','AI_PROVIDER_QUOTA','AI_PROVIDER_AUTH_ERROR','AI_CONTENT_BLOCKED','AI_RESPONSE_INCOMPLETE','AI_MODEL_UNAVAILABLE','AI_ORIGIN_DENIED'];
+    const allowed=['AI_AUTH_REQUIRED','AI_OWNER_MISMATCH','AI_LIMIT_REACHED','AI_NOT_CONFIGURED','AI_REQUEST_ALREADY_USED','AI_AUTH_UNAVAILABLE','AI_LIMIT_UNAVAILABLE','AI_PROVIDER_BUSY','AI_PROVIDER_QUOTA','AI_PROVIDER_AUTH_ERROR','AI_CONTENT_BLOCKED','AI_RESPONSE_INCOMPLETE','AI_MODEL_UNAVAILABLE','AI_ORIGIN_DENIED','AI_SUBSCRIPTION_REQUIRED','AI_ACCESS_BLOCKED'];
     throw new Error(allowed.includes(raw?.error)?raw.error:'AI_PROVIDER_UNAVAILABLE');
   }
   if(options.signal.aborted||identity.getProfile()?.subjectHash!==owner) throw new Error('AI_OWNER_MISMATCH');

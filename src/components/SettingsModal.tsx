@@ -10,6 +10,8 @@ import { ContentCenter } from './ContentCenter';
 import { ModalShell, secondaryButton } from './ModalShell';
 import { AppearanceSettings } from './AppearanceSettings';
 import { mobileUiEnabled } from '../appearance/mobileAppearance';
+import { useServiceIdentity } from '../access/useServiceIdentity';
+const CustomerAccessPanel=lazy(()=>import('./CustomerAccessPanel').then(module=>({default:module.CustomerAccessPanel})));
 const AccountSettingsPanel=lazy(()=>import('./AccountSettingsPanel'));
 const accountAuthEnabled=import.meta.env.VITE_SUPABASE_AUTH_ENABLED==='true';
 
@@ -19,7 +21,8 @@ interface SettingsModalProps {
   onOpenProfileModal: () => void; onOpenSyncModal: () => void; onOpenSnapshotModal: () => void;
 }
 export function SettingsModal({ isOpen, onClose, initialSection='home', onOpenProfileModal, onOpenSyncModal, onOpenSnapshotModal }: SettingsModalProps) {
-  const { language, setLanguage, userProfile, signOut, db, currentWorkspace } = useApp();
+  const { language, setLanguage, userProfile, signOut, db, currentWorkspace,auth } = useApp();
+  const service=useServiceIdentity(auth);
   const [section, setSection] = useState<'home' | 'account' | 'sound' | 'security' | 'privacy' | 'backup' | 'notifications' | 'data' | 'content' | 'appearance'>(initialSection);
   const [signingOut, setSigningOut] = useState(false);
   useEffect(() => { if (isOpen) setSection(initialSection); }, [isOpen,initialSection]);
@@ -54,7 +57,7 @@ export function SettingsModal({ isOpen, onClose, initialSection='home', onOpenPr
       </>}
       {section === 'sound' && <SoundSettings />}
       {section === 'appearance' && <AppearanceSettings en={en} />}
-      {section === 'account' && <Suspense fallback={<p role="status" className="text-sm text-slate-500">{en?'Opening account…':'অ্যাকাউন্ট খোলা হচ্ছে…'}</p>}><AccountSettingsPanel en={en}/></Suspense>}
+      {section === 'account' && <Suspense fallback={<p role="status" className="text-sm text-slate-500">{en?'Opening account…':'অ্যাকাউন্ট খোলা হচ্ছে…'}</p>}><AccountSettingsPanel en={en}/><CustomerAccessPanel en={en}/></Suspense>}
       {section === 'notifications' && <NotificationSettings en={en} />}
       {section === 'content' && <ContentCenter readerOnly={mobileUiEnabled} key={db.getIdentity()?.ownerSubjectHash || 'local'}/>}
       {section === 'data' && <DataHealthPanel key={`${db.getIdentity()?.ownerSubjectHash || 'local'}:${currentWorkspace?.id}`} onOpenSync={()=>navigate(onOpenSyncModal)} onOpenBackup={()=>navigate(onOpenSnapshotModal)} />}
@@ -64,7 +67,7 @@ export function SettingsModal({ isOpen, onClose, initialSection='home', onOpenPr
         {row(<Download className="h-4 w-4" />, en ? 'Backup files & restore' : 'ব্যাকআপ ফাইল ও রিস্টোর', en ? 'Save a local copy, import a backup or restore a recovery point' : 'নিজের কাছে কপি রাখুন, ব্যাকআপ আমদানি বা রিকভারি পয়েন্ট থেকে ফিরিয়ে আনুন', () => navigate(onOpenSnapshotModal))}
         <p className="rounded-xl bg-blue-50 p-3 text-[11px] leading-relaxed text-blue-800">{accountAuthEnabled ? (en ? 'Cloud sync is not enabled in this account preview. Save a backup file for a separate copy. Recovery points stay on this device.' : 'এই অ্যাকাউন্ট প্রিভিউতে ক্লাউড সিঙ্ক চালু হয়নি। আলাদা কপির জন্য ব্যাকআপ ফাইল রাখুন। রিকভারি পয়েন্ট এই ডিভাইসেই থাকে।') : (en ? 'Drive sync and a downloaded backup are separate protections. A local recovery point stays on this device.' : 'ড্রাইভ সিঙ্ক ও ডাউনলোড করা ব্যাকআপ আলাদা সুরক্ষা। স্থানীয় রিকভারি পয়েন্ট শুধু এই ডিভাইসে থাকে।')}</p>
       </>}
-      {section === 'privacy' && <><AIPrivacySettings owner={db.getIdentity()?.ownerSubjectHash || ''} en={en} /><div className="space-y-4 rounded-2xl bg-slate-50 p-4 text-xs leading-relaxed text-slate-500"><h3 className="font-bold text-slate-800">{en ? 'Your records stay yours' : 'আপনার হিসাব আপনারই থাকে'}</h3><p>{accountAuthEnabled ? (en ? 'Financial records, workspace photos and receipts remain on this device. Account sign-in does not upload them in this preview. You can keep a separate backup file.' : 'হিসাব, খাতার ছবি ও রিসিপ্ট এই ডিভাইসে থাকে। এই প্রিভিউতে লগইন করলে এগুলো আপলোড হয় না। আলাদা ব্যাকআপ ফাইল রাখতে পারবেন।') : en ? 'Financial records are stored locally. Google Drive sync uses your private app storage after you grant access. Workspace photos and receipts are included in your private sync and backups.' : 'হিসাব প্রথমে ডিভাইসে সংরক্ষিত হয়। আপনার অনুমতির পর গুগল ড্রাইভের ব্যক্তিগত অ্যাপ স্টোরেজে সিঙ্ক হয়। খাতার ছবি ও রিসিপ্ট ব্যক্তিগত সিঙ্ক এবং ব্যাকআপে থাকে।'}</p><p>{en ? 'Biometric authentication is managed by Android. Fingerprints and face images are never collected or backed up by this app.' : 'বায়োমেট্রিক যাচাই অ্যান্ড্রয়েড পরিচালনা করে। এই অ্যাপ আঙুলের ছাপ বা মুখের ছবি সংগ্রহ বা ব্যাকআপ করে না।'}</p><button className={secondaryButton} onClick={() => setSection('backup')}>{en ? 'Manage backups' : 'ব্যাকআপ পরিচালনা'}</button></div></>}
+      {section === 'privacy' && <><AIPrivacySettings owner={service.enabled?service.owner:db.getIdentity()?.ownerSubjectHash || ''} en={en} /><div className="space-y-4 rounded-2xl bg-slate-50 p-4 text-xs leading-relaxed text-slate-500"><h3 className="font-bold text-slate-800">{en ? 'Your records stay yours' : 'আপনার হিসাব আপনারই থাকে'}</h3><p>{accountAuthEnabled ? (en ? 'Financial records, workspace photos and receipts remain on this device. Account sign-in does not upload them in this preview. You can keep a separate backup file.' : 'হিসাব, খাতার ছবি ও রিসিপ্ট এই ডিভাইসে থাকে। এই প্রিভিউতে লগইন করলে এগুলো আপলোড হয় না। আলাদা ব্যাকআপ ফাইল রাখতে পারবেন।') : en ? 'Financial records are stored locally. Google Drive sync uses your private app storage after you grant access. Workspace photos and receipts are included in your private sync and backups.' : 'হিসাব প্রথমে ডিভাইসে সংরক্ষিত হয়। আপনার অনুমতির পর গুগল ড্রাইভের ব্যক্তিগত অ্যাপ স্টোরেজে সিঙ্ক হয়। খাতার ছবি ও রিসিপ্ট ব্যক্তিগত সিঙ্ক এবং ব্যাকআপে থাকে।'}</p><p>{en ? 'Biometric authentication is managed by Android. Fingerprints and face images are never collected or backed up by this app.' : 'বায়োমেট্রিক যাচাই অ্যান্ড্রয়েড পরিচালনা করে। এই অ্যাপ আঙুলের ছাপ বা মুখের ছবি সংগ্রহ বা ব্যাকআপ করে না।'}</p><button className={secondaryButton} onClick={() => setSection('backup')}>{en ? 'Manage backups' : 'ব্যাকআপ পরিচালনা'}</button></div></>}
     </div>
   </ModalShell>;
 }

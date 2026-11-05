@@ -11,14 +11,17 @@ import { aiConsentStore, AI_CONSENT_CHANGED } from '../ai/consent';
 import { requestAIMediaPermissions } from '../ai/nativeMedia';
 import { prepareAIReceipt } from '../ai/receiptCapture';
 import { ModalShell, primaryButton, secondaryButton } from './ModalShell';
+import { useServiceIdentity } from '../access/useServiceIdentity';
 
 export function AIEntryModal({ onClose, onApply }: {
   onClose: () => void; onApply: (entry: EntryDraft, receipt: ReceiptBlob | null) => void;
 }) {
-  const { language, auth, db, isOnline } = useApp();
+  const { language, auth:legacyAuth, db, isOnline } = useApp();
+  const {identity:auth,owner:serviceOwner,enabled:customerService}=useServiceIdentity(legacyAuth);
   const en = language === 'en';
-  const owner = db.getIdentity()?.ownerSubjectHash || '';
+  const owner = customerService?serviceOwner:db.getIdentity()?.ownerSubjectHash || '';
   const ownerAtOpen = useRef(owner);
+  const datasetAtOpen=useRef(db.getIdentity()?.ownerSubjectHash);
   const [allowed, setAllowed] = useState(false);
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
@@ -34,7 +37,7 @@ export function AIEntryModal({ onClose, onApply }: {
   let endpoint = '';
   try { endpoint = aiEndpoint(import.meta.env.VITE_AI_API_BASE_URL || '', window.location.origin, Capacitor.isNativePlatform()); } catch { /* Report before opening a sensor. */ }
   const unavailable = !endpoint || !owner || !isOnline;
-  const sameOwner = () => ownerAtOpen.current === db.getIdentity()?.ownerSubjectHash && ownerAtOpen.current === auth.getProfile()?.subjectHash;
+  const sameOwner = () => datasetAtOpen.current===db.getIdentity()?.ownerSubjectHash && ownerAtOpen.current === auth.getProfile()?.subjectHash;
 
   useEffect(() => {
     mounted.current = true;

@@ -58,7 +58,7 @@ export async function extractEntry(input: ExtractionInput, ownerHash: string, id
     const allowed = ['AI_AUTH_REQUIRED', 'AI_OWNER_MISMATCH', 'AI_LIMIT_REACHED', 'AI_NOT_CONFIGURED',
       'AI_REQUEST_ALREADY_USED', 'AI_AUTH_UNAVAILABLE', 'AI_LIMIT_UNAVAILABLE', 'AI_RESPONSE_INVALID', 'AI_MODEL_UNAVAILABLE',
       'AI_PROVIDER_BUSY', 'AI_PROVIDER_QUOTA', 'AI_PROVIDER_AUTH_ERROR', 'AI_CONTENT_BLOCKED', 'AI_RESPONSE_INCOMPLETE',
-      'AI_ORIGIN_DENIED', 'AI_MEDIA_TOO_LARGE', 'AI_MEDIA_OR_CONSENT_INVALID'];
+      'AI_ORIGIN_DENIED', 'AI_MEDIA_TOO_LARGE', 'AI_MEDIA_OR_CONSENT_INVALID','AI_SUBSCRIPTION_REQUIRED','AI_ACCESS_BLOCKED'];
     throw new Error(allowed.includes(raw?.error) ? raw.error : 'AI_PROVIDER_UNAVAILABLE');
   }
   return validateExtractionResult(raw, sourceSha256, requestId);
@@ -67,6 +67,8 @@ export async function extractEntry(input: ExtractionInput, ownerHash: string, id
 export function aiErrorMessage(error: unknown, isEn: boolean) {
   const code = error instanceof Error ? error.message : '';
   const messages: Record<string, [string, string]> = {
+    AI_SUBSCRIPTION_REQUIRED:['Redeem a code or renew your subscription to use AI.','AI ব্যবহার করতে রিডিম কোড দিন অথবা সাবস্ক্রিপশন নবায়ন করুন।'],
+    AI_ACCESS_BLOCKED:['AI access is blocked. Contact the Admin.','AI ব্যবহার বন্ধ আছে। অ্যাডমিনের সঙ্গে যোগাযোগ করুন।'],
     AI_NOT_CONFIGURED: ['AI entry is not enabled yet. You can still enter transactions manually.', 'AI এন্ট্রি এখনও চালু হয়নি। সাধারণভাবে লেনদেন যোগ করতে পারবেন।'],
     AI_MEDIA_PERMISSION_DENIED: ['Allow camera or microphone access in phone settings, or choose a gallery image.', 'ফোনের সেটিংসে ক্যামেরা বা মাইক্রোফোনের অনুমতি দিন, অথবা গ্যালারি থেকে ছবি বেছে নিন।'],
     AI_MEDIA_PERMISSION_UNAVAILABLE: ['Camera or microphone permission could not be checked. Close and reopen this screen. If it repeats, update the app.', 'ক্যামেরা বা মাইক্রোফোনের অনুমতি যাচাই করা যাচ্ছে না। স্ক্রিনটি বন্ধ করে আবার খুলুন। আবার হলে অ্যাপ আপডেট করুন।'],

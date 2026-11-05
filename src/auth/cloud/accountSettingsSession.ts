@@ -7,6 +7,7 @@ export interface AccountSettingsRuntime {
   openLink(url:string): Promise<void>;
   signOut(): Promise<{serverRevoked:boolean}>;
   close(): Promise<void>;
+  serviceAuthorization?(customerId:string):Promise<{customerId:string;token:string}>;
 }
 export interface AccountSettingsState {
   phase:'loading'|'signed_out'|'connected'|'offline'|'opening'|'busy'|'error';
@@ -40,6 +41,15 @@ export class AccountSettingsSession {
     this.contactChangesEnabled=deps.contactChangesEnabled;
   }
   getSnapshot=()=>this.state;
+  serviceGeneration=()=>this.epoch;
+  async serviceToken(expectedCustomerId:string,generation:number):Promise<string>{
+    const runtime=this.runtime;
+    const active=()=>this.epoch===generation&&this.runtime===runtime&&this.state.phase==='connected'&&this.state.account?.customerId===expectedCustomerId;
+    if(!active()||!runtime?.serviceAuthorization)throw Error('CUSTOMER_SIGN_IN_REQUIRED');
+    const value=await runtime.serviceAuthorization(expectedCustomerId);
+    if(!active()||value.customerId!==expectedCustomerId||!value.token)throw Error('CUSTOMER_SIGN_IN_REQUIRED');
+    return value.token;
+  }
   subscribe=(listener:()=>void)=>{this.listeners.add(listener);return()=>{this.listeners.delete(listener);};};
   private update(patch:Partial<AccountSettingsState>){this.state={...this.state,...patch};this.listeners.forEach(listener=>listener());}
   private fail(error:unknown){this.update({phase:this.deps.online()?'error':'offline',error:error instanceof Error&&knownErrors.has(error.message)?error.message:'CLOUD_UNAVAILABLE'});}
