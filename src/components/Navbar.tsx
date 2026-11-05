@@ -1,6 +1,6 @@
 import { WorkspaceManager } from './WorkspaceManager';
 import { WorkspaceAvatar } from './WorkspaceAvatar';
-import React, { useState, useRef, useEffect } from 'react';
+import React, { lazy, Suspense, useState, useRef, useEffect } from 'react';
 import { useApp } from '../context/AppContext';
 import { formatAccountTitle } from '../domain/money';
 import {
@@ -17,6 +17,8 @@ import {
   Users,
   Info,
 } from 'lucide-react';
+const AccountMenuProfile=lazy(()=>import('./AccountMenuProfile'));
+const accountAuthEnabled=import.meta.env.VITE_SUPABASE_AUTH_ENABLED==='true';
 
 interface NavbarProps {
   onOpenSyncModal: () => void;
@@ -383,6 +385,7 @@ export const Navbar: React.FC<NavbarProps> = ({
                 >
                   {/* User Profile Teaser */}
                   <div className="px-3 py-2 flex items-center gap-2.5">
+                    {accountAuthEnabled?<Suspense fallback={<span className="text-slate-500">{isEn?'Checking account…':'অ্যাকাউন্ট যাচাই হচ্ছে…'}</span>}><AccountMenuProfile en={isEn}/></Suspense>:<>
                     <div className="w-8 h-8 rounded-full bg-slate-900 text-white flex items-center justify-center font-bold text-xs shrink-0 overflow-hidden">
                       {userProfile?.photoUrl ? (
                         <img src={userProfile.photoUrl} alt="User" className="w-full h-full object-cover" />
@@ -398,6 +401,7 @@ export const Navbar: React.FC<NavbarProps> = ({
                         {userProfile?.email || (isEn ? 'Local Device Mode' : 'লোকাল মোড')}
                       </div>
                     </div>
+                    </>}
                   </div>
 
                   <div className="py-1">

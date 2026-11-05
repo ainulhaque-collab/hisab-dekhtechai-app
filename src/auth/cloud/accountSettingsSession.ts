@@ -20,7 +20,7 @@ const knownErrors=new Set(['CLOUD_AUTH_CONFIG','CLOUD_STORAGE_INVALID','CLOUD_ST
   'CLOUD_SIGN_IN_IN_PROGRESS','CLOUD_ACCOUNT_MISMATCH','CUSTOMER_SIGN_IN_REQUIRED','CUSTOMER_REAUTH_REQUIRED','CUSTOMER_EMAIL_INVALID',
   'CUSTOMER_PHONE_INVALID','CUSTOMER_OTP_INVALID','CUSTOMER_SMS_NOT_CONFIGURED','CUSTOMER_CHANGE_IN_PROGRESS','CUSTOMER_CHANGE_EXPIRED',
   'CUSTOMER_CHANGE_INVALID','CUSTOMER_CHANGE_UNVERIFIED','CUSTOMER_LINK_UNAVAILABLE','CUSTOMER_LAST_SIGN_IN_METHOD',
-  'CUSTOMER_PRIMARY_EMAIL_CHANGE_REQUIRED','ACCOUNT_CHANGES_NOT_ENABLED']);
+  'CUSTOMER_PRIMARY_EMAIL_CHANGE_REQUIRED','ACCOUNT_CHANGES_NOT_ENABLED','CLOUD_LOCAL_SIGN_OUT_FAILED']);
 
 /** UI/session state only: no LocalDatabase, outbox, financial sync or owner adoption. */
 export class AccountSettingsSession {
@@ -71,6 +71,7 @@ export class AccountSettingsSession {
     }catch(error){if(epoch===this.epoch)this.fail(error);}
   }
   refresh():Promise<void>{
+    if(this.signingOut)return this.signingOut;
     if(this.action){this.refreshQueued=true;return this.action;}
     if(this.reading)return this.reading;
     this.callbackError=null;
@@ -105,7 +106,7 @@ export class AccountSettingsSession {
   signOut():Promise<void>{
     if(this.signingOut)return this.signingOut;
     // Invalidate reads/callbacks immediately, even when a contact change is waiting on HTTP.
-    this.epoch++;this.callbackError=null;this.update({phase:'busy',error:null,notice:null});
+    this.epoch++;this.callbackError=null;this.update({phase:'busy',account:null,pending:null,error:null,notice:null});
     const runtime=this.runtime,init=this.initializing;
     const job=(async()=>{
       try{

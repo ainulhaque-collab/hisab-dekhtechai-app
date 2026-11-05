@@ -5,6 +5,8 @@ import {renderToStaticMarkup} from 'react-dom/server';
 import {AccountSettingsSession,type AccountSettingsRuntime} from '../auth/cloud/accountSettingsSession';
 import type {CustomerAccount,CustomerAccountChanges,PendingCustomerChange} from '../contracts/customerAccount';
 import AccountSettingsPanel from '../components/AccountSettingsPanel';
+import AccountMenuProfile from '../components/AccountMenuProfile';
+import {registerAccountSignOutCleanup,signOutAccountSessions,clearLegacyAccountSession} from '../auth/cloud/accountSignOut';
 import {accountSettingsError} from '../components/accountSettingsText';
 import {captureAccountCallback,hasAccountCallback,takeAccountCallback} from '../auth/cloud/callbackLocation';
 
@@ -13,6 +15,7 @@ const account:CustomerAccount={customerId:owner,email:'original@example.invalid'
 function gate(){let release!:()=>void;const promise=new Promise<void>(resolve=>{release=resolve;});return{promise,release};}
 function fixture(enabled=true,initial:CustomerAccount|null=account){
   let current=initial,pending:PendingCustomerChange|null=null,online=true,callback:(error?:unknown)=>void=()=>{},hold:ReturnType<typeof gate>|null=null,initError:unknown=null;
+  let logoutHold:ReturnType<typeof gate>|null=null,logoutError:unknown=null;
   const calls={creates:0,reads:0,updates:0,links:0,opens:0,signOuts:0,closes:0,signIns:[] as (string|null)[],changedOwners:[] as string[]};
   const manager=(id:string):CustomerAccountChanges=>({
     readAccount:async()=>{assert.equal(id,current?.customerId);return current!;},readPendingChange:async()=>pending,
@@ -23,10 +26,11 @@ function fixture(enabled=true,initial:CustomerAccount|null=account){
     completeGoogleLink:async()=>({status:'verified',account:current!}),removeGoogleIdentity:async()=>current!,cancelPendingChange:async()=>{pending=null;},
   });
   const runtime:AccountSettingsRuntime={read:async()=>{calls.reads++;return current;},changes:manager,signIn:async id=>{calls.signIns.push(id);},
-    openLink:async()=>{calls.opens++;},signOut:async()=>{calls.signOuts++;current=null;pending=null;return{serverRevoked:true};},close:async()=>{calls.closes++;}};
+    openLink:async()=>{calls.opens++;},signOut:async()=>{calls.signOuts++;if(logoutHold)await logoutHold.promise;current=null;pending=null;if(logoutError)throw logoutError;return{serverRevoked:true};},close:async()=>{calls.closes++;}};
   const session=new AccountSettingsSession({online:()=>online,contactChangesEnabled:enabled,create:async receive=>{calls.creates++;callback=receive;if(initError)receive(initError);return runtime;}});
   return{session,calls,setOnline:(value:boolean)=>{online=value;},setPending:(value:PendingCustomerChange)=>{pending=value;},setAccount:(value:CustomerAccount|null)=>{current=value;},
-    callback:(error?:unknown)=>callback(error),hold:()=>{hold=gate();return hold;},setInitError:(error:unknown)=>{initError=error;}};
+    callback:(error?:unknown)=>callback(error),hold:()=>{hold=gate();return hold;},setInitError:(error:unknown)=>{initError=error;},
+    holdSignOut:()=>{logoutHold=gate();return logoutHold;},failSignOut:(error:unknown)=>{logoutError=error;}};
 }
 
 test('account startup is shared and offline reads retain display data without verifying or changing it',async()=>{
@@ -59,6 +63,43 @@ test('a logout fences a late contact response and callback without replacing the
 test('late linking cannot open a browser after logout',async()=>{
   const f=fixture();await f.session.start();const held=f.hold(),link=f.session.linkGoogle();await new Promise(resolve=>setTimeout(resolve,0));
   await f.session.signOut();held.release();await link;assert.equal(f.calls.opens,0);
+});
+
+test('logout immediately hides identity in the menu and account panel, including offline and concurrent refresh',async()=>{
+  const f=fixture();await f.session.start();
+  const menu=()=>renderToStaticMarkup(React.createElement(AccountMenuProfile,{en:true,session:f.session}));
+  assert.match(menu(),/Primary email/);assert.match(menu(),/original@example.invalid/);
+  f.setOnline(false);await f.session.refresh();assert.match(menu(),/last verified/);
+  const held=f.holdSignOut(),logout=f.session.signOut();
+  assert.equal(f.session.getSnapshot().account,null);
+  assert.equal(f.session.refresh(),logout);
+  assert.doesNotMatch(menu(),/original@example.invalid|<img|Primary email/);
+  const panel=renderToStaticMarkup(React.createElement(AccountSettingsPanel,{en:true,session:f.session}));
+  assert.doesNotMatch(panel,/original@example.invalid|Primary verified email/);
+  held.release();await logout;f.callback();
+  assert.match(menu(),/Signed out/);assert.doesNotMatch(menu(),/original@example.invalid/);
+  assert.equal(f.calls.signOuts,1);
+});
+
+test('failed logout stays anonymous and reports a fixed error instead of restoring the old identity',async()=>{
+  const f=fixture();await f.session.start();f.failSignOut(Error('CLOUD_LOCAL_SIGN_OUT_FAILED'));await f.session.signOut();
+  assert.equal(f.session.getSnapshot().phase,'error');assert.equal(f.session.getSnapshot().account,null);
+  const html=renderToStaticMarkup(React.createElement(AccountMenuProfile,{en:false,session:f.session}));
+  assert.doesNotMatch(html,/original@example.invalid|<img/);assert.match(html,/সংযোগ যাচাই/);
+});
+
+test('cloud and legacy credential cleanup are both attempted, and a missing local cleanup cannot report success',async()=>{
+  const calls:string[]=[];
+  let detach=registerAccountSignOutCleanup(async()=>{calls.push('legacy');});
+  await assert.rejects(signOutAccountSessions(async()=>{calls.push('cloud');throw Error('CLOUD_STORAGE_UNAVAILABLE');}),/CLOUD_STORAGE_UNAVAILABLE/);
+  assert.deepEqual(calls.sort(),['cloud','legacy']);detach();calls.length=0;
+  detach=registerAccountSignOutCleanup(async()=>{calls.push('legacy');throw Error('private synthetic error');});
+  await assert.rejects(signOutAccountSessions(async()=>{calls.push('cloud');return{serverRevoked:true};}),/CLOUD_LOCAL_SIGN_OUT_FAILED/);
+  assert.deepEqual(calls.sort(),['cloud','legacy']);detach();
+  await assert.rejects(clearLegacyAccountSession(),/CLOUD_LOCAL_SIGN_OUT_FAILED/);
+  const old=registerAccountSignOutCleanup(async()=>{throw Error('stale callback');});
+  detach=registerAccountSignOutCleanup(async()=>{});old();
+  assert.deepEqual(await signOutAccountSessions(async()=>({serverRevoked:false})),{serverRevoked:false});detach();
 });
 
 test('callback errors during initialization remain visible rather than becoming a successful empty read',async()=>{

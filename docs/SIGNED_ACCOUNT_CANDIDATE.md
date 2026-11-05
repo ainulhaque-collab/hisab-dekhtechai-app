@@ -30,3 +30,11 @@ Runtime audit initially reported 8 high-severity findings, including inherited t
 ## Production blockers
 
 Remaining Postgres commands, authenticated gateway, backed-up explicit legacy UUID adoption, multi-client/restore acceptance, key recovery backup and final owner acceptance remain open. Old data must not be uploaded or silently reassigned to bypass these gates. Keep release HOLD until the required checks pass. No Production website promotion, paid service or public release is part of installing this owner candidate.
+
+## Sign-out privacy correction — 2026-11-05
+
+The owner found that signing out of Account settings left the hamburger displaying the legacy Google name, photo and Gmail. The menu now subscribes to the same account session as Account settings. It shows only the primary verified email of that session, explicitly labelled; signed-out, loading and error states never fall back to the legacy profile. Linked Google identities remain in Account settings, and the owner chose to keep both without changing the primary email.
+
+Logout removes displayed identity immediately, fences concurrent refreshes and attempts both current and legacy credential cleanup. The mounted app supplies its existing legacy auth instance; push-disable errors cannot prevent local credential clearing. A confirmed empty account read also clears an old Google session left by a previous app version. Device-only editable profile details are separately labelled; profile drafts/photos reset when the profile is cleared or reopened. No journal, local financial identity or outbox ownership is changed.
+
+Focused regressions cover pending/offline/failed logout, late callbacks, menu/panel privacy and independent cleanup failures. Lint and all 13 account settings tests pass. The next signed candidate must use code 23 or higher and repeat read-only retention comparison, native bridge/cold-launch checks and owner sign-out/menu acceptance before this correction is recorded as device-verified.
