@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { randomUUID } from 'node:crypto';
+import { randomUUID,X509Certificate } from 'node:crypto';
 import { readFile } from 'node:fs/promises';
 import { spawnSync } from 'node:child_process';
 import express from 'express';
@@ -17,11 +17,23 @@ import { validateEntryDraft } from '../ai/entryDraft';
 import { AccountSettingsSession,type AccountSettingsRuntime } from '../auth/cloud/accountSettingsSession';
 import { customerRequestIdentity,customerServiceHash as browserHash } from '../access/identity';
 import { accessRequest } from '../access/client';
+import { accessDatabaseConfig } from '../../server/access/database';
+import { SUPABASE_DATABASE_CA } from '../../server/access/supabaseCA';
 
 const owner='11111111-1111-4111-8111-111111111111',alice='22222222-2222-4222-8222-222222222222',bob='33333333-3333-4333-8333-333333333333';
 const customer=(id:string):ServiceCustomer=>({customerId:id,ownerHash:customerServiceHash(id)});
 const master='ad'.repeat(32),secret='synthetic-provider-key-never-real-123456789';
 const native=process.env.HISAB_TEST_PG_URL;
+
+test('Supabase connection verifies the official CA and hostname without changing other PostgreSQL trust',async()=>{
+  const certificate=new X509Certificate(SUPABASE_DATABASE_CA);
+  assert.equal(certificate.ca,true);assert.equal(certificate.fingerprint256,'80:70:25:AD:50:D4:ED:21:9D:2C:9C:7D:29:9C:00:4F:82:4E:B0:0C:F7:F6:5A:FE:F6:07:D0:7B:72:E6:CA:FA');
+  assert.equal((await readFile(new URL('../../config/certificates/supabase-prod-ca-2021.crt',import.meta.url),'utf8')).replace(/\r\n/g,'\n'),SUPABASE_DATABASE_CA.replace(/\r\n/g,'\n'));
+  const config=accessDatabaseConfig('postgresql://synthetic:synthetic@aws-0-ap-southeast-1.pooler.supabase.com:6543/postgres?sslmode=verify-full');
+  const tls=config.ssl as {rejectUnauthorized:boolean;ca:string;servername:string};assert.equal(tls.rejectUnauthorized,true);assert.equal(tls.ca,SUPABASE_DATABASE_CA);assert.equal(tls.servername,'aws-0-ap-southeast-1.pooler.supabase.com');
+  assert.deepEqual(accessDatabaseConfig('postgresql://synthetic:synthetic@postgres.example.invalid/app').ssl,{rejectUnauthorized:true});
+  assert.throws(()=>accessDatabaseConfig('postgresql://synthetic:synthetic@postgres.example.invalid/app?sslmode=disable'));
+});
 
 test('provider vault binds encryption to provider/revision; tampering and wrong wrapping key fail closed',()=>{
   const vault=new ProviderKeyVault(master),sealed=vault.seal(secret,'gemini',1);
@@ -52,8 +64,14 @@ test(`access SQL commands on ${native?'isolated native PostgreSQL':'PGlite'}`,as
   const exec=(text:string)=>native?sql.query(text):sql.exec(text);
   t.after(async()=>{await exec('DROP SCHEMA IF EXISTS hisab_access CASCADE; DROP OWNED BY hisab_access_preview; DROP ROLE hisab_access_preview');await close();});
   await exec('DROP SCHEMA IF EXISTS hisab_access CASCADE');await exec(await readFile(new URL('../../server/access/migrations/001-access.sql',import.meta.url),'utf8'));
+  await exec(await readFile(new URL('../../server/access/migrations/002-preview-login-provisioner.sql',import.meta.url),'utf8'));
+  await exec(await readFile(new URL('../../server/access/migrations/003-encrypted-preview-bootstrap.sql',import.meta.url),'utf8'));
+  await exec(await readFile(new URL('../../server/access/migrations/004-ciphertext-only-bootstrap.sql',import.meta.url),'utf8'));
   const store=new PostgresAccessStore(pool,owner,new ProviderKeyVault(master)),admin=customer(owner),a=customer(alice),b=customer(bob);
   await exec('SET ROLE hisab_access_preview');await sql.query('INSERT INTO hisab_access.customers(customer_id) VALUES($1)',[bob]);await exec('RESET ROLE');
+  await exec('SET ROLE hisab_access_preview');await assert.rejects(()=>sql.query("SELECT hisab_access.provision_encrypted_preview('not-a-key')"),/permission denied/);await exec('RESET ROLE');
+  await exec(await readFile(new URL('../../server/access/migrations/005-retire-preview-bootstrap.sql',import.meta.url),'utf8'));
+  assert.equal((await sql.query("SELECT to_regprocedure('hisab_access.provision_encrypted_preview(text)') IS NULL AS retired")).rows[0].retired,true);
   assert.equal((await store.status(a)).active,false);assert.equal((await store.status(admin)).isAdmin,true);
   await assert.rejects(()=>store.requireActive(a),/AI_SUBSCRIPTION_REQUIRED/);
   await assert.rejects(()=>store.issue(a,randomUUID(),30),/ACCESS_ADMIN_REQUIRED/);

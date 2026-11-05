@@ -1,6 +1,6 @@
 -- Portable PostgreSQL. Apply explicitly with a migration owner, never at runtime.
 -- No auth.users FK: identity provider migration must not cascade-delete access.
-CREATE SCHEMA IF NOT EXISTS hisab_access;
+CREATE SCHEMA hisab_access;
 REVOKE ALL ON SCHEMA hisab_access FROM PUBLIC;
 CREATE TABLE hisab_access.customers (
  customer_id uuid PRIMARY KEY, blocked boolean NOT NULL DEFAULT false,

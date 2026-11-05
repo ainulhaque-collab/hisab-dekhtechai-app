@@ -42,3 +42,4 @@ android/app/google-services.json
 supabase/.temp/
 
 .qa-current-sync-output.txt
+.local-access-preview/

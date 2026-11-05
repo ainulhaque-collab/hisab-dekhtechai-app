@@ -1,47 +1,63 @@
 # Web Admin, redeem periods and managed AI keys
 
-Owner request: a separate Web-only Admin accepts the owner's Gemini key and controls access for manually verified BDT1 payments/redeem subscriptions. Android remains the customer product. A future OpenAI adapter can share the existing extraction/guide contracts; OpenAI is not activated in this milestone.
+The owner requested a separate Web-only Admin for Gemini key management and AI access for redeem/subscription customers. Android remains the customer product. OpenAI retains the existing provider boundary; no OpenAI service is activated.
 
-## Implemented boundary
+## Current behavior
 
-- `/admin` is a separate lazy Web route. Android cannot enter it. It does not mount `AppProvider`, open the financial database or upload financial records. A signed-in customer without the server-configured owner UUID receives no Admin API access.
-- The server calls the configured Supabase Auth `/auth/v1/user` endpoint with the request JWT. It does not trust JWT payloads, cached sessions, `user_metadata`, browser role flags, email strings or phone numbers as authorization. Linked Google logins share the stable customer UUID and AI quota. The initial owner's UUID must be resolved from the owner's authoritative verified Auth account before activation; the primary email is not changed.
-- Request credentials remain transient. Sign-out invalidates an in-flight request even when the same customer signs in again. AI consent uses the new customer service scope only when the rollout flag is enabled. No financial owner adoption, dataset relabelling, migration or journal write is added.
-- The Admin issues cryptographically random, single-use 128-bit codes. Only a domain-separated digest is stored. The code is returned once, must be claimed within 30 days, and starts an admin-selected 1–3660-day period. Renewal adds to the remaining period. Lost issuance responses cannot reveal a saved plaintext code; issue another unused code. Blocked customers cannot consume a new code.
-- Atomic PostgreSQL transactions, row/advisory locks and actor/payload-bound request IDs prevent concurrent double redemption, duplicated renewal and cross-customer request replay. Admin manual grants and app-specific block/unblock never modify shared Supabase Auth users. The owner cannot block themself.
-- Every customer-mode AI request checks current server entitlement before reserving quota or calling the provider. Blocked, expired or unconfigured access fails closed. Owner service access is retained for operation/recovery, within the same AI usage limits. Enabling the access backend with legacy Google AI auth disables AI rather than creating a bypass.
-- Key input is password-masked and cleared on submission/account changes. AES-256-GCM uses a separate 32-byte server wrapping key, fresh nonce, authentication tag and provider/revision AAD. PostgreSQL stores ciphertext only. Status responses contain configured/enabled/model/revision/time, never the key or suffix. Provider rotation uses an expected revision; disable/rotation is checked on the next request. In-flight generations cannot be recalled. There is no fallback to an old environment key in customer mode, no arbitrary provider URL and no automatic chargeable retry.
-- Access API rate counters are durable, bounded to one row/customer plus a global row, and separate from chargeable AI quota. Responses use fixed safe errors, exact CORS, JSON limits and no-store. Audit entries contain actor/subject IDs and fixed action names, no keys, codes, receipt contents or financial records.
+- `/admin` is a lazy Web-only route. It does not mount `AppProvider`, initialize the financial database or upload financial records. Android cannot enter Admin. Google login returns to Admin through a one-time session hint, limited to the fixed `/admin` destination and ten minutes; it is never authorization evidence. Callback codes are removed from browser history before rendering.
+- The server verifies the request JWT online with the configured Supabase Auth `/auth/v1/user` endpoint. JWT payloads, cached sessions, email strings, browser roles and `user_metadata` cannot grant access. The initial owner was bound to the authoritative, confirmed customer UUID of the already approved account. Linked Google identities share entitlement, Admin status and quota without changing the primary email.
+- Request credentials remain transient. Sign-out invalidates in-flight handles even after login to the same UUID. The rollout flag changes AI service/consent scope only; it does not adopt or relabel financial ownership.
+- Owner-only Admin saves/replaces/disables a Gemini key. Password input clears on submission or identity change. AES-256-GCM uses a separate server wrapping secret, random nonce and provider/revision AAD. SQL stores ciphertext only; read responses return configured/enabled/model/revision/time, never a key or suffix. Rotation uses an expected revision. Disable/rotation applies on the next request; an in-flight generation cannot be recalled. There is no old-key fallback or arbitrary provider endpoint.
+- Codes are random 128-bit, single-use, returned once, stored only as a domain-separated digest, and claimable for 30 days. Admin selects 1–3660 days. First redemption starts the period; renewal extends the remaining period. Row/advisory locks and actor/payload-bound request IDs prevent concurrent double claims, duplicated renewal and cross-user replay. A blocked customer cannot consume a fresh code. A lost issuance response requires a new code; saved plaintext cannot be retrieved.
+- Manual grants and app-specific blocks never modify shared Auth users. Owner self-block is rejected. AI checks current entitlement before quota/generation. Owner recovery/operation retains AI service access within the same quota. Access mode cannot be bypassed through legacy Google auth. Durable access request counters are separate from generation quota; no automatic paid generation retry.
+- The UI explicitly describes the current gate as **AI access**. Broader app-wide subscription enforcement still requires ledger-write guards and a signed offline lease (up to seven days or the remaining period), while retaining own-record view/export. Do not sell this Preview as completed app-wide enforcement.
+- Responses have exact CORS, JSON limits, no-store and fixed safe errors. Audit records contain fixed actions and actor/subject IDs, no codes, keys, media or financial records. Existing push/inbox bindings remain unchanged; their verified-customer migration is separate.
 
-## SQL and deployment controls
+## Private SQL and scope
 
-Canonical portable SQL: `server/access/migrations/001-access.sql`. It creates only the private `hisab_access` namespace and a new **NOLOGIN** `hisab_access_preview` role. RLS is enabled on all six tables. No anonymous/authenticated/shared service-role grants or policies are added. The dedicated role gets only required table/sequence operations, no delete/DDL/finance access. A pre-existing role/schema is not silently reused or modified. Applying this portable SQL to the shared Supabase host requires a CLI-generated tracked host migration and inspection/review of existing objects first; no runtime DDL.
+Portable SQL is under `server/access/migrations`. CLI-generated host migrations are under `supabase/migrations`; their filenames are aligned to actual applied host versions. The shared host is `sfzitbasxrpmtmldujbm`. Only `hisab_access` and the dedicated `hisab_access_preview` role were created. No finance/public/other-application table, Auth policy, SMS setting or primary email was modified.
 
-The hosted runtime refuses a project-owner/superuser/BYPASSRLS/CREATEDB/CREATEROLE database login. It requires `hisab_access_preview` and verified TLS. A dedicated restricted pooled connection and its credentials must be prepared securely before activation. Never use a Supabase service key or a browser `VITE_*` variable for database/provider/wrapping credentials.
+All six tables have RLS. No anon/authenticated/shared service-role grant was added. The role has only needed table/sequence privileges, no delete/DDL/finance access. Runtime refuses superuser, BYPASSRLS, CREATEDB, CREATEROLE or INHERIT connections and requires the exact role name. The role's live TLS connection was verified before secret upload.
 
-Branch-scoped Preview configuration, all default off:
+Management provisioning helpers are invoker-privilege and denied to the runtime. The current helper returns **only public-key-encrypted recovery material and a checksum**. It never returns a live password/wrapping secret through MCP. Earlier management-only bootstrap forms were superseded; none was granted to customers. Do not invoke provisioning again after the current credentials are uploaded: it rotates the DB password. Optional final removal (`005-retire-preview-bootstrap.sql`) is tested locally but has not been applied to the host: its destructive-DDL confirmation expired. The remaining helper is inaccessible to the runtime; this cleanup is not required by normal Admin/AI requests. Do not label it retired until confirmed.
 
-| Variable | Meaning |
-| --- | --- |
-| `ACCESS_ENABLED=true` | Mount the configured Preview access service |
-| `AI_AUTH_MODE=supabase` | Require verified-customer AI auth and entitlement |
-| `VITE_CUSTOMER_ACCESS_ENABLED=true` | Show customer redeem UI and use customer AI identity |
-| `VITE_SUPABASE_AUTH_ENABLED=true` | Existing verified customer login |
-| `SUPABASE_URL`, `SUPABASE_PUBLISHABLE_KEY` | Server Auth endpoint and public project key |
-| `ACCESS_ADMIN_CUSTOMER_ID` | Stable, verified owner UUID; not an email |
-| `ACCESS_DATABASE_URL` | Sensitive dedicated-role pooled DB URL, verified TLS |
-| `AI_VAULT_WRAPPING_KEY` | Sensitive random 32-byte hexadecimal server wrapping key |
+This Supabase project also hosts other applications. Never bulk-reset or blindly push/reconcile the shared migration history. Apply only reviewed, explicitly scoped Hisab migrations. Runtime never performs DDL.
 
-Existing AI budget Redis pair and approved exact origins remain required. Keep server/client rollout settings aligned and scoped to the new Preview branch. Do not move existing customer aliases or enable Production. An authenticated Admin login callback for the new Preview origin must be reviewed before saving it to shared Auth. Enter the real Gemini key through the protected Admin after deployment; no key belongs in chat, Git or Notion.
+## TLS
 
-Recovery: preserve the wrapping key separately from the SQL dump. Rotating the Gemini API key is implemented. Rotating the wrapping key itself needs an explicit decrypt/re-encrypt migration; do not simply replace it. Losing a wrapping key requires the owner to enter a fresh Gemini key; it must never affect financial records. Code redemption history, grants and blocks need a private schema dump/restore rehearsal before any real subscription is issued. Do not drop tables or disable access while grants are active as a rollback shortcut.
+Supabase's shared pooler requires its official CA. `accessDatabaseConfig` adds that CA only for Supabase database hostnames and retains `rejectUnauthorized: true` and hostname verification. Other PostgreSQL hosts keep normal CA trust. No global trust-store, SSL-enforcement or network protection was weakened.
 
-## Evidence and open gates
+Public certificate: `config/certificates/supabase-prod-ca-2021.crt`, copied from the authenticated dashboard's exact download link. Its generated server constant supports emitted ESM without filesystem tracing assumptions. Fingerprint SHA-256: `80:70:25:AD:50:D4:ED:21:9D:2C:9C:7D:29:9C:00:4F:82:4E:B0:0C:F7:F6:5A:FE:F6:07:D0:7B:72:E6:CA:FA`; expiry April 26, 2031. Tests verify the CA fingerprint, asset consistency and full TLS settings.
 
-Local TypeScript, full suite (395 tests: 394 pass, one existing native-only skip), bundle and compiled Node ESM AI/access adapters pass. Access-specific tests cover encryption/tamper/wrong-key/revision handling, verified UUID identity, cross-user denial, code expiry/replay/blocked-customer rollback, RLS default-deny, key rotation/disable, quota separation, fixed safe HTTP errors and sign-out fencing. Native PostgreSQL concurrency is added to CI and must pass separately.
+Official guidance: [Supabase SSL enforcement](https://supabase.com/docs/guides/platform/ssl-enforcement), [database connections](https://supabase.com/docs/guides/database/connecting-to-postgres).
 
-Browser evidence uses disposable loopback synthetic-only Auth fixtures and a real PGlite access store, not real customer data: Admin key save returns configured status with an emptied input; issuance creates a code; customer redemption displays active access and its expiry. No provider generation or charge was made. A browser-native confirmation blocked the automation; it was replaced with inline readable confirmation. Visual acceptance of the replacement, compact mobile Admin layout, real Google-to-Admin login, hosted role/secret configuration, private access-schema dump/restore and native customer acceptance remain open. Do not label these live/production PASS.
+## Secret handling and recovery
 
-This milestone gates **AI only**. The broader approved subscription policy (own-record view/export retained; new ledger writes stopped after expiry/block; signed offline lease up to seven days/remaining period) still needs its own ledger command guards, signed-lease/clock-rollback tests and acceptance before selling app-wide subscriptions. No UI-only flag claims to enforce offline ledger access. Existing push/inbox identity migration is separate and remains unchanged to avoid losing bindings/history. Existing Google/legacy API deployment is not a new production subscription endpoint.
+Automatic review rejected methods that embedded live credentials in command arguments/code or returned them to AI tool history. Do not repeat those methods or expose decrypted recovery data through MCP, stdout, arguments, chat or Notion.
 
-Installed owner-accepted Android remains `1.0.24-rc4/code25`, source `94bea38`. No APK replacement, uninstall, data clear, new Android permissions, financial SQL migration/upload, Google Drive work, Production change, paid service or real customer entitlement is part of the verification above.
+The completed safe pipeline is:
+
+1. `Create-PreviewRecoveryKey.mjs` generates a local RSA OpenPGP pair; the private key is protected with the owner's PowerShell 7/DPAPI context. Only its public key leaves the local process.
+2. Management SQL generates a fresh DB password/wrapping secret and returns a public-key-encrypted record plus checksum only. Previous experimental credentials were rotated and are not active.
+3. `.local-access-preview/credentials.pgp.json` is encrypted; `recovery-private-key.dpapi` is separately owner-protected. `Verify-PreviewRecovery.mjs` decrypts only in private local process memory and verifies the exact record hash/project/branch. It prints a fixed success marker, never secrets.
+4. `Upload-PreviewAccessSecrets.mjs` verifies Vercel CLI identity/team/project, recovery, restricted DB role and full TLS, then sends the two values via private stdin directly to Vercel Sensitive storage. No `--value`/token flags or plaintext files. Child CLI output is not forwarded. A value-free receipt records only scope and verification booleans.
+
+The private directory is outside build/worktrees, excluded in both Git local excludes and this branch's `.gitignore`. Do not commit, upload or delete it as cache. Operator OpenPGP dependency is isolated under `.local-tools/secret-backup` and pinned to 6.3.2; Vercel CLI is pinned to 65.11.0. These are not app dependencies. Use PowerShell 7; inheriting its module path into PowerShell 5 caused a failed backup, so that path is not accepted.
+
+DPAPI recovery has been verified in the current Windows owner profile. An owner-controlled off-device/passphrase-protected recovery export remains a Production gate; this local verification does not claim recovery after loss of the entire Windows profile. Losing a wrapping key can require a fresh Gemini key; it must never affect financial records. Rotating a Gemini key is implemented; rotating a wrapping key requires an explicit decrypt/re-encrypt migration.
+
+## Preview activation
+
+Only branch `codex/verified-service-identity` in Vercel project `hisab-dekhtechai-app` is configured. `ACCESS_DATABASE_URL` and `AI_VAULT_WRAPPING_KEY` are Sensitive and Preview/branch scoped. Public rollout/configuration flags are also branch scoped. The server requires `AI_AUTH_MODE=supabase`, `ACCESS_ENABLED=true`, verified Auth project/public key, exact owner UUID, approved exact origins and the existing Redis generation budget. Client flags are `VITE_SUPABASE_AUTH_ENABLED=true` and `VITE_CUSTOMER_ACCESS_ENABLED=true`. Other branches/Production are not changed.
+
+Approved Admin URL: `https://hisab-dekhtechai-app-git-codex-verifie-f9b531-ainulhaque-collab.vercel.app/admin`. Exactly its `/auth/callback` was appended to shared Auth; all seven old callbacks and Site URL were retained. Vercel project/alias protection remains enabled. Authenticated temporary connector inspection is limited to the owner-approved Preview and at most 23 hours.
+
+Configuration changes require a new deployment. Current hosted acceptance/source/CI evidence is tracked in PR #19 and Notion; configuration existing is not proof that an older deployment is enabled. The owner enters the real Gemini key directly in Admin after deployment. No real key has been imported or generation charged by this setup.
+
+## Verification and release gates
+
+Local checks cover verified UUIDs, sign-out fencing, role/RLS denial, code expiry/replay/concurrency, encryption/tamper/revisions, safe errors, CA/TLS, callback return allowlist/expiry and storage denial. Native CI also covers exact private access/vault/audit dump/restore and key decryption with the retained wrapping key. Existing finance sync/RLS/restore tests remain separate.
+
+Synthetic-only browser tests demonstrated masked key save, code issuance and customer activation/expiry without real data/provider calls. Browser-native confirmation was replaced with inline confirmation. Final inline/responsive UI and real owner Google-to-Admin acceptance, actual provider-key entry, optional management-helper retirement and the new deployment checks remain to be recorded. Do not claim live/production PASS from synthetic tests.
+
+Installed accepted Android remains `1.0.24-rc4/code25`, source `94bea38`. No APK replacement, uninstall/data clear, real financial upload/adoption, new Android permission, broadcast, customer-Web alias movement, paid service or Vercel Production change was performed. Native AI rollout needs its own reachable API/protection plan and acceptance; do not embed a Vercel protection-bypass secret in an APK.
