@@ -2,6 +2,8 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { exportFinancialsToXLSX } from '../domain/excel';
 import { JournalTransaction, Account, Category } from '../contracts/types';
+import * as XLSX from 'xlsx';
+import { buildIncomeJournal } from '../domain/journal';
 
 test('exportFinancialsToXLSX: produces valid binary array without corruption', () => {
   const accounts: Account[] = [
@@ -124,4 +126,24 @@ test('exportFinancialsToXLSX: produces valid binary array without corruption', (
   // Verify PK header for ZIP / OOXML XLSX format
   assert.equal(buffer[0], 0x50, 'XLSX file must begin with PK header byte 0 (0x50)');
   assert.equal(buffer[1], 0x4b, 'XLSX file must begin with PK header byte 1 (0x4B)');
+  const workbook=XLSX.read(buffer,{type:'array'});
+  assert.deepEqual(workbook.SheetNames,['Transactions','Accounts Summary','Categories']);
+  const rows=XLSX.utils.sheet_to_json<Record<string,unknown>>(workbook.Sheets.Transactions);
+  assert.equal(rows[1]['Debit (BDT)'],'1250.50');
+  assert.equal(rows[1].Category,'কাঁচাবাজার');
+});
+
+test('Excel roundtrip retains exact large paisa, Bengali text and literal formula-like notes',()=>{
+  const amount='9007199254740993',workspace={id:'ws',ownerSubjectHash:'synthetic',name:'পরীক্ষা',kind:'personal' as const,currency:'BDT' as const,createdAt:'2026-11-04T00:00:00Z'};
+  const account:Account={id:'cash',workspaceId:'ws',name:'নগদ',kind:'cash',openingBalanceMinor:'0',createdAt:workspace.createdAt};
+  const category:Category={id:'salary',workspaceId:'ws',name:'বেতন',kind:'income'};
+  const journal=buildIncomeJournal({workspaceId:'ws',assetAccountId:'cash',revenueCategoryId:'salary',amountMinor:amount,effectiveDate:'2026-11-04',opId:'synthetic-op',note:'=1+1'});
+  const tx={...journal.transaction,lines:journal.lines};
+  const before=JSON.stringify(tx);
+  const workbook=XLSX.read(exportFinancialsToXLSX(workspace,[tx],[account],[category]),{type:'array'});
+  const rows=XLSX.utils.sheet_to_json<Record<string,unknown>>(workbook.Sheets.Transactions);
+  assert.equal(rows[0]['Debit (BDT)'],'90071992547409.93');
+  assert.equal(rows[0].Account,'নগদ');assert.equal(rows[0].Category,'বেতন');
+  assert.equal(workbook.Sheets.Transactions.I2.t,'s');assert.equal(workbook.Sheets.Transactions.I2.f,undefined);assert.equal(workbook.Sheets.Transactions.I2.v,'=1+1');
+  assert.equal(JSON.stringify(tx),before);
 });

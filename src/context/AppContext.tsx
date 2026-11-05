@@ -665,10 +665,12 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   };
 
   const signOut = async () => {
-    await notificationService.disable();
-    auth.signOut();
-    sync.setAuthorized(false);
-    refreshState();
+    try { await notificationService.disable(); }
+    finally {
+      auth.signOut();
+      sync.setAuthorized(false);
+      refreshState();
+    }
   };
 
   const currentWorkspace = useMemo(() => {

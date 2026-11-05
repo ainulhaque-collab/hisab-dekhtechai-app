@@ -1,4 +1,5 @@
 const messages:Record<string,[string,string]>={
+  CLOUD_LOCAL_SIGN_OUT_FAILED:['লগইনের তথ্য পুরোপুরি পরিষ্কার করা যায়নি। আবার চেষ্টা করুন।','Sign-in details could not be fully cleared. Try again.'],
   CUSTOMER_REAUTH_REQUIRED:['পরিবর্তনের আগে আবার পরিচয় যাচাই করুন।','Verify your identity again before making changes.'],
   CUSTOMER_PRIMARY_EMAIL_CHANGE_REQUIRED:['আগে নতুন Google অ্যাকাউন্টের ইমেইলটি নিশ্চিত করে মূল ইমেইল হিসেবে রাখুন।','Confirm the new Google account’s email as your primary email first.'],
   CUSTOMER_LAST_SIGN_IN_METHOD:['শেষ Google লগইনটি সরানো যাবে না। আগে আরেকটি যুক্ত করুন।','Add another Google sign-in before removing this one.'],

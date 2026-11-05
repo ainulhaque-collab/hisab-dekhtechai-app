@@ -3,7 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { AppProvider, useApp } from './context/AppContext';
 import { Navbar } from './components/Navbar';
 import { BottomNav, TabType } from './components/BottomNav';
@@ -81,7 +81,9 @@ class ErrorBoundary extends React.Component<ErrorBoundaryProps, ErrorBoundarySta
 }
 
 function MainApp() {
-  const { currentWorkspace, language } = useApp();
+  const { currentWorkspace, language, auth, signOut } = useApp();
+  const legacySignOut=useRef(signOut);
+  legacySignOut.current=signOut;
   const [activeTab, setActiveTab] = useState<TabType>('home');
   const [selectedTx, setSelectedTx] = useState<JournalTransaction | null>(null);
   const [isUnlocked, setIsUnlocked] = useState(() => !pinLock.isEnabled());
@@ -118,15 +120,22 @@ function MainApp() {
     let stopped=false;
     const show=()=>{if(!stopped){setSettingsSection('account');setIsSettingsModalOpen(true);}};
     let refresh=()=>{};
+    let unregister=()=>{};
     const visible=()=>{if(!document.hidden)refresh();};
     window.addEventListener('hisab-account-callback',show);
     window.addEventListener('online',visible);window.addEventListener('offline',visible);
     document.addEventListener('visibilitychange',visible);
-    void import('./auth/cloud/accountSettingsRuntime').then(({accountSettingsSession:session})=>{
-      if(stopped)return;refresh=()=>{void session.refresh();};void session.start();
+    void Promise.all([import('./auth/cloud/accountSettingsRuntime'),import('./auth/cloud/accountSignOut')]).then(([{accountSettingsSession:session},{registerAccountSignOutCleanup}])=>{
+      if(stopped)return;
+      unregister=registerAccountSignOutCleanup(async()=>{
+        const profile=auth.getProfile();
+        // A device-only editable profile is not a Google login credential.
+        if(profile&&profile.subjectId!=='local_user')await legacySignOut.current();
+      });
+      refresh=()=>{void session.refresh();};void session.start();
     });
-    return()=>{stopped=true;window.removeEventListener('hisab-account-callback',show);window.removeEventListener('online',visible);window.removeEventListener('offline',visible);document.removeEventListener('visibilitychange',visible);};
-  },[]);
+    return()=>{stopped=true;unregister();window.removeEventListener('hisab-account-callback',show);window.removeEventListener('online',visible);window.removeEventListener('offline',visible);document.removeEventListener('visibilitychange',visible);};
+  },[auth]);
 
   if (!isUnlocked) {
     return <PinLockScreen onUnlocked={() => setIsUnlocked(true)} />;
