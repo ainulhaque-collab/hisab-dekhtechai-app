@@ -38,11 +38,15 @@ $storePath = Join-Path $signingRoot 'hisab-release.p12'
 $credentialsPath = Join-Path $signingRoot 'credentials.dpapi.json'
 $publicPath = Join-Path $signingRoot 'public-certificate.json'
 $evidencePath = Join-Path $signingRoot 'last-signed-build.json'
+$databaseSource = [IO.File]::ReadAllText((Join-Path $workspaceRoot 'src/storage/db.ts'))
+if ($databaseSource -notmatch 'export const CURRENT_SCHEMA_VERSION = ([1-9][0-9]*);') { throw 'Cannot verify the source database reader version.' }
+$databaseSchemaVersion = [int]$Matches[1]
 foreach ($path in @($storePath, $credentialsPath, $publicPath)) {
     if (!(Test-Path -LiteralPath $path)) { throw 'Signing identity is incomplete. Run New-AndroidSigningIdentity.ps1 once as the desktop owner.' }
 }
 if (Test-Path -LiteralPath $evidencePath) {
     $previousBuild = Get-Content -LiteralPath $evidencePath -Raw | ConvertFrom-Json
+    if (!$BridgeTestOnly -and $previousBuild.databaseSchemaVersion -and $databaseSchemaVersion -lt $previousBuild.databaseSchemaVersion) { throw 'This source cannot read the last signed database schema. Use a compatible forward fix; do not downgrade or clear user data.' }
     if (!$BridgeTestOnly -and $VersionCode -le $previousBuild.versionCode) { throw 'Choose a versionCode greater than the last successful signed build.' }
 }
 $javaPath = if ($env:JAVA_HOME) { Join-Path $env:JAVA_HOME 'bin/java.exe' } else { (Get-Command java -ErrorAction SilentlyContinue).Source }
@@ -167,7 +171,7 @@ try {
     if (Test-Path -LiteralPath $archivePath) {
         if ((Get-FileHash -LiteralPath $archivePath -Algorithm SHA256).Hash -ne $apkHash) { throw 'A different preserved APK already uses this version; choose a new version.' }
     } else { Copy-Item -LiteralPath $apkPath -Destination $archivePath }
-    $evidence = @{ applicationId = $publicInfo.applicationId; versionCode = $VersionCode; versionName = $VersionName; commit = (git rev-parse HEAD); certificateSha256 = $publicInfo.certificateSha256; apkSha256 = $apkHash; apkPath = $archivePath; aiServiceOrigin = $nativeAIOrigin; builtAtUtc = [DateTime]::UtcNow.ToString('o'); physicalDeviceAcceptance = 'PENDING'; published = $false }
+    $evidence = @{ applicationId = $publicInfo.applicationId; versionCode = $VersionCode; versionName = $VersionName; databaseSchemaVersion = $databaseSchemaVersion; commit = (git rev-parse HEAD); certificateSha256 = $publicInfo.certificateSha256; apkSha256 = $apkHash; apkPath = $archivePath; aiServiceOrigin = $nativeAIOrigin; builtAtUtc = [DateTime]::UtcNow.ToString('o'); physicalDeviceAcceptance = 'PENDING'; published = $false }
     $evidence | ConvertTo-Json | Set-Content -LiteralPath $evidencePath -Encoding UTF8
     $evidence | ConvertTo-Json
 } finally {

@@ -36,7 +36,7 @@ test('bookmarks/reconciliation are atomic durable metadata; journals and balance
   assert.equal(canonicalJson(db.calculateAccountSummaries(ws)),balances);
   assert.equal(canonicalJson(db.toSerializable().journalTransactions),canonicalJson(before.journalTransactions));
   assert.equal(canonicalJson(db.toSerializable().journalLines),canonicalJson(before.journalLines));
-  assert.equal(db.getSchemaVersion(),5); assert.notEqual(await financialFingerprint(db.toSerializable()),fingerprint);
+  assert.equal(db.getSchemaVersion(),6); assert.notEqual(await financialFingerprint(db.toSerializable()),fingerprint);
   const target = await replica(db); assert.equal(target.getReportMetadata(ws).bookmarks.get(id)?.enabled,true);
   const fresh = new LocalDatabase(`restore-${generateUUID()}`,new LocalStorageFallbackDriver()); await fresh.init();
   await fresh.importBackupFile(await db.exportBackupFile());

@@ -56,7 +56,7 @@ test('Loan book: issuance atomically moves cash across workspaces, preserves pri
   assert.equal(row.balance.principalOutstandingMinor, '50000');
   assert.equal(row.issue.terms.interestBasis, 'daily-30');
   assert.equal(row.issue.terms.reminderMinute, 1140);
-  assert.equal(db.getSchemaVersion(), 5);
+  assert.equal(db.getSchemaVersion(), 6);
   for (const ws of [sourceWs, borrowerWs]) {
     assert.equal(db.verifyLedgerIntegrity(ws.id).isValid, true);
     const report = db.getDashboardData(ws.id);

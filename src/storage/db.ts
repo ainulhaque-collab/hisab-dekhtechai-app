@@ -48,13 +48,14 @@ import { projectSavingsGoals, validateSavingsGoalEvent, type SavingsGoal, type S
 import { isSavingsOperation, savingsRecords, validateSavingsOperations } from './savingsOperations';
 import { projectReportMetadata, validateReportOperations, validateReportEvent, reconciliationFingerprint, type ReportEvent } from './reportMetadata';
 import { issueSavingsLoan, repaySavingsLoan, setLoanAutoRepayment, readSavingsLoans, isLoanLedgerAccount, isLoanJournal, type NewSavingsLoan } from './loanBook';
+import { readWalletBook, isAllocationJournal, assertAllocationSpend, walletOutflowLimit } from './walletBook';
 import {
   createDurableStorageDriver,
   DurableStorageDriver,
   StorageType
 } from './drivers/durableStorage';
 
-export const CURRENT_SCHEMA_VERSION = 5;
+export const CURRENT_SCHEMA_VERSION = 6;
 
 function storageError(error: unknown): Error {
   if (error instanceof Error) return error;
@@ -210,6 +211,7 @@ export class LocalDatabase {
           checksum: 'account-groups-permissions-v5',
           appliedAt: new Date().toISOString(),
         },
+        {fromVersion:5,toVersion:6,checksum:'wallet-allocation-guard-v6',appliedAt:new Date().toISOString()},
       ],
       preferences: new Map<string, any>([
         ['language', 'en'],
@@ -591,6 +593,8 @@ export class LocalDatabase {
     const tx = balanced.transaction;
     const lines = balanced.lines;
     if (isLoanJournal(tx.id) || lines.some(line => isLoanLedgerAccount(line.accountId))) throw new Error('LOAN_PROTECTED_JOURNAL');
+    if (isAllocationJournal(tx.id)) throw new Error('WALLET_PROTECTED_TRANSFER');
+    if(op.seq===0&&op.deviceId!==this.getDeviceId())throw new Error('LOCAL_TRANSACTION_DEVICE_MISMATCH');
     validateTransactionTime(tx);
     if (receipt) {
       validateReceiptBlob(receipt);
@@ -606,6 +610,10 @@ export class LocalDatabase {
     // Atomic transaction boundary
     await this.beginTransaction();
     try {
+      assertAllocationSpend(this,balanced);
+      // UI journals reserve their sequence only after validation, inside this
+      // transaction. A rejected amount must not leave an unfillable device gap.
+      if(op.seq===0)op.seq=this.getNextDeviceSeq();
       // Store transaction and lines
       const fullTx: JournalTransaction = {
         ...tx,
@@ -654,6 +662,10 @@ export class LocalDatabase {
 
   public getSchemaVersion(): number {
     return this.state.schemaVersion;
+  }
+
+  public getWalletOutflowLimit(sourceAccountId:string,destinationAccountId?:string):string|null {
+    return walletOutflowLimit(this,sourceAccountId,destinationAccountId);
   }
 
   public queueSyncOp(
@@ -719,6 +731,7 @@ export class LocalDatabase {
   }
 
   public archiveWorkspace(id: UUID): boolean {
+    if(Array.from(readWalletBook(this.state).wallets.values()).some(w=>w.homeWorkspaceId===id))throw new Error('WALLET_HOME_REQUIRED');
     const ws = this.state.workspaces.get(id);
     if (!ws) return false;
     this.assertWorkspaceOwner(ws);
@@ -742,6 +755,7 @@ export class LocalDatabase {
   }
 
   public editWorkspace(id: UUID, updates: Partial<Pick<Workspace, 'name' | 'kind' | 'description'>> & { imageDataUrl?: string | null }): boolean {
+    if(updates.kind&&updates.kind!=='personal'&&Array.from(readWalletBook(this.state).wallets.values()).some(w=>w.homeWorkspaceId===id))throw new Error('WALLET_HOME_REQUIRED');
     const ws = this.state.workspaces.get(id);
     if (!ws) return false;
     this.assertWorkspaceOwner(ws);
@@ -763,6 +777,11 @@ export class LocalDatabase {
   }
 
   public workspaceDeleteBlocker(id: UUID): string | null {
+    const walletBook=readWalletBook(this.state);
+    if(Array.from(walletBook.wallets.values()).some(w=>w.homeWorkspaceId===id))
+      return 'This Personal workspace holds the wallet registry. Keep it active to manage your wallets.';
+    if(Array.from(walletBook.links.values()).some(l=>l.workspaceId===id))
+      return 'This workspace contains linked wallets. Archive it to keep its allocation history.';
     const ws = this.state.workspaces.get(id);
     if (!ws || ws.deletedAt) return 'Workspace not found.';
     this.assertWorkspaceOwner(ws);
@@ -857,6 +876,7 @@ export class LocalDatabase {
     updates: Partial<Pick<Account, 'name' | 'accountNumberMasked' | 'kind' | 'groupId'>>
   ): Account | null {
     if (isLoanLedgerAccount(id)) throw new Error('LOAN_PROTECTED_ACCOUNT');
+    if (updates.kind!==undefined&&readWalletBook(this.state).links.has(id)&&updates.kind!==this.state.accounts.get(id)?.kind)throw new Error('WALLET_LINKED_KIND_FIXED');
     const acc = this.state.accounts.get(id);
     if (!acc) return null;
     if (updates.name !== undefined) acc.name = updates.name.trim();
@@ -914,6 +934,7 @@ export class LocalDatabase {
     }
 
     const hasReferences = BigInt(acc.openingBalanceMinor) !== 0n ||
+      readWalletBook(this.state).links.has(id) ||
       Array.from(this.state.syncOperations.values()).some(op => isSavingsOperation(op) && op.payload.savingsEvent?.accountId === id) ||
       Array.from(this.state.accountPermissions.values()).some(g => g.accountIds.includes(id)) ||
       Array.from(this.state.recurringRules.values()).some(r => JSON.stringify(r).includes(id)) ||
@@ -1316,8 +1337,9 @@ export class LocalDatabase {
    * Deletes (voids/reverses) a transaction cleanly using balanced double-entry accounting.
    */
   public async deleteTransaction(txId: UUID, reason = 'User deleted transaction'): Promise<void> {
+    if (isAllocationJournal(txId)) throw new Error('WALLET_PROTECTED_TRANSFER');
     if (isLoanJournal(txId)) throw new Error('LOAN_PROTECTED_JOURNAL');
-    const tx = this.state.journalTransactions.get(txId);
+    let tx = this.state.journalTransactions.get(txId);
     if (!tx) {
       throw new Error(`Transaction ${txId} not found`);
     }
@@ -1328,6 +1350,9 @@ export class LocalDatabase {
     // Atomic transaction boundary
     await this.beginTransaction();
     try {
+      tx=this.state.journalTransactions.get(txId);
+      if(!tx||tx.isReplacedBy||tx.transactionType==='reversal')throw new Error('WALLET_TRANSACTION_ALREADY_CHANGED');
+      if(tx.isDeleted){await this.rollbackTransaction();return;}
       // Save reversal in local state
       this.state.journalTransactions.set(reversalBalanced.transaction.id, {
         ...reversalBalanced.transaction,
@@ -1394,8 +1419,9 @@ export class LocalDatabase {
       reason?: string;
     }
   ): Promise<void> {
-    const origTx = this.state.journalTransactions.get(originalId);
+    let origTx = this.state.journalTransactions.get(originalId);
     if (isLoanJournal(originalId)) throw new Error('LOAN_PROTECTED_JOURNAL');
+    if (isAllocationJournal(originalId)) throw new Error('WALLET_PROTECTED_TRANSFER');
     if (!origTx) throw new Error(`Transaction ${originalId} not found`);
 
     const opId = generateUUID();
@@ -1444,6 +1470,8 @@ export class LocalDatabase {
     // Atomic transaction boundary
     await this.beginTransaction();
     try {
+      origTx=this.state.journalTransactions.get(originalId);
+      if(!origTx||origTx.isDeleted||origTx.isReplacedBy||origTx.transactionType==='reversal')throw new Error('WALLET_TRANSACTION_ALREADY_CHANGED');
       // Save reversal
       this.state.journalTransactions.set(reversalBalanced.transaction.id, {
         ...reversalBalanced.transaction,
@@ -1455,6 +1483,7 @@ export class LocalDatabase {
       }
 
       // Save replacement
+      assertAllocationSpend(this,replacementBalanced);
       this.state.journalTransactions.set(replacementBalanced.transaction.id, {
         ...replacementBalanced.transaction,
         createdOpId: opId,
@@ -2054,6 +2083,7 @@ export class LocalDatabase {
       const fromVer = data.schemaVersion || 1;
       if (fromVer < 4) await this.runVersion4Migration(fromVer);
       if (fromVer < 5) await this.runVersion5Migration(fromVer);
+      if (fromVer < 6) await this.runVersion6Migration();
     } catch (error) { this.state = previous; throw error; }
   }
 
@@ -2094,8 +2124,22 @@ export class LocalDatabase {
     this.state.preferences = new Map(data.preferences || []);
     validateSavingsOperations(this.state.syncOperations.values(), this.state.workspaces, this.state.accounts);
     readSavingsLoans(this.state);
+    readWalletBook(this.state);
     validateReportOperations(this.state.syncOperations.values(),this.state.workspaces,this.state.accounts,this.state.journalTransactions);
 
+  }
+
+  private async runVersion6Migration(): Promise<void> {
+    if(this.driver){const original=await this.driver.getItem(this.storageKey);if(original)await this.driver.setItem(`${this.storageKey}_pre_migration_v6`,original);}
+    const dataJson=JSON.stringify({...this.toSerializable(),localSnapshots:[]}),createdAt=new Date().toISOString();
+    const snapshot:LocalSnapshot={id:generateUUID(),dbSchemaVersion:this.state.schemaVersion,hash:await computeSha256(dataJson),
+      totalTransactions:this.state.journalTransactions.size,totalLines:this.state.journalLines.size,pendingOutboxCount:this.getPendingOutbox().length,
+      verifiedAt:createdAt,createdAt,dataJson};
+    for(const ws of this.state.workspaces.values())if(!this.verifyLedgerIntegrity(ws.id).isValid)throw new Error('WALLET_MIGRATION_INTEGRITY');
+    readWalletBook(this.state);
+    this.state.localSnapshots.set(snapshot.id,snapshot);
+    this.state.schemaMigrations.push({fromVersion:this.state.schemaVersion,toVersion:6,checksum:'wallet-allocation-guard-v6',appliedAt:createdAt});
+    this.state.schemaVersion=6;
   }
 
   private async runVersion4Migration(fromVer: number): Promise<void> {

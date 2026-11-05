@@ -23,6 +23,8 @@ export const SYSTEM_ACCOUNTS = {
   REVENUE_CLEARING: '__system__revenue_clearing',
   /** Expense clearing account: contra-side for expense entries */
   EXPENSE_CLEARING: '__system__expense_clearing',
+  /** Paired allocation transfers between workspace books; never income/expense. */
+  WORKSPACE_CLEARING: '__system__workspace_clearing',
 } as const;
 
 export type SystemAccountId = typeof SYSTEM_ACCOUNTS[keyof typeof SYSTEM_ACCOUNTS];
@@ -42,6 +44,7 @@ export function normalBalanceIsDebit(classification: AccountClassification): boo
 export function getSystemAccountClassification(id: SystemAccountId): AccountClassification {
   switch (id) {
     case SYSTEM_ACCOUNTS.OPENING_EQUITY:
+    case SYSTEM_ACCOUNTS.WORKSPACE_CLEARING:
       return 'equity';
     case SYSTEM_ACCOUNTS.REVENUE_CLEARING:
       return 'revenue';
