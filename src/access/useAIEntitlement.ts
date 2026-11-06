@@ -18,5 +18,5 @@ export function useAIEntitlement(legacy:AIIdentity,en=false){
   },[identity,enabled,owner,endpoint,revision,en]);
   useEffect(()=>{if(!enabled)return;const visible=()=>{if(!document.hidden)refresh();};window.addEventListener(AI_ACCESS_CHANGED,refresh);window.addEventListener('online',visible);document.addEventListener('visibilitychange',visible);return()=>{window.removeEventListener(AI_ACCESS_CHANGED,refresh);window.removeEventListener('online',visible);document.removeEventListener('visibilitychange',visible);};},[enabled]);
   const bound=enabled&&result?.identity===identity&&!!identity.getProfile()?result:null;
-  return {...service,active:!enabled||bound?.status?.active===true,status:bound?.status??null,error:bound?.error??'',loading:enabled&&!!owner&&(!bound||bound.loading),refresh};
+  return {...service,active:!enabled||bound?.status?.active===true,status:bound?.status??null,error:enabled&&owner&&!endpoint?accessErrorMessage(Error('ACCESS_NOT_CONFIGURED'),en):bound?.error??'',loading:enabled&&!!owner&&!!endpoint&&(!bound||bound.loading),refresh};
 }

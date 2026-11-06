@@ -10,7 +10,7 @@ export async function accessRequest(identity:AIIdentity,endpoint:string,body:Rec
   // Keep this site's deployment-protection cookie. Cross-origin/native calls
   // still omit cookies; the verified bearer remains the only app authority.
   try{response=await fetchFn(endpoint,{method:'POST',headers:{Authorization:'Bearer '+token,'Content-Type':'application/json'},body:JSON.stringify(body),credentials:'same-origin',cache:'no-store',redirect:'error',signal:signal?AbortSignal.any([signal,AbortSignal.timeout(20_000)]):AbortSignal.timeout(20_000)});}
-  catch{throw Error('ACCESS_UNAVAILABLE');}
+  catch{throw Error('ACCESS_NETWORK_ERROR');}
   const text=await response.text();if(text.length>64_000||!response.headers.get('content-type')?.includes('application/json'))throw Error('ACCESS_UNAVAILABLE');
   if(identity.getProfile()?.subjectHash!==owner||signal?.aborted)throw Error('ACCESS_ACCOUNT_CHANGED');
   let value:any;try{value=JSON.parse(text);}catch{throw Error('ACCESS_UNAVAILABLE');}
@@ -20,6 +20,8 @@ export async function accessRequest(identity:AIIdentity,endpoint:string,body:Rec
 export function accessErrorMessage(error:unknown,en=false){
   const code=error instanceof Error?error.message:'';
   const messages:Record<string,[string,string]>={
+    ACCESS_NETWORK_ERROR:['Cannot reach the AI service. Check your internet connection and try again.','AI সেবার সঙ্গে সংযোগ হচ্ছে না। ইন্টারনেট সংযোগ পরীক্ষা করে আবার চেষ্টা করুন।'],
+    ACCESS_UNAVAILABLE:['AI permission could not be checked right now. Try again shortly. Your saved entries are unchanged.','এই মুহূর্তে AI অনুমতি যাচাই হচ্ছে না। একটু পরে আবার চেষ্টা করুন। আগের হিসাব অক্ষত আছে।'],
     ACCESS_EMAILS_INVALID:['Enter up to 50 valid emails, within 6,000 characters.','সর্বোচ্চ ৫০টি সঠিক Gmail/ইমেইল দিন; মোট লেখা ৬,০০০ অক্ষরের মধ্যে রাখুন।'],
     ACCESS_CUSTOMER_NOT_FOUND:['The customer list changed. Refresh before trying again.','গ্রাহক তালিকা বদলেছে। রিফ্রেশ করে আবার চেষ্টা করুন।'],
     ACCESS_SIGN_IN_REQUIRED:['Sign in to your account first.','আগে আপনার অ্যাকাউন্টে লগইন করুন।'],
