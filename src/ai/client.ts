@@ -1,5 +1,6 @@
 import { EntryDraft, validateEntryDraft } from './entryDraft';
 import { ExtractionInput, validateExtractionMedia } from './media';
+import { aiFeaturesEnabled } from './availability';
 
 export interface AIIdentity {
   isTestMode(): boolean;
@@ -27,6 +28,7 @@ export function validateExtractionResult(raw: any, sourceSha256: string, request
 
 export async function extractEntry(input: ExtractionInput, ownerHash: string, identity: AIIdentity,
   settings: { endpoint: string; signal?: AbortSignal; fetchFn?: typeof fetch; requestId?: string }) {
+  if (!aiFeaturesEnabled) throw new Error('AI_NOT_CONFIGURED');
   const { sourceSha256 } = validateExtractionMedia(input);
   if (identity.isTestMode()) throw new Error('AI_AUTH_REQUIRED');
   let token: string;

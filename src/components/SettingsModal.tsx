@@ -11,6 +11,7 @@ import { ModalShell, secondaryButton } from './ModalShell';
 import { AppearanceSettings } from './AppearanceSettings';
 import { mobileUiEnabled } from '../appearance/mobileAppearance';
 import { useServiceIdentity } from '../access/useServiceIdentity';
+import { aiFeaturesEnabled } from '../ai/availability';
 const CustomerAccessPanel=lazy(()=>import('./CustomerAccessPanel').then(module=>({default:module.CustomerAccessPanel})));
 const AccountSettingsPanel=lazy(()=>import('./AccountSettingsPanel'));
 const accountAuthEnabled=import.meta.env.VITE_SUPABASE_AUTH_ENABLED==='true';
@@ -57,7 +58,7 @@ export function SettingsModal({ isOpen, onClose, initialSection='home', onOpenPr
       </>}
       {section === 'sound' && <SoundSettings />}
       {section === 'appearance' && <AppearanceSettings en={en} />}
-      {section === 'account' && <Suspense fallback={<p role="status" className="text-sm text-slate-500">{en?'Opening account…':'অ্যাকাউন্ট খোলা হচ্ছে…'}</p>}><AccountSettingsPanel en={en}/><CustomerAccessPanel en={en}/></Suspense>}
+      {section === 'account' && <Suspense fallback={<p role="status" className="text-sm text-slate-500">{en?'Opening account…':'অ্যাকাউন্ট খোলা হচ্ছে…'}</p>}><AccountSettingsPanel en={en}/>{aiFeaturesEnabled && <CustomerAccessPanel en={en}/>}</Suspense>}
       {section === 'notifications' && <NotificationSettings en={en} />}
       {section === 'content' && <ContentCenter readerOnly={mobileUiEnabled} key={db.getIdentity()?.ownerSubjectHash || 'local'}/>}
       {section === 'data' && <DataHealthPanel key={`${db.getIdentity()?.ownerSubjectHash || 'local'}:${currentWorkspace?.id}`} onOpenSync={()=>navigate(onOpenSyncModal)} onOpenBackup={()=>navigate(onOpenSnapshotModal)} />}

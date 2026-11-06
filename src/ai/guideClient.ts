@@ -1,7 +1,9 @@
 import { type GuideInput,guideInputHash,validateFinancialGuide } from './financialGuide';
 import type { AIIdentity } from './client';
+import { aiFeaturesEnabled } from './availability';
 
 export async function requestFinancialGuide(input:GuideInput,owner:string,identity:AIIdentity,options:{endpoint:string;signal:AbortSignal;fetchFn?:typeof fetch}) {
+  if(!aiFeaturesEnabled) throw new Error('AI_NOT_CONFIGURED');
   const sourceSha256=guideInputHash(input),requestId=crypto.randomUUID();
   if(identity.isTestMode()) throw new Error('AI_AUTH_REQUIRED');
   let token:string;try{token=await identity.getValidAccessToken();}catch{throw new Error('AI_AUTH_REQUIRED');}

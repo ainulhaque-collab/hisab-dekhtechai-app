@@ -1,8 +1,12 @@
 import React, { useEffect, useState } from 'react';
 import { aiConsentStore, aiGuideConsentStore, notifyAIConsentChanged } from '../ai/consent';
 import { secondaryButton } from './ModalShell';
+import { aiFeaturesEnabled } from '../ai/availability';
 
-export function AIPrivacySettings({ owner, en }: { owner: string; en: boolean }) {
+export function AIPrivacySettings(props: { owner: string; en: boolean }) {
+  return aiFeaturesEnabled ? <AIPrivacyControls {...props} /> : null;
+}
+function AIPrivacyControls({ owner, en }: { owner: string; en: boolean }) {
   const [allowed, setAllowed] = useState(false);
   const [guideAllowed,setGuideAllowed] = useState(false);
   const [busy, setBusy] = useState(true);
