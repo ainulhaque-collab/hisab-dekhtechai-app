@@ -4,14 +4,16 @@
   "buildCommand": "npm run build",
   "outputDirectory": "dist",
   "installCommand": "npm ci",
+  "proxy": { "entrypoint": "proxy.ts" },
   "headers": [
+    { "source": "/admin", "headers": [{ "key": "Cache-Control", "value": "private, no-store" }, { "key": "Referrer-Policy", "value": "no-referrer" }] },
     { "source": "/push-sw.js", "headers": [{ "key": "Cache-Control", "value": "no-cache" }] },
     { "source": "/auth/callback", "headers": [
       { "key": "Cache-Control", "value": "private, no-store" },
       { "key": "Referrer-Policy", "value": "no-referrer" }
     ] }
   ],
-  "functions": { "api/ai/extract.ts": { "maxDuration": 60 }, "api/ai/guide.ts": { "maxDuration": 60 }, "api/notifications/push.ts": { "maxDuration": 60 }, "api/content.ts": { "maxDuration": 30 }, "api/articles.ts": { "maxDuration": 30 } },
+  "functions": { "api/ai/extract.ts": { "maxDuration": 60 }, "api/ai/guide.ts": { "maxDuration": 60 }, "api/notifications/push.ts": { "maxDuration": 60 }, "api/content.ts": { "maxDuration": 30 }, "api/articles.ts": { "maxDuration": 30 }, "api/access.ts": { "maxDuration": 30 } },
   "rewrites": [
     { "source": "/((?!api/).*)", "destination": "/index.html" }
   ]

@@ -83,6 +83,10 @@ jobs:
         run: npm run test:sql
       - name: Durable SQLite outbox over HTTP, native SQL and concurrent commit order
         run: npm run test:sync
+      - name: Access vault, RLS and concurrent single-use redemption in native PostgreSQL
+        env:
+          HISAB_TEST_PG_CONTAINER: ${{ job.services.postgres.id }}
+        run: node --import tsx --test src/test/customer_access.test.ts
       - name: Scoped pg_dump/pg_restore into a separate fresh database
         env:
           HISAB_TEST_PG_CONTAINER: ${{ job.services.postgres.id }}

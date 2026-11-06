@@ -9,6 +9,7 @@ export interface AIHttpOptions {
   enabled: boolean;
   provider?: EntryExtractionProvider;
   verifyToken: (token: string) => Promise<string>;
+  verifyCustomer?: (token:string)=>Promise<{owner:string;assertAccess:()=>Promise<void>}>;
   budget?: AIBudget;
   allowedOrigins: Set<string>;
   onFailure?: (failure: { code: string; status: number; stage: string }) => void;
@@ -48,7 +49,8 @@ export function createAIRouter(options: AIHttpOptions) {
     try {
       const bearer = request.get('authorization')?.match(/^Bearer ([^\s]+)$/)?.[1];
       if (!bearer) throw new AIServiceError('AI_AUTH_REQUIRED', 401);
-      const owner = await options.verifyToken(bearer);
+      const customer=options.verifyCustomer?await options.verifyCustomer(bearer):null;
+      const owner = customer?.owner??await options.verifyToken(bearer);
       stage = 'validation';
       const body = request.body;
       if (!body || typeof body !== 'object' || Array.isArray(body) ||
@@ -60,6 +62,9 @@ export function createAIRouter(options: AIHttpOptions) {
       const guide=request.path==='/guide';
       const input = body.input as ExtractionInput;
       try { guide?validateGuideInput(body.input):validateExtractionMedia(input); } catch { throw new AIServiceError(guide?'AI_GUIDE_INPUT_INVALID':'AI_MEDIA_OR_CONSENT_INVALID', 400); }
+      // Authoritative access check precedes both quota reservation and any
+      // chargeable generation. A cached client label cannot grant AI access.
+      stage='entitlement';await customer?.assertAccess();
       // Count attempts before the chargeable call. Provider failures are not retried
       // automatically or refunded, so failures cannot bypass the spending cap.
       stage = 'quota';

@@ -6,7 +6,7 @@ import {fieldClass,primaryButton,secondaryButton} from './ModalShell';
 import {accountSettingsError} from './accountSettingsText';
 import {mobileUiEnabled} from '../appearance/mobileAppearance';
 
-export default function AccountSettingsPanel({en,session=accountSettingsSession}:{en:boolean;session?:AccountSettingsSession}){
+export default function AccountSettingsPanel({en,session=accountSettingsSession,onSignIn}:{en:boolean;session?:AccountSettingsSession;onSignIn?:()=>void}){
   const state=useSyncExternalStore(session.subscribe,session.getSnapshot,session.getSnapshot);
   const[email,setEmail]=useState(''),[editingEmail,setEditingEmail]=useState<string|null>(null),[removing,setRemoving]=useState<string|null>(null);
   useEffect(()=>{void session.start();},[session]);
@@ -28,7 +28,7 @@ export default function AccountSettingsPanel({en,session=accountSettingsSession}
     </p>
     {state.error&&<div role="alert" className="rounded-xl border border-rose-100 bg-rose-50 p-3 text-xs text-rose-800">{accountSettingsError(state.error,en)}</div>}
     {state.notice&&<p role="status" className="rounded-xl bg-emerald-50 p-3 text-xs text-emerald-900">{notices[state.notice]}</p>}
-    {!account&&state.phase!=='opening'&&<button type="button" className={`${primaryButton} w-full`} disabled={busy||offline} onClick={()=>{if(state.phase==='error')void session.signOut().then(()=>session.signIn());else void session.signIn();}}>{en?'Continue with Google':'Google দিয়ে লগইন করুন'}</button>}
+    {!account&&state.phase!=='opening'&&<button type="button" className={`${primaryButton} w-full`} disabled={busy||offline} onClick={()=>{onSignIn?.();if(state.phase==='error')void session.signOut().then(()=>session.signIn());else void session.signIn();}}>{en?'Continue with Google':'Google দিয়ে লগইন করুন'}</button>}
     {state.phase==='opening'&&<button type="button" className={`${secondaryButton} w-full`} onClick={()=>{void session.signOut();}}>{en?'Cancel sign-in':'লগইন বাতিল করুন'}</button>}
     {account&&<>
       <section className="rounded-2xl border border-slate-200 p-4">
@@ -56,7 +56,7 @@ export default function AccountSettingsPanel({en,session=accountSettingsSession}
       </section>
       <section className="rounded-2xl border border-slate-200 p-4"><h3 className="flex items-center gap-2 font-semibold"><Smartphone aria-hidden="true" className="h-4 w-4 text-blue-700"/>{en?'Phone sign-in':'মোবাইল দিয়ে লগইন'}</h3>{account.phone&&<p className="mt-2 text-slate-700">{account.phone}</p>}<p className="mt-2 text-xs text-slate-500">{en?'Phone OTP is not enabled yet. You can use your verified Google sign-in.':'মোবাইল OTP এখনো চালু হয়নি। যাচাইকৃত Google লগইন ব্যবহার করতে পারবেন।'}</p></section>
       {!session.contactChangesEnabled&&<p className="rounded-xl bg-slate-50 p-3 text-xs text-slate-600">{en?'Changing sign-in details is being prepared. Your current Google sign-in remains available.':'লগইনের তথ্য পরিবর্তনের সুবিধাটি প্রস্তুত হচ্ছে। বর্তমান Google লগইন ব্যবহার করতে পারবেন।'}</p>}
-      {state.error==='CUSTOMER_REAUTH_REQUIRED'&&<button type="button" disabled={busy||offline} className={`${primaryButton} w-full`} onClick={()=>{void session.reauthenticate();}}>{en?'Verify identity again':'আবার পরিচয় যাচাই করুন'}</button>}
+      {state.error==='CUSTOMER_REAUTH_REQUIRED'&&<button type="button" disabled={busy||offline} className={`${primaryButton} w-full`} onClick={()=>{onSignIn?.();void session.reauthenticate();}}>{en?'Verify identity again':'আবার পরিচয় যাচাই করুন'}</button>}
     </>}
     <div className="flex flex-wrap gap-2"><button type="button" disabled={busy} className={`${secondaryButton} flex-1`} onClick={()=>{void session.refresh();}}><RefreshCw aria-hidden="true" className="h-4 w-4"/>{en?'Check connection':'সংযোগ যাচাই'}</button>{account&&<button type="button" disabled={busy} className={`${secondaryButton} flex-1`} onClick={()=>{void session.signOut();}}><LogOut aria-hidden="true" className="h-4 w-4"/>{en?'Sign out':'সাইন আউট'}</button>}</div>
     <p className="text-xs text-slate-500">{en?'This login does not move existing local records to a different account. Financial sync migration is not enabled in this preview.':'এই লগইন আগের স্থানীয় হিসাব অন্য অ্যাকাউন্টে সরাবে না। এই প্রিভিউতে হিসাব স্থানান্তর এখনো চালু হয়নি।'}</p>

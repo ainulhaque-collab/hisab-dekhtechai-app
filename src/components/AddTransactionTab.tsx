@@ -20,6 +20,7 @@ import { soundService } from '../services/soundService';
 import { resolveJournalTime } from '../domain/transactionTime';
 import { createReceiptBlob } from '../storage/receipts';
 import { AIEntryModal } from './AIEntryModal';
+import { aiFeaturesEnabled } from '../ai/availability';
 import { EntryDraft } from '../ai/entryDraft';
 import {walletError} from './walletText';
 import {
@@ -469,12 +470,12 @@ export const AddTransactionTab: React.FC<AddTransactionTabProps> = ({ onSuccess 
           {isEn ? 'New Transaction' : 'নতুন লেনদেন'}
         </h1>
 
-        <button type="button" disabled={isSubmitting || isReceiptLoading} onClick={() => setShowAIEntry(true)}
+        {aiFeaturesEnabled && <button type="button" disabled={isSubmitting || isReceiptLoading} onClick={() => setShowAIEntry(true)}
           className="mb-4 flex min-h-11 w-full items-center justify-center gap-2 rounded-xl border border-blue-200 bg-blue-50 px-3 py-2.5 text-xs font-semibold text-blue-700 disabled:opacity-40">
           <Sparkles className="h-4 w-4" />{isEn ? 'Fill from receipt or voice with AI' : 'রিসিপ্ট বা ভয়েস থেকে AI দিয়ে লিখুন'}
-        </button>
+        </button>}
 
-        {showAIEntry && <AIEntryModal key={currentWorkspace?.id} onClose={() => setShowAIEntry(false)} onApply={applyAIEntry} />}
+        {aiFeaturesEnabled && showAIEntry && <AIEntryModal key={currentWorkspace?.id} onClose={() => setShowAIEntry(false)} onApply={applyAIEntry} />}
 
         {/* Transaction Type Segmented Switcher */}
         <div className="app-entry-type grid grid-cols-3 gap-1 p-1 bg-slate-100/90 rounded-xl mb-4 text-xs font-semibold">

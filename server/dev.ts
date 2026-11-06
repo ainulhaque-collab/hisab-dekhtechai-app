@@ -6,6 +6,8 @@ import { createPushRouter } from './notifications/http';
 import { pushOptionsFromEnvironment } from './notifications/runtime';
 import { createContentRouter } from './content/http';
 import { contentOptionsFromEnvironment } from './content/runtime';
+import { createAccessRouter } from './access/http';
+import { accessOptionsFromEnvironment } from './access/runtime';
 
 dotenv.config({ path: ['.env.ai.local', '.env'], quiet: true });
 const options = aiOptionsFromEnvironment(process.env, true);
@@ -13,6 +15,7 @@ options.onFailure = failure => console.warn(JSON.stringify({ event: 'ai_request_
 const app = express();
 app.disable('x-powered-by');
 app.use('/api/ai', createAIRouter(options));
+app.use('/api/access',createAccessRouter(accessOptionsFromEnvironment(process.env,true)));
 app.use('/api/notifications', createPushRouter(pushOptionsFromEnvironment(process.env)));
 app.use('/api',createContentRouter(contentOptionsFromEnvironment(process.env)));
 // Loopback only; Vite proxies local requests. No public unauthenticated server.

@@ -23,6 +23,7 @@ export const accountSettingsSession=new AccountSettingsSession({
     return{
       read:async()=>{const account=await auth.getCustomerAccount();if(!account)await clearLegacyAccountSession();return account;},
       changes:customerId=>auth.customerChanges(customerId),
+      serviceAuthorization:customerId=>auth.serviceAuthorization(customerId),
       signIn:expected=>platform.openCloudGoogleSignIn(auth,expected),
       openLink:async url=>{if(native)await Browser.open({url});else window.location.assign(url);},
       signOut:()=>signOutAccountSessions(()=>auth.signOut()),

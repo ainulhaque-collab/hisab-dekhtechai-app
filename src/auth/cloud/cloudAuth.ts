@@ -54,7 +54,7 @@ export class CloudAuth {
     this.busy = true;
     try { return await work(); } finally { this.busy = false; }
   }
-  private async readVerifiedCustomer(expectedUserId: string | null = this.expectedUserId): Promise<{user: User; account: CustomerAccount} | null> {
+  private async readVerifiedCustomer(expectedUserId: string | null = this.expectedUserId): Promise<{user: User; account: CustomerAccount; token:string} | null> {
     this.checkOpen();
     const epoch = this.epoch;
     if (expectedUserId && !customerUuid(expectedUserId)) throw new Error('CLOUD_ACCOUNT_MISMATCH');
@@ -62,11 +62,11 @@ export class CloudAuth {
     if (error) throw new Error('CLOUD_SESSION_UNAVAILABLE');
     if (!data.session) return null;
     // A cached getSession/user_metadata value is not a verified owner. Always ask Auth.
-    const verified = await this.client.auth.getUser();
+    const verified = await this.client.auth.getUser(data.session.access_token);
     if (verified.error || !verified.data.user) throw new Error('CLOUD_IDENTITY_UNAVAILABLE');
     const account = verifiedCustomer(verified.data.user, data.session.user.id, expectedUserId);
     if (epoch !== this.epoch || this.closed) throw new Error('CLOUD_SESSION_CLOSED');
-    return { user: verified.data.user, account };
+    return { user: verified.data.user, account,token:data.session.access_token };
   }
   async getVerifiedIdentity(expectedUserId: string | null = this.expectedUserId): Promise<VerifiedCloudIdentity | null> {
     const value = await this.readVerifiedCustomer(expectedUserId);
@@ -74,6 +74,13 @@ export class CloudAuth {
   }
   async getCustomerAccount(expectedCustomerId: string | null = this.expectedUserId): Promise<CustomerAccount | null> {
     return (await this.readVerifiedCustomer(expectedCustomerId))?.account ?? null;
+  }
+  /** Transient request credential only: never exposed as React/display state or
+   * persisted outside the existing credential vault. No financial owner adoption. */
+  async serviceAuthorization(expectedCustomerId:string):Promise<{customerId:string;token:string}>{
+    const value=await this.readVerifiedCustomer(expectedCustomerId);
+    if(!value)throw Error('CUSTOMER_SIGN_IN_REQUIRED');
+    return {customerId:value.account.customerId,token:value.token};
   }
   /** Explicit UUID from the local binding; never infer an owner by email or phone. */
   customerChanges(expectedCustomerId: string, options: { phoneChangeEnabled?: boolean } = {}): SupabaseCustomerChanges {

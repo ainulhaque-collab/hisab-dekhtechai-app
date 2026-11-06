@@ -91,7 +91,7 @@ test('guide client binds response to owner, request and exact summary without se
   let active=owner;
   const identity={isTestMode:()=>false,getValidAccessToken:async()=>'synthetic-token',getProfile:()=>({subjectHash:active})};
   const fetchFn:typeof fetch=async(url,options)=>{
-    assert.equal(String(url),'https://example.invalid/api/ai/guide');assert.equal(options?.credentials,'omit');assert.equal(options?.cache,'no-store');
+    assert.equal(String(url),'https://example.invalid/api/ai/guide');assert.equal(options?.credentials,'same-origin');assert.equal(options?.cache,'no-store');
     const body=JSON.parse(options?.body as string);
     return Response.json({requestId:body.requestId,sourceSha256:guideInputHash(body.input),provider:'gemini',guide:answer});
   };

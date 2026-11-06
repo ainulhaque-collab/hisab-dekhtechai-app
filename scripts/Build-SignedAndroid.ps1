@@ -4,6 +4,8 @@ param(
     [Parameter(Mandatory = $true)][ValidatePattern('^[A-Za-z0-9][A-Za-z0-9.+-]{0,63}$')][string]$VersionName,
     [switch]$LowMemory,
     [switch]$BridgeTestOnly,
+    [switch]$ManagedAIAccess,
+    [switch]$WithoutAI,
     [string]$AIServiceOrigin = $env:VITE_AI_API_BASE_URL,
     [string]$LocalResourcesRoot
 )
@@ -84,7 +86,18 @@ $variables = @{
     HISAB_ANDROID_VERSION_NAME = $VersionName
 }
 if (!$BridgeTestOnly) {
+    # The owner can ship core finance without mounting AI controls or making
+    # permission/provider requests. Web/Admin deployments are unaffected.
+    $variables.VITE_AI_FEATURES_ENABLED = if ($WithoutAI) { 'false' } else { 'true' }
     $variables.VITE_AI_API_BASE_URL = $nativeAIOrigin
+    if ($ManagedAIAccess) {
+        Push-Location $workspaceRoot
+        try { $managedClientJson = & node.exe scripts/Prepare-NativeManagedAI.mjs --ai-origin $nativeAIOrigin }
+        finally { Pop-Location }
+        if ($LASTEXITCODE -ne 0) { throw 'Managed AI public Auth configuration is invalid. No APK was built.' }
+        $managedClient = $managedClientJson | ConvertFrom-Json
+        foreach ($property in $managedClient.PSObject.Properties) { $variables[$property.Name] = [string]$property.Value }
+    }
     # Only validated public Firebase client configuration enters the APK.
     # Capture silently: never print config/credentials in build logs.
     Push-Location $workspaceRoot
@@ -123,6 +136,8 @@ try {
         Invoke-BuildStep 'npx.cmd' @('tsx', '--test', '--test-concurrency=1', 'src/test/*.test.ts')
     } else { Invoke-BuildStep 'npm.cmd' @('test') }
     Invoke-BuildStep 'npm.cmd' @('run', 'build')
+    $nativeFeatures = @{ aiEnabled = !$WithoutAI }
+    $nativeFeatures | ConvertTo-Json | Set-Content -LiteralPath (Join-Path $workspaceRoot 'dist/native-features.json') -Encoding UTF8
     $nativeAIInBuild = Get-ChildItem -LiteralPath (Join-Path $workspaceRoot 'dist/assets') -Filter '*.js' |
         Where-Object { [IO.File]::ReadAllText($_.FullName).Contains($nativeAIOrigin) }
     if (!$nativeAIInBuild) { throw 'Android web bundle is missing its required AI service origin. No APK was built.' }
@@ -154,6 +169,12 @@ try {
     Add-Type -AssemblyName System.IO.Compression.FileSystem
     $nativeApk = [IO.Compression.ZipFile]::OpenRead($apkPath)
     try {
+        $featureEntry = $nativeApk.GetEntry('assets/public/native-features.json')
+        if (!$featureEntry) { throw 'Signed APK is missing its feature manifest.' }
+        $featureReader = [IO.StreamReader]::new($featureEntry.Open())
+        try { $packagedFeatures = $featureReader.ReadToEnd() | ConvertFrom-Json }
+        finally { $featureReader.Dispose() }
+        if ($packagedFeatures.aiEnabled -ne (!$WithoutAI)) { throw 'Signed APK AI mode does not match the requested build.' }
         $nativeAIInApk = $false
         foreach ($entry in $nativeApk.Entries) {
             if ($entry.FullName -match '^assets/public/assets/[^/]+\.js$') {
@@ -171,7 +192,7 @@ try {
     if (Test-Path -LiteralPath $archivePath) {
         if ((Get-FileHash -LiteralPath $archivePath -Algorithm SHA256).Hash -ne $apkHash) { throw 'A different preserved APK already uses this version; choose a new version.' }
     } else { Copy-Item -LiteralPath $apkPath -Destination $archivePath }
-    $evidence = @{ applicationId = $publicInfo.applicationId; versionCode = $VersionCode; versionName = $VersionName; databaseSchemaVersion = $databaseSchemaVersion; commit = (git rev-parse HEAD); certificateSha256 = $publicInfo.certificateSha256; apkSha256 = $apkHash; apkPath = $archivePath; aiServiceOrigin = $nativeAIOrigin; builtAtUtc = [DateTime]::UtcNow.ToString('o'); physicalDeviceAcceptance = 'PENDING'; published = $false }
+    $evidence = @{ applicationId = $publicInfo.applicationId; versionCode = $VersionCode; versionName = $VersionName; databaseSchemaVersion = $databaseSchemaVersion; commit = (git rev-parse HEAD); certificateSha256 = $publicInfo.certificateSha256; apkSha256 = $apkHash; apkPath = $archivePath; aiServiceOrigin = $nativeAIOrigin; aiEnabled = !$WithoutAI; builtAtUtc = [DateTime]::UtcNow.ToString('o'); physicalDeviceAcceptance = 'PENDING'; published = $false }
     $evidence | ConvertTo-Json | Set-Content -LiteralPath $evidencePath -Encoding UTF8
     $evidence | ConvertTo-Json
 } finally {
