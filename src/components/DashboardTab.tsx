@@ -57,7 +57,8 @@ export const DashboardTab: React.FC<DashboardTabProps> = ({
   const activeGoals = savings?.goals.filter(item => !item.deleted && !item.goal.archived) || [];
   const savedMinor = activeGoals.reduce((total, item) => total + BigInt(item.fundedMinor), 0n);
   const shortfall = activeGoals.some(item => BigInt(item.shortfallMinor) > 0n);
-  const spendableMinor=savings?.accounts.reduce((total,a)=>total+BigInt(a.availableMinor),0n).toString();
+  const activeAccountIds=useMemo(()=>new Set(currentWorkspace?db.getAccounts(currentWorkspace.id).map(a=>a.id):[]),[db,currentWorkspace?.id,dashboardData]);
+  const spendableMinor=savings?.accounts.reduce((total,a)=>total+(activeAccountIds.has(a.accountId)?BigInt(a.availableMinor):0n),0n).toString();
   const reservedMinor=savings?.accounts.reduce((total,a)=>total+BigInt(a.allocatedMinor),0n).toString()||'0';
   const localFinanceOnly=import.meta.env.VITE_SUPABASE_AUTH_ENABLED==='true';
 

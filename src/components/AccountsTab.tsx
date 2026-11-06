@@ -361,10 +361,10 @@ export const AccountsTab: React.FC<{onOpenAllWallets:()=>void}> = ({onOpenAllWal
                     </div>
                     <div className="text-right">
                       <div className="text-base font-bold text-slate-900 tabular-nums">
-                        {formatBDT(allocation?.availableMinor||accSummary.currentBalanceMinor, { locale: language })}
+                        {formatBDT(fullAccount?.archivedAt?accSummary.currentBalanceMinor:allocation?.availableMinor||accSummary.currentBalanceMinor, { locale: language })}
                       </div>
                       <div className="text-[10px] text-slate-400 font-medium">
-                        {allocation?(isEn?'Spendable allocation':'খরচযোগ্য বরাদ্দ'):(isEn ? 'Current Balance' : 'বর্তমান ব্যালেন্স')}
+                        {fullAccount?.archivedAt?(isEn?'Archived balance':'আর্কাইভের ব্যালেন্স'):allocation?(isEn?'Spendable allocation':'খরচযোগ্য বরাদ্দ'):(isEn ? 'Current Balance' : 'বর্তমান ব্যালেন্স')}
                       </div>
                     </div>
                   </div>
