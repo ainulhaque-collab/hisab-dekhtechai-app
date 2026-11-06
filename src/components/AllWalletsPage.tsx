@@ -1,5 +1,5 @@
 import React,{useEffect,useRef,useState} from 'react';
-import {Banknote,Building2,Smartphone,Plus,Copy,ArrowUpRight,Wallet,ArrowLeft} from 'lucide-react';
+import {Banknote,Building2,Smartphone,Plus,Copy,ArrowUpRight,Wallet,ArrowLeft,Pencil,Trash2,RotateCcw} from 'lucide-react';
 import {useApp} from '../context/AppContext';
 import {fieldClass,primaryButton,secondaryButton} from './ModalShell';
 import {AppSelect} from './AppSelect';
@@ -10,6 +10,8 @@ import type {AccountKind} from '../contracts/types';
 import {createMasterWallet,personalWalletHome,readWalletBook,walletSummaries} from '../storage/walletBook';
 import {walletActor,walletError} from './walletText';
 import {WalletTransferModal} from './WalletTransferModal';
+import {WalletManageModal,type WalletManageMode} from './WalletManageModal';
+import type {MasterWalletSummary} from '../contracts/wallets';
 
 export default function AllWalletsPage({onClose}:{onClose:()=>void}){
   const {db,language,refreshState,currentWorkspace,userProfile}=useApp(),en=language==='en',actorHash=walletActor(userProfile);
@@ -18,6 +20,8 @@ export default function AllWalletsPage({onClose}:{onClose:()=>void}){
   const [copied,setCopied]=useState(''),[transfer,setTransfer]=useState(false);
   const [period,setPeriod]=useState<'today'|'month'|'all'>('today');
   const [tab,setTab]=useState<'wallets'|'workspaces'>('wallets');
+  const [archived,setArchived]=useState(false),[notice,setNotice]=useState('');
+  const [manage,setManage]=useState<{row:MasterWalletSummary;mode:WalletManageMode}|null>(null);
   const requestId=useRef(generateUUID());
   useEffect(()=>{
     const back=(event:Event)=>{
@@ -36,17 +40,18 @@ export default function AllWalletsPage({onClose}:{onClose:()=>void}){
     (a.classification||'asset')==='asset'&&!a.id.startsWith('sl-account-')&&!book?.links.has(a.id))
     .filter(a=>db.calculateAccountSummaries(a.workspaceId).some(s=>s.accountId===a.id&&BigInt(s.currentBalanceMinor)!==0n));
   const total=rows.reduce((n,w)=>n+BigInt(w.balanceMinor),0n).toString(),reserved=rows.reduce((n,w)=>n+BigInt(w.reservedMinor),0n).toString();
+  const visibleRows=rows.filter(row=>row.lifecycle.status===(archived?'archived':'active'));
   const money=(value:string)=>formatBDT(value,{locale:language});
   const labels:Record<AccountKind,string>={cash:en?'Cash in hand':'হাতে ক্যাশ',bank:en?'Banks':'ব্যাংক',bkash:en?'bKash':'বিকাশ',nagad:en?'Nagad account':'নগদ অ্যাকাউন্ট',rocket:en?'Rocket':'রকেট',other:en?'Other':'অন্যান্য'};
   const visibleKinds=(['cash','bkash','nagad','bank','rocket','other'] as const).filter(k=>['cash','bkash','nagad','bank'].includes(k)||rows.some(r=>r.wallet.kind===k));
   const byWorkspace=new Map<string,{id:string;name:string;balance:bigint;available:bigint;reserved:bigint;income:bigint;expense:bigint}>();
-  for(const row of rows)for(const a of row.allocations){const value=byWorkspace.get(a.workspaceId)||{id:a.workspaceId,name:a.workspaceName,balance:0n,available:0n,reserved:0n,income:0n,expense:0n};value.balance+=BigInt(a.balanceMinor);value.available+=BigInt(a.availableMinor);value.reserved+=BigInt(a.reservedMinor);value.income+=BigInt(a.incomeMinor);value.expense+=BigInt(a.expenseMinor);byWorkspace.set(value.id,value);}
+  for(const row of visibleRows)for(const a of row.allocations){const value=byWorkspace.get(a.workspaceId)||{id:a.workspaceId,name:a.workspaceName,balance:0n,available:0n,reserved:0n,income:0n,expense:0n};value.balance+=BigInt(a.balanceMinor);value.available+=BigInt(a.availableMinor);value.reserved+=BigInt(a.reservedMinor);value.income+=BigInt(a.incomeMinor);value.expense+=BigInt(a.expenseMinor);byWorkspace.set(value.id,value);}
   async function save(event:React.FormEvent){
     event.preventDefault();if(busy||!allowed)return;setBusy(true);setError('');
     try{
       const old=legacy.find(a=>a.id===existing),amount=existing?'0':parsePaisaString(opening||'0').toString();
       await createMasterWallet(db,{id:requestId.current,name:name.trim(),kind:old?.kind||kind,openingBalanceMinor:amount,actorHash,...(old?{existingAccountId:old.id}:{})});
-      requestId.current=generateUUID();refreshState();setName('');setOpening('');setExisting('');setView('list');
+      requestId.current=generateUUID();refreshState();setName('');setOpening('');setExisting('');setArchived(false);setView('list');
     }catch(e){setError(walletError(e,en));}finally{setBusy(false);}
   }
   async function copy(code:string){try{if(!navigator.clipboard)throw Error();await navigator.clipboard.writeText(code);setCopied(code);}catch{setCopied('manual');}}
@@ -64,12 +69,21 @@ export default function AllWalletsPage({onClose}:{onClose:()=>void}){
         <div className="grid grid-cols-2 gap-3"><button className={primaryButton} onClick={()=>{setError('');setView('create');}}><Plus className="h-4 w-4"/>{en?'Add wallet':'ওয়ালেট যোগ করুন'}</button><button className={secondaryButton} disabled={!rows.length||!!book?.pendingReferences} onClick={()=>setTransfer(true)}><ArrowUpRight className="h-4 w-4"/>{en?'Transfer':'স্থানান্তর'}</button></div>
         {!!rows.length&&<label className="block text-xs font-medium text-slate-600">{en?'Income and expense period':'কোন সময়ের আয়–খরচ দেখবেন'}<AppSelect aria-label={en?"Income and expense period":"আয়–খরচের সময়"} className={fieldClass} value={period} onChange={e=>setPeriod(e.target.value as 'today'|'month'|'all')}><option value="today">{en?'Today':'আজ'}</option><option value="month">{en?'This month':'এই মাস'}</option><option value="all">{en?'All time':'শুরু থেকে সব'}</option></AppSelect></label>}
         {!!rows.length&&<div className="grid grid-cols-2 gap-1 rounded-xl bg-slate-100 p-1">{(['wallets','workspaces'] as const).map(value=><button key={value} type="button" aria-pressed={tab===value} className={`min-h-12 rounded-lg px-3 text-sm font-semibold ${tab===value?'bg-white text-blue-700 shadow-sm':'text-slate-500'}`} onClick={()=>setTab(value)}>{value==='wallets'?(en?'By wallet':'ওয়ালেটভিত্তিক'):(en?'By workspace':'খাতাভিত্তিক')}</button>)}</div>}
+        <div className="grid grid-cols-2 gap-1 rounded-xl bg-slate-100 p-1" aria-label={en?'Wallet status':'ওয়ালেটের অবস্থা'}>{[false,true].map(value=><button key={String(value)} type="button" aria-pressed={archived===value} className={`min-h-12 rounded-lg px-3 text-sm font-semibold ${archived===value?'bg-white text-blue-700 shadow-sm':'text-slate-500'}`} onClick={()=>{setArchived(value);setNotice('');}}>{value?(en?'Archived':'আর্কাইভ'):(en?'Active':'চালু')}</button>)}</div>
+        {rows.some(row=>row.lifecycle.status==='archived')&&<p className="text-xs leading-relaxed text-slate-500">{en?'The total above includes archived wallets. Restore them before spending their money.':'উপরের মোট টাকায় আর্কাইভের ওয়ালেটও আছে। সেই টাকা ব্যবহার করতে আগে ওয়ালেট ফিরিয়ে আনুন।'}</p>}
+        {notice&&<p role="status" className="rounded-xl bg-emerald-50 p-3 text-sm text-emerald-800">{notice}</p>}
+        {!visibleRows.length&&rows.length>0&&<p className="py-5 text-center text-sm text-slate-500">{archived?(en?'No archived wallets.':'আর্কাইভে কোনো ওয়ালেট নেই।'):(en?'No active wallets. Add one or restore an archived wallet.':'চালু ওয়ালেট নেই। নতুন ওয়ালেট যোগ করুন অথবা আর্কাইভ থেকে ফিরিয়ে আনুন।')}</p>}
         {tab==='workspaces'&&Array.from(byWorkspace.values()).map(w=><section key={w.id} className="space-y-3 rounded-2xl border border-slate-200 bg-white p-4"><h2 className="text-base font-semibold text-slate-900">{w.name}</h2><div className="grid grid-cols-2 gap-3 text-xs text-slate-500"><div>{en?'Allocation total':'মোট বরাদ্দ'}<strong className="mt-1 block text-lg text-slate-900">{money(w.balance.toString())}</strong></div><div>{en?'Spendable':'খরচযোগ্য'}<strong className="mt-1 block text-lg text-blue-700">{money(w.available.toString())}</strong></div><div>{en?'Income':'আয়'}<strong className="mt-1 block text-sm text-emerald-700">{money(w.income.toString())}</strong></div><div>{en?'Expense':'খরচ'}<strong className="mt-1 block text-sm text-rose-700">{money(w.expense.toString())}</strong></div></div><p className="border-t border-slate-100 pt-3 text-xs text-slate-500">{en?'Included goal savings':'এই বরাদ্দের মধ্যে Goal-এ'} {money(w.reserved.toString())}</p></section>)}
         {!rows.length&&<div className="rounded-2xl border border-dashed border-slate-200 p-5 text-center"><Wallet className="mx-auto h-8 w-8 text-blue-600"/><h3 className="mt-3 font-semibold text-slate-900">{en?'Keep each real wallet here':'আপনার মূল ওয়ালেট এখানে রাখুন'}</h3><p className="mt-2 text-xs leading-relaxed text-slate-500">{en?'Add Cash, bKash, Nagad or a bank account. Use its code to allocate money to another workspace.':'ক্যাশ, বিকাশ, নগদ বা ব্যাংক যোগ করুন। তৈরি হওয়া কোড দিয়ে অন্য খাতায় ওয়ালেট যুক্ত করুন।'}</p></div>}
-        {tab==='wallets'&&rows.map(row=><section key={row.wallet.id} className="overflow-hidden rounded-2xl border border-slate-200 bg-white">
+        {tab==='wallets'&&visibleRows.map(row=><section key={row.wallet.id} className="overflow-hidden rounded-2xl border border-slate-200 bg-white">
           <div className="flex items-start gap-3 p-4"><span className="rounded-xl bg-blue-50 p-3 text-blue-700">{row.wallet.kind==='bank'?<Building2 className="h-5 w-5"/>:row.wallet.kind==='cash'?<Banknote className="h-5 w-5"/>:<Smartphone className="h-5 w-5"/>}</span><div className="min-w-0 flex-1"><h3 className="font-semibold text-slate-900">{row.wallet.name}</h3><p className="mt-1 text-xl font-bold tabular-nums text-slate-900">{money(row.balanceMinor)}</p></div></div>
           <div className="mx-4 mb-4 flex items-center gap-2 rounded-xl bg-slate-50 p-2"><code className="min-w-0 flex-1 select-all break-all text-[10px] text-slate-600">{row.wallet.code}</code><button type="button" className="flex min-h-11 min-w-11 items-center justify-center rounded-lg text-blue-700 hover:bg-blue-50" aria-label={en?'Copy wallet code':'ওয়ালেট কোড কপি করুন'} onClick={()=>{void copy(row.wallet.code);}}><Copy className="h-4 w-4"/></button></div>
           {copied===row.wallet.code&&<p role="status" className="px-4 pb-3 text-xs text-emerald-700">{en?'Code copied. Use it in the other workspace.':'কোড কপি হয়েছে। অন্য খাতায় এটি দিয়ে যুক্ত করুন।'}</p>}
+          <div className="flex flex-wrap gap-2 px-4 pb-4">
+            <button type="button" className={secondaryButton} onClick={()=>setManage({row,mode:'edit'})}><Pencil className="h-4 w-4"/>{en?'Edit':'এডিট'}</button>
+            {archived&&<button type="button" className={secondaryButton} onClick={()=>setManage({row,mode:'restore'})}><RotateCcw className="h-4 w-4"/>{en?'Restore':'ফিরিয়ে আনুন'}</button>}
+            <button type="button" className={`${secondaryButton} text-rose-700`} onClick={()=>setManage({row,mode:archived?'delete':'archive'})}><Trash2 className="h-4 w-4"/>{archived?(en?'Delete permanently':'স্থায়ীভাবে মুছুন'):(en?'Delete':'মুছুন')}</button>
+          </div>
           <div className="divide-y divide-slate-100 border-t border-slate-100">{row.allocations.map(a=><div key={a.accountId} className="space-y-2 p-4 text-xs"><div className="flex justify-between gap-3"><p className="font-semibold text-slate-800">{a.workspaceName}{a.archived?` · ${en?'Archived':'আর্কাইভ'}`:''}</p><strong className="tabular-nums text-slate-900">{money(a.balanceMinor)}</strong></div><div className="flex flex-wrap justify-between gap-2 text-slate-500"><span>{en?'Goal savings':'Goal-এ'} {money(a.reservedMinor)}</span><span className="font-medium text-blue-700">{en?'Spendable':'খরচযোগ্য'} {money(a.availableMinor)}</span></div><div className="flex flex-wrap gap-4 text-[11px] text-slate-500"><span>{en?'Income':'আয়'} {money(a.incomeMinor)}</span><span>{en?'Expense':'খরচ'} {money(a.expenseMinor)}</span></div></div>)}</div>
         </section>)}
         {copied==='manual'&&<p role="status" className="text-xs text-slate-600">{en?'Press and hold the code to copy it.':'কোডটি চেপে ধরে কপি করুন।'}</p>}
@@ -85,5 +99,6 @@ export default function AllWalletsPage({onClose}:{onClose:()=>void}){
       {error&&view==='list'&&<p role="alert" className="text-xs text-rose-700">{error}</p>}
     </div>}
     {transfer&&<WalletTransferModal onClose={()=>setTransfer(false)}/>}
+    {manage&&<WalletManageModal key={`${manage.row.wallet.id}:${manage.mode}`} row={manage.row} mode={manage.mode} onClose={()=>setManage(null)} onSaved={()=>setNotice(en?'Wallet updated. Your financial history is kept.':'ওয়ালেট আপডেট হয়েছে। পুরোনো হিসাব রাখা আছে।')}/>}
   </section>;
 }

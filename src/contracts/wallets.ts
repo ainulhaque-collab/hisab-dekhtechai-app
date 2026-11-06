@@ -28,7 +28,21 @@ export interface AllocationTransfer {
 export type WalletEvent =
   | {version:1;action:'wallet.create';wallet:MasterWallet;accountId:UUID;adopted:boolean}
   | {version:1;action:'wallet.link';walletId:UUID;accountId:UUID}
-  | {version:1;action:'allocation.transfer';transfer:AllocationTransfer};
+  | {version:1;action:'allocation.transfer';transfer:AllocationTransfer}
+  | {version:1;action:'wallet.change';change:WalletChange};
+
+export interface WalletChange {
+  walletId:UUID;
+  commandId:UUID;
+  revision:number;
+  action:'rename'|'archive'|'restore'|'delete';
+  name?:string;
+}
+export interface WalletLifecycle {
+  revision:number;
+  status:'active'|'archived'|'deleted';
+  changedAt?:string;
+}
 
 export interface WalletAllocationSummary extends WalletAllocation {
   workspaceName: string;
@@ -42,6 +56,7 @@ export interface WalletAllocationSummary extends WalletAllocation {
 }
 export interface MasterWalletSummary {
   wallet: MasterWallet;
+  lifecycle: WalletLifecycle;
   allocations: WalletAllocationSummary[];
   balanceMinor: string;
   reservedMinor: string;

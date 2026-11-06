@@ -48,7 +48,7 @@ import { projectSavingsGoals, validateSavingsGoalEvent, type SavingsGoal, type S
 import { isSavingsOperation, savingsRecords, validateSavingsOperations } from './savingsOperations';
 import { projectReportMetadata, validateReportOperations, validateReportEvent, reconciliationFingerprint, type ReportEvent } from './reportMetadata';
 import { issueSavingsLoan, repaySavingsLoan, setLoanAutoRepayment, readSavingsLoans, isLoanLedgerAccount, isLoanJournal, type NewSavingsLoan } from './loanBook';
-import { readWalletBook, isAllocationJournal, assertAllocationSpend, walletOutflowLimit } from './walletBook';
+import { readWalletBook, isAllocationJournal, assertAllocationSpend, walletOutflowLimit, walletAccountView } from './walletBook';
 import {
   createDurableStorageDriver,
   DurableStorageDriver,
@@ -829,7 +829,8 @@ export class LocalDatabase {
   }
 
   public getAccounts(workspaceId: UUID, includeArchived = false): Account[] {
-    return Array.from(this.state.accounts.values()).filter(
+    const book=readWalletBook(this.state);
+    return Array.from(this.state.accounts.values()).map(a=>walletAccountView(this.state,a,book)).filter(
       (a) => a.workspaceId === workspaceId && !isLoanLedgerAccount(a.id) && (includeArchived || !a.archivedAt)
     );
   }
@@ -862,13 +863,15 @@ export class LocalDatabase {
   }
 
   public getAllAccounts(workspaceId: UUID): Account[] {
+    const book=readWalletBook(this.state);
     return Array.from(this.state.accounts.values()).filter(
       (a) => a.workspaceId === workspaceId
-    );
+    ).map(a=>walletAccountView(this.state,a,book));
   }
 
   public getAccount(id: UUID): Account | undefined {
-    return this.state.accounts.get(id);
+    const account=this.state.accounts.get(id);
+    return account?walletAccountView(this.state,account):undefined;
   }
 
   public updateAccount(
@@ -902,6 +905,8 @@ export class LocalDatabase {
     if (isLoanLedgerAccount(id)) throw new Error('LOAN_PROTECTED_ACCOUNT');
     const acc = this.state.accounts.get(id);
     if (!acc) return false;
+    const book=readWalletBook(this.state),link=book.links.get(id);
+    if(link&&book.states.get(link.walletId)?.status!=='active')throw new Error('WALLET_ACCOUNT_UNAVAILABLE');
     acc.archivedAt = null;
     this.queueSyncOp('account.restore', id, { id });
     this.autoPersist();
@@ -1771,7 +1776,7 @@ export class LocalDatabase {
 
   public async recordReconciliation(workspaceId: UUID, accountId: UUID, actualMinor: string, note = ''): Promise<void> {
     await this.commitReportEvent(workspaceId,()=>{
-      const account = this.state.accounts.get(accountId);
+      const account = this.getAccount(accountId);
       if (!account || account.workspaceId !== workspaceId || account.archivedAt || (account.classification || 'asset') !== 'asset' || isLoanLedgerAccount(account.id)) throw new Error('REPORT_METADATA_REFERENCE');
       const balance = this.calculateAccountSummaries(workspaceId).find(row=>row.accountId===accountId);
       if (!balance) throw new Error('REPORT_METADATA_REFERENCE');
@@ -1856,7 +1861,7 @@ export class LocalDatabase {
       if (!item) throw new Error('SAVINGS_GOAL_NOT_FOUND');
       if (item.deleted) throw new Error('SAVINGS_GOAL_DELETED');
       if (item.goal.archived) throw new Error('SAVINGS_GOAL_ARCHIVED');
-      const account = this.state.accounts.get(accountId);
+      const account = this.getAccount(accountId);
       if (!account || account.workspaceId !== workspaceId || account.archivedAt || (account.classification || 'asset') !== 'asset')
         throw new Error('SAVINGS_ACCOUNT_UNAVAILABLE');
       const event: SavingsGoalEvent = { version: 1, action: 'allocation.add', goalId, allocationId: generateUUID(),

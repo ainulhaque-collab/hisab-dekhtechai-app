@@ -3,6 +3,13 @@ export function walletActor(profile:{subjectId:string;subjectHash:string}|null):
   return profile&&profile.subjectId!=='local_user'?profile.subjectHash:undefined;
 }
 const errors:Record<string,[string,string]>={
+  WALLET_DELETE_CONFIRMATION:['নিশ্চিত করতে হুবহু DELETE লিখুন।','Type exactly DELETE to confirm.'],
+  WALLET_ARCHIVE_REQUIRED:['স্থায়ীভাবে মুছে দেওয়ার আগে ওয়ালেটটি আর্কাইভ করুন।','Archive this wallet before permanently deleting it.'],
+  WALLET_DELETED:['ওয়ালেটটি স্থায়ীভাবে মুছে দেওয়া হয়েছে। পুরোনো ইতিহাস রাখা আছে।','This wallet is permanently deleted. Its history is retained.'],
+  WALLET_REVISION_CONFLICT:['ওয়ালেটের তথ্য বদলেছে। তালিকা নতুন করে খুলে আবার চেষ্টা করুন।','This wallet changed. Reopen the list before trying again.'],
+  WALLET_BALANCE_REMAINS:['এই ওয়ালেটের কোনো খাতায় টাকা বা ঘাটতি আছে। আগে সব বরাদ্দের ব্যালেন্স শূন্য করুন। আর্কাইভে রেখেও হিসাব দেখতে পারবেন।','An allocation has money or a deficit. Settle every allocation to zero before deleting; it can stay archived.'],
+  WALLET_SAVINGS_REMAIN:['এই ওয়ালেটে Goal-এর বরাদ্দ আছে। আগে সেই টাকা ছাড়ুন।','Release this wallet’s goal allocations before deleting it.'],
+  WALLET_LOAN_REMAINS:['এই ওয়ালেটের ঋণ বকেয়া আছে। আগে পরিশোধ শেষ করুন।','Finish this wallet’s outstanding loan repayments before deleting it.'],
   WALLET_TRANSACTION_ALREADY_CHANGED:['লেনদেনটি আগেই বদলেছে। ইতিহাস থেকে সর্বশেষ লেনদেনটি খুলুন।','This transaction has already changed. Open the latest record from History.'],
   WALLET_PHYSICAL_SHORTFALL:['মূল ওয়ালেটের মোট টাকায় ঘাটতি আছে। সব ওয়ালেট থেকে বরাদ্দ ও স্টেটমেন্ট মিলিয়ে নিন।','The physical wallet has insufficient funds. Reconcile its allocations and statement in All wallets.'],
   WALLET_HOME_REQUIRED:['প্রথম ব্যক্তিগত খাতা খুলে সব ওয়ালেট পরিচালনা করুন।','Open your first Personal workspace to manage all wallets.'],

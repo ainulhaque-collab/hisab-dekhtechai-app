@@ -100,6 +100,8 @@ export const AccountsTab: React.FC<{onOpenAllWallets:()=>void}> = ({onOpenAllWal
   const allocationProjection=walletFeatureEnabled?db.getSavingsProjection(currentWorkspace.id):null;
   const walletBook=walletFeatureEnabled?readWalletBook(db.getRawState()):null;
   const visibleSummaries = dashboardData.accountSummaries.filter(summary => {
+    const link=walletBook?.links.get(summary.accountId);
+    if(link&&walletBook?.states.get(link.walletId)?.status==='deleted')return false;
     const account = allWorkspaceAccounts.find(a => a.id === summary.accountId);
     return account && (accountView === 'archived' ? !!account.archivedAt : !account.archivedAt);
   });
@@ -359,10 +361,10 @@ export const AccountsTab: React.FC<{onOpenAllWallets:()=>void}> = ({onOpenAllWal
                     </div>
                     <div className="text-right">
                       <div className="text-base font-bold text-slate-900 tabular-nums">
-                        {formatBDT(allocation?.availableMinor||accSummary.currentBalanceMinor, { locale: language })}
+                        {formatBDT(fullAccount?.archivedAt?accSummary.currentBalanceMinor:allocation?.availableMinor||accSummary.currentBalanceMinor, { locale: language })}
                       </div>
                       <div className="text-[10px] text-slate-400 font-medium">
-                        {allocation?(isEn?'Spendable allocation':'খরচযোগ্য বরাদ্দ'):(isEn ? 'Current Balance' : 'বর্তমান ব্যালেন্স')}
+                        {fullAccount?.archivedAt?(isEn?'Archived balance':'আর্কাইভের ব্যালেন্স'):allocation?(isEn?'Spendable allocation':'খরচযোগ্য বরাদ্দ'):(isEn ? 'Current Balance' : 'বর্তমান ব্যালেন্স')}
                       </div>
                     </div>
                   </div>
