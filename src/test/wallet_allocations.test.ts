@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {LocalDatabase} from '../storage/db';
 import {LocalStorageFallbackDriver} from '../storage/drivers/durableStorage';
-import {createMasterWallet,linkMasterWallet,transferAllocation,walletSummaries,readWalletBook,allocationJournalId} from '../storage/walletBook';
+import {createMasterWallet,linkMasterWallet,transferAllocation,walletSummaries,readWalletBook,allocationJournalId,changeMasterWallet,walletDeletionBlocker} from '../storage/walletBook';
 import {buildExpenseJournal,buildTransferJournal,generateUUID} from '../domain/journal';
 import {canonicalJson,computeSha256Sync} from '../sync/canonical';
 import {decodeBackup} from '../storage/backup';
@@ -212,4 +212,109 @@ test('wallets: values above JavaScript safe integer preserve every paisa across 
   await transferAllocation(db,{id:generateUUID(),sourceAccountId:source.accountId,destinationAccountId:destination.id,amountMinor:'9007199254740991'});
   const reloaded=new LocalDatabase(key,driver);await reloaded.init();const view=walletSummaries(reloaded).find(w=>w.wallet.id===wallet.id)!;
   assert.equal(view.balanceMinor,amount);assert.equal(view.allocations.find(a=>a.workspaceId===home.id)?.balanceMinor,'2');
+});
+
+test('wallet lifecycle: rename keeps codes, opening balances and journals; replay is idempotent and stale/foreign commands fail',async()=>{
+  const {db,wallet,personal,biz}=await setup(),before=core(db),count=db.getPendingOutbox().length;
+  const command={walletId:wallet.id,commandId:generateUUID(),expectedRevision:0,action:'rename' as const,name:'নতুন বিকাশ'};
+  await changeMasterWallet(db,command);
+  const retained=JSON.parse(before),after=JSON.parse(core(db));
+  for(const pair of after.accounts){const original=retained.accounts.find((a:any)=>a[0]===pair[0]);if(pair[0]===personal.accountId||pair[0]===biz.id)original[1].name='নতুন বিকাশ';}
+  assert.equal(canonicalJson(after),canonicalJson(retained));assert.equal(db.getPendingOutbox().length,count+3);
+  assert.equal(db.getAccount(personal.accountId)?.name,'নতুন বিকাশ');assert.equal(db.getAccount(biz.id)?.name,'নতুন বিকাশ');
+  assert.equal(walletSummaries(db)[0].wallet.code,wallet.code);assert.equal(walletSummaries(db)[0].balanceMinor,'1000000');
+  const saved=canonicalJson(db.toSerializable());await changeMasterWallet(db,command);assert.equal(canonicalJson(db.toSerializable()),saved);
+  await assert.rejects(changeMasterWallet(db,{...command,commandId:generateUUID(),name:'stale'}),/WALLET_REVISION_CONFLICT/);
+  await assert.rejects(changeMasterWallet(db,{...command,commandId:generateUUID(),expectedRevision:1,actorHash:'foreign'}),/WALLET_OWNER_MISMATCH/);
+  await assert.rejects(changeMasterWallet(db,{...command,commandId:generateUUID(),expectedRevision:1,name:'  '}),/WALLET_INVALID_EVENT/);
+  assert.equal(canonicalJson(db.toSerializable()),saved);
+  db.updateAccount(biz.id,{name:'Synthetic workspace alias'});await db.waitForPendingWrites();
+  assert.equal(db.getAccount(biz.id)?.name,'Synthetic workspace alias','existing workspace account editing remains available');
+  assert.equal(walletSummaries(db)[0].wallet.name,'নতুন বিকাশ');
+});
+
+test('wallet lifecycle: guarded archive blocks spending, new goal funding and linking; restore retains separately archived allocations',async()=>{
+  const {db,wallet,personal,biz,home,business}=await setup();db.archiveAccount(biz.id);await db.waitForPendingWrites();
+  const originalArchive=db.getRawState().accounts.get(biz.id)!.archivedAt,before=core(db);
+  for(const confirmation of ['', 'delete', ' DELETE'])await assert.rejects(changeMasterWallet(db,{walletId:wallet.id,commandId:generateUUID(),expectedRevision:0,action:'archive',confirmation}),/WALLET_DELETE_CONFIRMATION/);
+  await changeMasterWallet(db,{walletId:wallet.id,commandId:generateUUID(),expectedRevision:0,action:'archive',confirmation:'DELETE'});
+  assert.equal(core(db),before);assert.equal(db.getAccounts(home.id).some(a=>a.id===personal.accountId),false);
+  assert.equal(db.getAccounts(business.id).some(a=>a.id===biz.id),false);assert.equal(walletSummaries(db)[0].balanceMinor,'1000000');assert.equal(walletSummaries(db)[0].availableMinor,'0');
+  assert.throws(()=>db.restoreAccount(personal.accountId),/WALLET_ACCOUNT_UNAVAILABLE/);
+  await assert.rejects(linkMasterWallet(db,wallet.code,business.id),/WALLET_ACCOUNT_UNAVAILABLE/);
+  const category=db.getCategories(home.id).find(c=>c.kind==='expense')!;
+  await assert.rejects(post(db,buildExpenseJournal({workspaceId:home.id,assetAccountId:personal.accountId,expenseCategoryId:category.id,amountMinor:'1',effectiveDate:'2026-11-06',opId:generateUUID()})),/WALLET_ACCOUNT_UNAVAILABLE/);
+  const goal=await db.saveSavingsGoal(home.id,{name:'Synthetic protected goal',kind:'general',targetMinor:'100'});
+  await assert.rejects(db.allocateSavingsGoal(home.id,goal.id,personal.accountId,'1'),/SAVINGS_ACCOUNT_UNAVAILABLE/);
+  await changeMasterWallet(db,{walletId:wallet.id,commandId:generateUUID(),expectedRevision:1,action:'restore'});
+  assert.equal(db.getAccounts(home.id).some(a=>a.id===personal.accountId),true);assert.equal(db.getAccount(biz.id)?.archivedAt,originalArchive);
+  assert.equal(walletSummaries(db)[0].balanceMinor,'1000000');
+});
+
+test('wallet lifecycle: permanent removal requires archive and DELETE; settled journal history, backups and tombstones survive reload',async()=>{
+  const {db,home,personal,driver,key}=await setup();
+  const empty=await createMasterWallet(db,{id:generateUUID(),name:'Synthetic removable bank',kind:'bank',openingBalanceMinor:'0'});
+  const receiver=walletSummaries(db).find(r=>r.wallet.id===empty.id)!.allocations[0];
+  await transferAllocation(db,{id:generateUUID(),sourceAccountId:personal.accountId,destinationAccountId:receiver.accountId,amountMinor:'1000'});
+  await transferAllocation(db,{id:generateUUID(),sourceAccountId:receiver.accountId,destinationAccountId:personal.accountId,amountMinor:'1000'});
+  const finance=core(db),journals=db.getTransactions(home.id).length;
+  await assert.rejects(changeMasterWallet(db,{walletId:empty.id,commandId:generateUUID(),expectedRevision:0,action:'delete',confirmation:'DELETE'}),/WALLET_ARCHIVE_REQUIRED/);
+  await changeMasterWallet(db,{walletId:empty.id,commandId:generateUUID(),expectedRevision:0,action:'archive',confirmation:'DELETE'});
+  await assert.rejects(changeMasterWallet(db,{walletId:empty.id,commandId:generateUUID(),expectedRevision:1,action:'delete',confirmation:'delete'}),/WALLET_DELETE_CONFIRMATION/);
+  await changeMasterWallet(db,{walletId:empty.id,commandId:generateUUID(),expectedRevision:1,action:'delete',confirmation:'DELETE'});
+  assert.equal(core(db),finance);assert.equal(db.getTransactions(home.id).length,journals);assert.equal(db.verifyLedgerIntegrity(home.id).isValid,true);
+  assert.equal(readWalletBook(db.getRawState()).states.get(empty.id)?.status,'deleted');
+  await assert.rejects(changeMasterWallet(db,{walletId:empty.id,commandId:generateUUID(),expectedRevision:2,action:'restore'}),/WALLET_DELETED/);
+  assert.throws(()=>db.restoreAccount(receiver.accountId),/WALLET_ACCOUNT_UNAVAILABLE/);
+  const restored=new LocalDatabase(key,driver);await restored.init();assert.deepEqual(walletSummaries(restored),walletSummaries(db));
+  const copy=new LocalDatabase(`lifecycle-restore-${generateUUID()}`,new LocalStorageFallbackDriver());await copy.init();copy.setIdentity('synthetic-wallet-owner');
+  await copy.importBackupFile(await db.exportBackupFile());assert.deepEqual(walletSummaries(copy),walletSummaries(db));
+  assert.equal(copy.verifyLedgerIntegrity(home.id).isValid,true);
+});
+
+test('wallet lifecycle: individual nonzero allocations and unfunded goal reservations cannot be hidden by deletion',async()=>{
+  const {db,wallet,home,personal,biz}=await setup();
+  await changeMasterWallet(db,{walletId:wallet.id,commandId:generateUUID(),expectedRevision:0,action:'archive',confirmation:'DELETE'});
+  await assert.rejects(changeMasterWallet(db,{walletId:wallet.id,commandId:generateUUID(),expectedRevision:1,action:'delete',confirmation:'DELETE'}),/WALLET_BALANCE_REMAINS/);
+  // A retained legacy deficit must not net against another workspace's money.
+  db.getRawState().accounts.get(biz.id)!.openingBalanceMinor='-1000000';
+  assert.equal(walletSummaries(db)[0].balanceMinor,'0');assert.equal(walletDeletionBlocker(db,wallet.id),'WALLET_BALANCE_REMAINS');
+  db.getRawState().accounts.get(biz.id)!.openingBalanceMinor='0';
+  await changeMasterWallet(db,{walletId:wallet.id,commandId:generateUUID(),expectedRevision:1,action:'restore'});
+  const goal=await db.saveSavingsGoal(home.id,{name:'Synthetic unfunded goal',kind:'general',targetMinor:'1000'});await db.allocateSavingsGoal(home.id,goal.id,personal.accountId,'1000');
+  db.getRawState().accounts.get(personal.accountId)!.openingBalanceMinor='0';
+  assert.equal(walletDeletionBlocker(db,wallet.id),'WALLET_SAVINGS_REMAIN');
+});
+
+test('wallet lifecycle: a zero-cash lender with outstanding principal cannot be permanently removed',async()=>{
+  const {db,home,business,biz}=await setup();
+  const lender=await createMasterWallet(db,{id:generateUUID(),name:'Synthetic lender',kind:'bank',openingBalanceMinor:'10000'});
+  const source=walletSummaries(db).find(w=>w.wallet.id===lender.id)!.allocations[0];
+  const goal=await db.saveSavingsGoal(home.id,{name:'Synthetic loan savings',kind:'general',targetMinor:'10000'});await db.allocateSavingsGoal(home.id,goal.id,source.accountId,'10000');
+  await db.issueSavingsLoan({id:generateUUID(),goalId:goal.id,sourceWorkspaceId:home.id,sourceAccountId:source.accountId,borrowerWorkspaceId:business.id,borrowerAccountId:biz.id,principalMinor:'10000',dueDate:'2030-01-01',monthlyRateBps:0,repaymentOrder:'principal-first',purpose:'Synthetic outstanding loan'});
+  assert.equal(walletSummaries(db).find(w=>w.wallet.id===lender.id)!.balanceMinor,'0');
+  await changeMasterWallet(db,{walletId:lender.id,commandId:generateUUID(),expectedRevision:0,action:'archive',confirmation:'DELETE'});
+  assert.equal(walletDeletionBlocker(db,lender.id),'WALLET_LOAN_REMAINS');
+  await assert.rejects(changeMasterWallet(db,{walletId:lender.id,commandId:generateUUID(),expectedRevision:1,action:'delete',confirmation:'DELETE'}),/WALLET_LOAN_REMAINS/);
+});
+
+test('wallet lifecycle: durable failure rolls back metadata and outbox; concurrent stale edits cannot overwrite each other',async()=>{
+  const {db,driver,wallet}=await setup(),before=canonicalJson(db.toSerializable());
+  driver.faultInjection='throw_on_commit';await assert.rejects(changeMasterWallet(db,{walletId:wallet.id,commandId:generateUUID(),expectedRevision:0,action:'rename',name:'Failed'}));
+  driver.faultInjection='none';assert.equal(canonicalJson(db.toSerializable()),before);
+  const results=await Promise.allSettled(['First','Second'].map(name=>changeMasterWallet(db,{walletId:wallet.id,commandId:generateUUID(),expectedRevision:0,action:'rename',name})));
+  assert.equal(results.filter(r=>r.status==='fulfilled').length,1);assert.equal(readWalletBook(db.getRawState()).states.get(wallet.id)?.revision,1);
+});
+
+test('wallet lifecycle: unordered revisions hydrate, missing revisions stay pending, forks and foreign commands are rejected',async()=>{
+  const {db,wallet}=await setup();
+  await changeMasterWallet(db,{walletId:wallet.id,commandId:generateUUID(),expectedRevision:0,action:'rename',name:'Renamed'});
+  await changeMasterWallet(db,{walletId:wallet.id,commandId:generateUUID(),expectedRevision:1,action:'archive',confirmation:'DELETE'});
+  const raw=structuredClone(db.getRawState());raw.syncOperations=new Map([...raw.syncOperations].reverse());
+  assert.equal(readWalletBook(raw).states.get(wallet.id)?.status,'archived');
+  const rename=[...raw.syncOperations.values()].find(op=>op.payload.walletEvent?.change?.action==='rename')!;
+  raw.syncOperations.delete(rename.operationId);assert.ok(readWalletBook(raw).pendingReferences>0);raw.syncOperations.set(rename.operationId,rename);
+  const fork=structuredClone(rename);fork.operationId=generateUUID();fork.payload.walletEvent.change.commandId=generateUUID();fork.payload.walletEvent.change.name='Conflicting';fork.contentSha256=computeSha256Sync(canonicalJson(fork.payload));
+  raw.syncOperations.set(fork.operationId,fork);assert.throws(()=>readWalletBook(raw),/WALLET_REVISION_CONFLICT/);raw.syncOperations.delete(fork.operationId);
+  rename.ownerHash='foreign';assert.throws(()=>readWalletBook(raw),/WALLET_OWNER_MISMATCH/);
 });

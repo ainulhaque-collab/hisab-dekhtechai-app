@@ -100,6 +100,8 @@ export const AccountsTab: React.FC<{onOpenAllWallets:()=>void}> = ({onOpenAllWal
   const allocationProjection=walletFeatureEnabled?db.getSavingsProjection(currentWorkspace.id):null;
   const walletBook=walletFeatureEnabled?readWalletBook(db.getRawState()):null;
   const visibleSummaries = dashboardData.accountSummaries.filter(summary => {
+    const link=walletBook?.links.get(summary.accountId);
+    if(link&&walletBook?.states.get(link.walletId)?.status==='deleted')return false;
     const account = allWorkspaceAccounts.find(a => a.id === summary.accountId);
     return account && (accountView === 'archived' ? !!account.archivedAt : !account.archivedAt);
   });

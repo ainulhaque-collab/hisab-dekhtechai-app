@@ -14,7 +14,7 @@ export function WalletTransferModal({onClose}:{onClose:()=>void}){
   const [source,setSource]=useState(''),[destination,setDestination]=useState(''),[amount,setAmount]=useState(''),[note,setNote]=useState('');
   const [busy,setBusy]=useState(false),[error,setError]=useState('');const requestId=useRef(generateUUID());
   if(actorHash!==undefined&&actorHash!==(db.getIdentity()?.ownerSubjectHash||'local-owner'))return <ModalShell title={en?'Transfer':'স্থানান্তর'} onClose={onClose}><p role="alert" className="text-sm text-rose-700">{walletError(Error('WALLET_OWNER_MISMATCH'),en)}</p></ModalShell>;
-  const rows=walletSummaries(db,undefined,actorHash),allocations=rows.flatMap(row=>row.allocations.map(a=>({...a,code:row.wallet.code}))).filter(a=>!a.archived);
+  const rows=walletSummaries(db,undefined,actorHash).filter(row=>row.lifecycle.status==='active'),allocations=rows.flatMap(row=>row.allocations.map(a=>({...a,code:row.wallet.code}))).filter(a=>!a.archived);
   const owner=db.getIdentity()?.ownerSubjectHash||'local-owner',workspaces=db.getWorkspaces().filter(w=>w.ownerSubjectHash===owner);
   const from=allocations.find(a=>a.accountId===source),to=allocations.find(a=>a.accountId===destination);
   async function save(e:React.FormEvent){

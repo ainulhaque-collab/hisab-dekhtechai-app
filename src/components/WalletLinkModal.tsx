@@ -11,7 +11,7 @@ export function WalletLinkModal({onClose}:{onClose:()=>void}){
   const {db,language,currentWorkspace,refreshState,userProfile}=useApp(),en=language==='en',actorHash=walletActor(userProfile);
   const [code,setCode]=useState(''),[existing,setExisting]=useState(''),[busy,setBusy]=useState(false),[error,setError]=useState('');
   if(actorHash!==undefined&&actorHash!==(db.getIdentity()?.ownerSubjectHash||'local-owner'))return <ModalShell title={en?'Link a wallet':'ওয়ালেট যুক্ত করুন'} onClose={onClose}><p role="alert" className="text-sm text-rose-700">{walletError(Error('WALLET_OWNER_MISMATCH'),en)}</p></ModalShell>;
-  const book=readWalletBook(db.getRawState()),wallets=walletSummaries(db),selected=wallets.find(w=>w.wallet.code===code.trim().toUpperCase());
+  const book=readWalletBook(db.getRawState()),wallets=walletSummaries(db).filter(w=>w.lifecycle.status==='active'),selected=wallets.find(w=>w.wallet.code===code.trim().toUpperCase());
   const candidates=currentWorkspace?db.getAccounts(currentWorkspace.id).filter(a=>(a.classification||'asset')==='asset'&&!book.links.has(a.id)&&(!selected||a.kind===selected.wallet.kind)):[];
   async function save(event:React.FormEvent){
     event.preventDefault();if(busy||!currentWorkspace)return;setBusy(true);setError('');

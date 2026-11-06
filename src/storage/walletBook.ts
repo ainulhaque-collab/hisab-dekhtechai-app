@@ -1,11 +1,14 @@
 import type { Account, BalancedJournal, JournalTransaction, SyncOperation, Workspace } from '../contracts/types';
-import type { AllocationTransfer, MasterWallet, MasterWalletSummary, WalletAllocation, WalletEvent } from '../contracts/wallets';
+import type { AllocationTransfer, MasterWallet, MasterWalletSummary, WalletAllocation, WalletEvent, WalletChange, WalletLifecycle } from '../contracts/wallets';
 import type { DatabaseState, LocalDatabase } from './db';
 import { SYSTEM_ACCOUNTS } from '../contracts/ledger';
 import { generateUUID } from '../domain/journal';
-import { resolveJournalTime, validateTransactionTime } from '../domain/transactionTime';
+import { localDate, resolveJournalTime, validateTransactionTime } from '../domain/transactionTime';
 import { canonicalJson, computeSha256Sync } from '../sync/canonical';
-import { isLoanLedgerAccount } from './loanBook';
+import { isLoanLedgerAccount, readSavingsLoans } from './loanBook';
+import { projectSavingsGoals } from '../domain/savingsGoals';
+import { savingsRecords } from './savingsOperations';
+import { isDeleteConfirmed } from '../domain/confirmation';
 
 type State = Pick<DatabaseState,'workspaces'|'accounts'|'syncOperations'|'journalTransactions'>;
 const kinds=['cash','bank','bkash','nagad','rocket','other'];
@@ -32,7 +35,7 @@ export function personalWalletHome(workspaces:Iterable<Workspace>,owner:string):
     .sort((a,b)=>a.createdAt.localeCompare(b.createdAt)||a.id.localeCompare(b.id))[0];
 }
 function readEvent(op:SyncOperation):WalletEvent{
-  record(op.payload,['id','walletEvent']);const e=record(op.payload.walletEvent,['version','action','wallet','walletId','accountId','transfer','adopted']);
+  record(op.payload,['id','walletEvent']);const e=record(op.payload.walletEvent,['version','action','wallet','walletId','accountId','transfer','adopted','change']);
   if(e.version!==1||op.protocolVersion!==1||op.type!=='workspace.update'||op.payload.id!==op.entityId||
     !Number.isSafeInteger(op.seq)||op.seq<1||!Number.isFinite(Date.parse(op.createdAtUtc))||
     op.authorSubjectHash&&op.authorSubjectHash!==op.ownerHash||op.contentSha256!==digest(canonicalJson(op.payload)))return fail();
@@ -44,6 +47,12 @@ function readEvent(op:SyncOperation):WalletEvent{
   }
   if(e.action==='wallet.link'){
     record(e,['version','action','walletId','accountId']);return{version:1,action:'wallet.link',walletId:id(e.walletId),accountId:id(e.accountId)};
+  }
+  if(e.action==='wallet.change'){
+    record(e,['version','action','change']);const c=record(e.change,['walletId','commandId','revision','action','name']);
+    if(!Number.isSafeInteger(c.revision)||c.revision<1||!['rename','archive','restore','delete'].includes(c.action)||
+      (c.action==='rename'?!text(c.name,100).trim():Object.hasOwn(c,'name')))return fail();
+    return{version:1,action:'wallet.change',change:{walletId:id(c.walletId),commandId:id(c.commandId),revision:c.revision,action:c.action,...(c.action==='rename'?{name:c.name.trim()}:{})}};
   }
   if(e.action==='allocation.transfer'){
     record(e,['version','action','transfer']);const t=record(e.transfer,['id','sourceAccountId','destinationAccountId','amountMinor','effectiveDate','occurredAtUtc','occurredTimezoneOffsetMinutes','createdAtUtc','note']);
@@ -70,6 +79,7 @@ function assertPosting(actual:JournalTransaction,expected:BalancedJournal){
 /** Order-independent retained history validation. Missing sync references remain pending. */
 export function readWalletBook(state:State){
   const wallets=new Map<string,MasterWallet>(),links=new Map<string,WalletAllocation>();
+  const states=new Map<string,WalletLifecycle>(),commands=new Map<string,WalletChange>();
   const definitions=new Map<string,string>();
   const events=Array.from(state.syncOperations.values()).filter(isWalletOperation).map(op=>({op,event:readEvent(op)}));
   let pendingReferences=0;
@@ -82,10 +92,11 @@ export function readWalletBook(state:State){
     const previous=wallets.get(w.id);
     if(previous&&definitions.get(w.id)!==canonicalJson(e))return fail('WALLET_CODE_CONFLICT');
     if(Array.from(wallets.values()).some(other=>other.code===w.code&&other.id!==w.id))return fail('WALLET_CODE_CONFLICT');
-    wallets.set(w.id,w);definitions.set(w.id,canonicalJson(e));
+    wallets.set(w.id,{...w});states.set(w.id,{revision:0,status:'active'});definitions.set(w.id,canonicalJson(e));
   }
   const transfers=new Map<string,{transfer:AllocationTransfer;owner:string}>();
   for(const {op,event:e} of events){
+    if(e.action==='wallet.change')continue;
     if(e.action==='allocation.transfer'){
       const previous=transfers.get(e.transfer.id);
       if(previous&&(canonicalJson(previous.transfer)!==canonicalJson(e.transfer)||previous.owner!==op.ownerHash))return fail('WALLET_TRANSFER_CONFLICT');
@@ -104,6 +115,29 @@ export function readWalletBook(state:State){
     if(previous&&previous.walletId!==walletId||Array.from(links.values()).some(l=>l.walletId===walletId&&l.workspaceId===account.workspaceId&&l.accountId!==account.id))return fail('WALLET_LINK_CONFLICT');
     links.set(account.id,{walletId,accountId:account.id,workspaceId:account.workspaceId});
   }
+  const changes=new Map<string,Map<number,{change:WalletChange;at:string}>>();
+  for(const {op,event:e} of events){
+    if(e.action!=='wallet.change')continue;const c=e.change,wallet=wallets.get(c.walletId);
+    if(!wallet){pendingReferences++;continue;}
+    if(op.entityId!==wallet.homeWorkspaceId||state.workspaces.get(wallet.homeWorkspaceId)?.ownerSubjectHash!==op.ownerHash)return fail('WALLET_OWNER_MISMATCH');
+    const command=commands.get(c.commandId);if(command&&canonicalJson(command)!==canonicalJson(c))return fail('WALLET_REVISION_CONFLICT');
+    commands.set(c.commandId,c);
+    const revisions=changes.get(c.walletId)||new Map(),prior=revisions.get(c.revision);
+    if(prior&&canonicalJson(prior.change)!==canonicalJson(c))return fail('WALLET_REVISION_CONFLICT');
+    if(!prior||op.createdAtUtc<prior.at)revisions.set(c.revision,{change:c,at:op.createdAtUtc});changes.set(c.walletId,revisions);
+  }
+  for(const [walletId,revisions] of changes){
+    const lifecycle=states.get(walletId)!,wallet=wallets.get(walletId)!;
+    for(const {change:c,at} of [...revisions.values()].sort((a,b)=>a.change.revision-b.change.revision)){
+      if(c.revision!==lifecycle.revision+1){pendingReferences++;continue;}
+      if(lifecycle.status==='deleted')return fail('WALLET_DELETED');
+      if(c.action==='rename')wallet.name=c.name!;
+      if(c.action==='archive'){if(lifecycle.status!=='active')return fail('WALLET_REVISION_CONFLICT');lifecycle.status='archived';}
+      if(c.action==='restore'){if(lifecycle.status!=='archived')return fail('WALLET_ARCHIVE_REQUIRED');lifecycle.status='active';}
+      if(c.action==='delete'){if(lifecycle.status!=='archived')return fail('WALLET_ARCHIVE_REQUIRED');lifecycle.status='deleted';}
+      lifecycle.revision=c.revision;lifecycle.changedAt=at;
+    }
+  }
   const expectedJournals=new Set<string>();
   for(const {transfer:t,owner} of transfers.values())for(const side of ['source','destination'] as const){
     const accountId=side==='source'?t.sourceAccountId:t.destinationAccountId,account=state.accounts.get(accountId);
@@ -115,7 +149,39 @@ export function readWalletBook(state:State){
   }
   // A financial side arriving before its metadata is not spendable as a settled transfer.
   for(const tx of state.journalTransactions.values())if(isAllocationJournal(tx.id)&&!expectedJournals.has(tx.id))pendingReferences++;
-  return{wallets,links,transfers,pendingReferences};
+  // A tombstone hides a settled, empty wallet; it never erases its journal.
+  for(const [walletId,lifecycle] of states)if(lifecycle.status==='deleted'){
+    const blocker=deletionBlocker(state,links,walletId);if(blocker)return fail(blocker);
+  }
+  return{wallets,links,transfers,states,commands,pendingReferences};
+}
+function deletionBlocker(state:State,links:Map<string,WalletAllocation>,walletId:string):string|null{
+  const accounts=[...links.values()].filter(l=>l.walletId===walletId),ids=new Set(accounts.map(a=>a.accountId));
+  const balances:Record<string,string>={};
+  for(const a of state.accounts.values()){
+    let amount=BigInt(a.openingBalanceMinor);
+    for(const tx of state.journalTransactions.values())for(const line of tx.lines)if(line.accountId===a.id&&!line.categoryId)amount+=BigInt(line.debitMinor)-BigInt(line.creditMinor);
+    balances[a.id]=amount.toString();
+  }
+  if(accounts.some(a=>balances[a.accountId]!==undefined&&balances[a.accountId]!=='0'))return 'WALLET_BALANCE_REMAINS';
+  for(const ws of new Set(accounts.map(a=>a.workspaceId))){
+    const projection=projectSavingsGoals(savingsRecords(state.syncOperations.values(),ws),ws,balances,localDate());
+    if(projection.orphanAllocationCount||projection.orphanReleaseCount)return 'WALLET_SYNC_INCOMPLETE';
+    if(projection.goals.some(g=>g.contributions.some(c=>ids.has(c.accountId)&&c.requestedMinor!=='0')))return 'WALLET_SAVINGS_REMAIN';
+  }
+  if(readSavingsLoans(state).some(row=>(ids.has(row.issue.terms.sourceAccountId)||ids.has(row.issue.terms.borrowerAccountId))&&(row.pendingReferences||row.balance.totalDueMinor!=='0')))return 'WALLET_LOAN_REMAINS';
+  return null;
+}
+/** Derived metadata only. Raw account definitions and financial history stay intact. */
+export function walletAccountView(state:State,account:Account,book=readWalletBook(state)):Account{
+  const link=book.links.get(account.id),lifecycle=link&&book.states.get(link.walletId),wallet=link&&book.wallets.get(link.walletId);
+  if(!lifecycle||!wallet||lifecycle.status==='active')return account;
+  return{...account,archivedAt:lifecycle.changedAt||wallet.createdAt};
+}
+export function walletDeletionBlocker(db:LocalDatabase,walletId:string):string|null{
+  const book=readWalletBook(db.getRawState());
+  if(book.pendingReferences)return 'WALLET_SYNC_INCOMPLETE';
+  return deletionBlocker(db.getRawState(),book.links,walletId);
 }
 function owned(db:LocalDatabase,workspaceId:string,active=true){
   const owner=db.getIdentity()?.ownerSubjectHash||'local-owner',ws=db.getWorkspace(workspaceId);
@@ -152,12 +218,12 @@ export function walletSummaries(db:LocalDatabase,period?:{fromDate:string;toDate
           expense+=tx.lines.filter(l=>l.categoryId).reduce((n,l)=>n+BigInt(l.debitMinor)-BigInt(l.creditMinor),0n);
       }
       return{...link,workspaceName:workspace.name,accountName:account.name,balanceMinor:balance,reservedMinor:amounts?.allocatedMinor||'0',
-        availableMinor:amounts?.availableMinor||balance,incomeMinor:income.toString(),expenseMinor:expense.toString(),archived:!!(workspace.archivedAt||account.archivedAt)};
+        availableMinor:workspace.archivedAt||account.archivedAt?'0':amounts?.availableMinor||balance,incomeMinor:income.toString(),expenseMinor:expense.toString(),archived:!!(workspace.archivedAt||account.archivedAt)};
     });
     const sum=(field:'balanceMinor'|'reservedMinor'|'availableMinor')=>allocations.reduce((n,a)=>n+BigInt(a[field]),0n).toString();
     const balanceMinor=sum('balanceMinor'),reservedMinor=sum('reservedMinor'),allocationAvailable=BigInt(sum('availableMinor'));
     const physicalAvailable=BigInt(balanceMinor)-BigInt(reservedMinor),cap=physicalAvailable>0n?physicalAvailable:0n;
-    return{wallet,allocations,balanceMinor,reservedMinor,availableMinor:(allocationAvailable<cap?allocationAvailable:cap).toString()};
+    return{wallet,lifecycle:book.states.get(wallet.id)!,allocations,balanceMinor,reservedMinor,availableMinor:(allocationAvailable<cap?allocationAvailable:cap).toString()};
   });
 }
 /** Existing allocation deficits must not invent spendable physical cash. Same-wallet
@@ -175,7 +241,7 @@ export async function createMasterWallet(db:LocalDatabase,input:{id:string;name:
     const book=settled(db),previous=book.wallets.get(input.id);
     if(previous){
       const creation=Array.from(db.getRawState().syncOperations.values()).filter(isWalletOperation).map(op=>readEvent(op)).find(e=>e.action==='wallet.create'&&e.wallet.id===input.id);
-      if(!creation||creation.action!=='wallet.create'||previous.name!==input.name.trim()||previous.kind!==input.kind||
+      if(!creation||creation.action!=='wallet.create'||creation.wallet.name!==input.name.trim()||previous.kind!==input.kind||
         creation.adopted!==!!input.existingAccountId||input.existingAccountId&&creation.accountId!==input.existingAccountId||
         !input.existingAccountId&&db.getAccount(creation.accountId)?.openingBalanceMinor!==input.openingBalanceMinor)return fail('WALLET_CODE_CONFLICT');
       await db.rollbackTransaction();return previous;
@@ -194,12 +260,36 @@ export async function linkMasterWallet(db:LocalDatabase,code:string,workspaceId:
   await db.beginTransaction();try{
     owned(db,workspaceId);const book=settled(db),wallet=Array.from(book.wallets.values()).find(w=>w.code===code.trim().toUpperCase()&&db.getWorkspace(w.homeWorkspaceId)?.ownerSubjectHash===(db.getIdentity()?.ownerSubjectHash||'local-owner'));
     if(!wallet)return fail('WALLET_CODE_NOT_FOUND');
+    if(book.states.get(wallet.id)?.status!=='active')return fail('WALLET_ACCOUNT_UNAVAILABLE');
     const previous=Array.from(book.links.values()).find(l=>l.walletId===wallet.id&&l.workspaceId===workspaceId);
     if(previous){if(existingAccountId&&previous.accountId!==existingAccountId)return fail('WALLET_LINK_CONFLICT');const account=accountFor(db,previous.accountId);await db.rollbackTransaction();return account;}
     const account=existingAccountId?accountFor(db,existingAccountId):db.createAccount(workspaceId,wallet.name,wallet.kind,'0');
     if(account.workspaceId!==workspaceId||account.kind!==wallet.kind||book.links.has(account.id))return fail('WALLET_LINK_CONFLICT');
     db.queueSyncOp('workspace.update',workspaceId,{id:workspaceId,walletEvent:{version:1,action:'wallet.link',walletId:wallet.id,accountId:account.id}});
     settled(db);await db.commitTransaction();return account;
+  }catch(error){await db.rollbackTransaction();throw error;}
+}
+
+/** Revision-bound, atomic metadata commands. DELETE is a permanent tombstone,
+ * never a financial deletion or a balance adjustment. */
+export async function changeMasterWallet(db:LocalDatabase,input:{walletId:string;commandId:string;expectedRevision:number;action:WalletChange['action'];name?:string;confirmation?:string;actorHash?:string}){
+  assertWalletOwner(db,input.actorHash);
+  if((input.action==='delete'||input.action==='archive')&&!isDeleteConfirmed(input.confirmation||''))return fail('WALLET_DELETE_CONFIRMATION');
+  await db.beginTransaction();try{
+    const book=settled(db),wallet=book.wallets.get(input.walletId),lifecycle=book.states.get(input.walletId);
+    if(!wallet||!lifecycle)return fail('WALLET_CODE_NOT_FOUND');owned(db,wallet.homeWorkspaceId);
+    const change:WalletChange={walletId:input.walletId,commandId:id(input.commandId),revision:input.expectedRevision+1,action:input.action,...(input.action==='rename'?{name:(input.name||'').trim()}:{})};
+    const previous=book.commands.get(input.commandId);
+    if(previous){if(canonicalJson(previous)!==canonicalJson(change))return fail('WALLET_REVISION_CONFLICT');await db.rollbackTransaction();return;}
+    if(!Number.isSafeInteger(input.expectedRevision)||lifecycle.revision!==input.expectedRevision)return fail('WALLET_REVISION_CONFLICT');
+    if(lifecycle.status==='deleted')return fail('WALLET_DELETED');
+    if(input.action==='delete'){
+      if(lifecycle.status!=='archived')return fail('WALLET_ARCHIVE_REQUIRED');
+      const blocker=deletionBlocker(db.getRawState(),book.links,input.walletId);if(blocker)return fail(blocker);
+    }
+    db.queueSyncOp('workspace.update',wallet.homeWorkspaceId,{id:wallet.homeWorkspaceId,walletEvent:{version:1,action:'wallet.change',change}});
+    if(input.action==='rename')for(const link of book.links.values())if(link.walletId===wallet.id)db.updateAccount(link.accountId,{name:change.name!});
+    settled(db);await db.commitTransaction();
   }catch(error){await db.rollbackTransaction();throw error;}
 }
 export async function transferAllocation(db:LocalDatabase,input:{id:string;sourceAccountId:string;destinationAccountId:string;amountMinor:string;effectiveDate?:string;note?:string;actorHash?:string}){
