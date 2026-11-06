@@ -22,6 +22,9 @@ Existing Web/Admin Preview configuration is independent and unchanged.
 
 Financial records remain local. Google login does not yet enable Postgres
 financial sync or upload/adopt the existing dataset. No Drive sync is restored.
+Loan repayment is manual: automatic repayment requires verified financial sync
+and is unavailable here. New loans do not default to a non-running automation;
+existing stored settings are retained and the UI states that they are not running.
 Public distribution, broader subscription enforcement and independent recovery
 acceptance remain separate release gates.
 
