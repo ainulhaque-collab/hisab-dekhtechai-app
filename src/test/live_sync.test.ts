@@ -9,10 +9,42 @@ import {LiveSyncService,type LiveTransport,type LiveHead} from '../sync/live/ser
 import {liveCore,coreHash,baseHashes,mergeLive} from '../sync/live/state';
 import {RECOVERY_KEY} from '../sync/recovery/service';
 import {generateUUID,buildExpenseJournal} from '../domain/journal';
-import {createMasterWallet,changeMasterWallet,walletSummaries,linkMasterWallet} from '../storage/walletBook';
+import {createMasterWallet,changeMasterWallet,walletSummaries,linkMasterWallet,readWalletBook} from '../storage/walletBook';
 import {canonicalJson,computeSha256Sync} from '../sync/canonical';
 
 const owner='synthetic-live-owner';
+
+test('live: permanent account deletion defeats an offline rename and an older file import',async t=>{
+ const {a,b,sa,sb,remote}=await setup(t);const account=a.createAccount('ws-personal-default','Synthetic unused account','bank','0');await a.waitForPendingWrites();await sa.run();await sb.run();
+ const old=await a.exportBackupFile();b.updateAccount(account.id,{name:'Offline stale name'});await b.waitForPendingWrites();
+ assert.equal(a.safeDeleteAccount(account.id,'DELETE').mode,'deleted');await a.waitForPendingWrites();await sa.run();await sb.run();await sa.run();
+ assert.equal(sb.snapshot().phase,'synced');assert.equal(a.getAccount(account.id),undefined);assert.equal(b.getAccount(account.id),undefined);
+ await b.importBackupFile(old);assert.equal(b.getAccount(account.id),undefined);await sb.run();assert.equal(remote.core!.accounts.some(([id])=>id===account.id),false);
+});
+
+test('live: archived wallet/goal can restore; permanent deletion remains hidden after stale offline sync and old backup import',async t=>{
+ const {a,b,sa,sb,wallet}=await setup(t),ws='ws-personal-default';const empty=await createMasterWallet(a,{id:generateUUID(),name:'Synthetic deleted wallet',kind:'bank',openingBalanceMinor:'0'});
+ const goal=await a.saveSavingsGoal(ws,{name:'Synthetic deleted goal',kind:'general',targetMinor:'10000'});await sa.run();await sb.run();const old=await b.exportBackupFile();
+ await changeMasterWallet(a,{walletId:empty.id,commandId:generateUUID(),expectedRevision:0,action:'archive',confirmation:'DELETE'});await a.setSavingsGoalArchived(ws,goal.id,true);await sa.run();await sb.run();
+ assert.equal(readWalletBook(b.getRawState()).states.get(empty.id)?.status,'archived');assert.equal(b.getSavingsProjection(ws).goals.find(g=>g.goal.id===goal.id)?.goal.archived,true);
+ await changeMasterWallet(b,{walletId:empty.id,commandId:generateUUID(),expectedRevision:1,action:'restore'});await b.setSavingsGoalArchived(ws,goal.id,false);await sb.run();await sa.run();
+ assert.equal(readWalletBook(a.getRawState()).states.get(empty.id)?.status,'active');
+ await changeMasterWallet(a,{walletId:empty.id,commandId:generateUUID(),expectedRevision:2,action:'archive',confirmation:'DELETE'});await a.setSavingsGoalArchived(ws,goal.id,true);
+ await changeMasterWallet(a,{walletId:empty.id,commandId:generateUUID(),expectedRevision:3,action:'delete',confirmation:'DELETE'});await a.safeDeleteSavingsGoal(ws,goal.id,'DELETE');await sa.run();
+ await expense(b,walletSummaries(b).find(r=>r.wallet.id===wallet.id)!.allocations[0].accountId,'100');await sb.run();await sa.run();
+ await b.importBackupFile(old);await sb.run();
+ assert.equal(readWalletBook(b.getRawState()).states.get(empty.id)?.status,'deleted');assert.equal(b.getSavingsProjection(ws).goals.find(g=>g.goal.id===goal.id)?.deleted,true);
+ await assert.rejects(changeMasterWallet(b,{walletId:empty.id,commandId:generateUUID(),expectedRevision:4,action:'restore'}),/WALLET_DELETED/);
+});
+
+test('live: transaction correction and offline void sync without reactivating the original or duplicating balances',async t=>{
+ const {a,b,sa,sb,wallet}=await setup(t);await sa.run();await sb.run();const account=walletSummaries(a)[0].allocations[0].accountId;await expense(a,account,'12000');await sa.run();await sb.run();
+ const original=a.getTransactions('ws-personal-default').find(tx=>tx.transactionType==='expense')!;
+ await a.editTransaction(original.id,{amountMinor:'15000',effectiveDate:'2026-11-07',assetAccountId:account,categoryId:a.getCategories('ws-personal-default').find(c=>c.kind==='expense')!.id});await sa.run();await sb.run();
+ const replacement=b.getTransaction(original.id)!.isReplacedBy!;assert.ok(replacement);await b.deleteTransaction(replacement);await sb.run();
+ await expense(a,account,'500');await sa.run();await sb.run();assert.equal(sa.snapshot().phase,'synced');assert.equal(a.getTransaction(replacement)?.isDeleted,true);assert.equal(a.getTransaction(original.id)?.isReplacedBy,replacement);
+ assert.equal(walletSummaries(a).find(r=>r.wallet.id===wallet.id)?.balanceMinor,'99500');assert.equal(coreHash(liveCore(a.toSerializable())),coreHash(liveCore(b.toSerializable())));
+});
 function cloud(){let core:ReturnType<typeof liveCore>|null=null,head:LiveHead|null=null;let lost=false;let writes=0;
  const transport:LiveTransport={head:async()=>head&&{...head},get:async()=>{if(!head||!core)throw Error('MISSING');return structuredClone({head,core});},
   put:async(datasetId,expected,input)=>{if(head&&head.datasetId!==datasetId)throw Error('LIVE_OTHER_DATASET');

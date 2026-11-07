@@ -5,6 +5,7 @@
  */
 
 import {liveCore,mergeLive,recoveryData,LIVE_KEY,type LiveCore,type LiveCheckpoint,type BaseHashes} from '../sync/live/state';
+import {retainAccountDeletions} from './accountDeletion';
 import {
   UUID,
   Workspace,
@@ -2085,6 +2086,7 @@ export class LocalDatabase {
           ['categories', 'category.create', 'category'], ['parties', 'party.create', 'party'],
         ] as const) for (const [id] of incoming[key] || []) {
           const record = (this.state[key] as Map<string, any>).get(id);
+          if(!record)continue; // A retained permanent deletion can suppress an old backup row.
           this.queueSyncOp(type, id, { [field]: { ...record } });
         }
       }
@@ -2170,6 +2172,7 @@ export class LocalDatabase {
     this.state.journalTransactions = new Map(data.journalTransactions || []);
     this.state.journalLines = new Map(data.journalLines || []);
     this.state.syncOperations = new Map(data.syncOperations || []);
+    this.state.accounts=retainAccountDeletions(this.state.accounts,this.state.syncOperations.values(),this.state.localIdentity?.ownerSubjectHash||null,this.state.journalLines.values());
     this.state.syncOutbox = new Map(data.syncOutbox || []);
     this.state.appliedOperations = new Set(data.appliedOperations || []);
     this.state.syncDeviceHeads = new Map(data.syncDeviceHeads || []);

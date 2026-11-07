@@ -7,6 +7,7 @@ import { validateSavingsOperations } from './savingsOperations';
 import { readSavingsLoans } from './loanBook';
 import { readWalletBook } from './walletBook';
 import { validateReportOperations } from './reportMetadata';
+import {retainAccountDeletions} from './accountDeletion';
 
 export const MAX_BACKUP_BYTES = 40 * 1024 * 1024;
 const MAPS = ['workspaces', 'accounts', 'accountGroups', 'accountPermissions', 'categories', 'parties',
@@ -87,7 +88,9 @@ export function mergeBackup(current: Data, incoming: Data, replaceUntouchedStart
     }
     result[key] = Array.from(merged);
   }
-  const ws = new Map<string, any>(result.workspaces), accounts = new Map<string, any>(result.accounts);
+  const ws = new Map<string, any>(result.workspaces);
+  const accounts = retainAccountDeletions(new Map(result.accounts),new Map<string,any>(result.syncOperations).values(),owner,new Map<string,any>(result.journalLines).values());
+  result.accounts=Array.from(accounts);
   const categories = new Map<string, any>(result.categories), journals = new Map<string, any>(result.journalTransactions);
   const lines = new Map<string, any>(result.journalLines), ops = new Map<string, any>(result.syncOperations);
   for (const entity of ws.values()) {
