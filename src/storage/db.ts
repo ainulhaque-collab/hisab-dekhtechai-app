@@ -2012,6 +2012,23 @@ export class LocalDatabase {
     await this.restoreBackupData(await decodeBackup(text));
   }
 
+  /** Explicit recovery on a genuinely untouched installation. The verified cloud
+   * customer owns the snapshot, while its original ledger namespace is retained. */
+  public async restoreVerifiedCloudBackup(text:string,binding:{customerId:string;datasetId:string;deviceId:string},active:()=>void):Promise<void>{
+    const incoming=await decodeBackup(text);
+    await this.waitForPendingWrites();active();
+    if(!this.hasOnlyUntouchedStarters()||this.state.preferences.has('hisab-supabase-recovery-v1'))throw Error('RECOVERY_NOT_EMPTY');
+    await this.captureRecoverySnapshot();active();await this.beginTransaction();
+    try{
+      active();if(!this.hasOnlyUntouchedStarters()||this.state.preferences.has('hisab-supabase-recovery-v1'))throw Error('RECOVERY_NOT_EMPTY');
+      const current={...this.toSerializable(),localIdentity:incoming.localIdentity||null};
+      const merged=mergeBackup(current,incoming,true);
+      merged.preferences=(merged.preferences||[]).filter(([key]:[string,unknown])=>key!=='hisab-supabase-recovery-v1');
+      merged.preferences.push(['hisab-supabase-recovery-v1',binding]);
+      active();await this.loadFromSerializable(merged);active();await this.commitTransaction();
+    }catch(error){await this.rollbackTransaction();throw error;}
+  }
+
   private async restoreBackupData(incoming: Record<string, any>): Promise<void> {
     await this.waitForPendingWrites();
     mergeBackup(this.toSerializable(), incoming, this.hasOnlyUntouchedStarters()); // Reject invalid/foreign files without writing anything.

@@ -29,6 +29,7 @@ import { JournalTransaction } from './contracts/types';
 import { hasAccountCallback } from './auth/cloud/callbackLocation';
 import { offerFirstRunWelcome, rememberWelcomeSeen } from './appearance/welcome';
 import { mobileUiEnabled } from './appearance/mobileAppearance';
+import {useAutomaticRecovery} from './sync/recovery/runtime';
 const MobileWelcome=lazy(()=>import('./components/MobileWelcome'));
 const accountAuthEnabled=import.meta.env.VITE_SUPABASE_AUTH_ENABLED==='true';
 const AllWalletsPage=lazy(()=>import('./components/AllWalletsPage'));
@@ -86,6 +87,7 @@ class ErrorBoundary extends React.Component<ErrorBoundaryProps, ErrorBoundarySta
 
 function MainApp() {
   const { currentWorkspace, language, auth, signOut, db } = useApp();
+  useAutomaticRecovery(db);
   const [showWelcome,setShowWelcome]=useState(()=>!hasAccountCallback()&&offerFirstRunWelcome(db));
   useEffect(()=>{if(mobileUiEnabled)document.documentElement.lang=language;},[language]);
   const legacySignOut=useRef(signOut);
@@ -107,7 +109,8 @@ function MainApp() {
   const [isConflictModalOpen, setIsConflictModalOpen] = useState(false);
   const [isSnapshotModalOpen, setIsSnapshotModalOpen] = useState(false);
   const [isSettingsModalOpen, setIsSettingsModalOpen] = useState(hasAccountCallback);
-  const [settingsSection,setSettingsSection]=useState<'home'|'account'>(()=>hasAccountCallback()?'account':'home');
+  const [settingsSection,setSettingsSection]=useState<'home'|'account'|'backup'>(()=>hasAccountCallback()?'account':'home');
+  useEffect(()=>{const open=()=>{setSettingsSection('backup');setIsSettingsModalOpen(true);};window.addEventListener('hisab-open-cloud-backup',open);return()=>window.removeEventListener('hisab-open-cloud-backup',open);},[]);
   const [isAuthModalOpen, setIsAuthModalOpen] = useState(false);
   const [isPartiesModalOpen, setIsPartiesModalOpen] = useState(false);
   const [isProfileModalOpen, setIsProfileModalOpen] = useState(false);
