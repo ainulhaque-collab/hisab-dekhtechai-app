@@ -6,7 +6,7 @@ import { canonicalJson, computeSha256Sync } from '../sync/canonical';
 import { savingsRecords } from './savingsOperations';
 
 type Issue = { version: 1; action: 'issue'; terms: SavingsLoanTerms; purpose: string; executorDeviceId: string; autoRepay: boolean; releases: string[] };
-type Repay = { version: 1; action: 'repay'; loanId: string; payment: SavingsLoanPayment; principalMinor: string; interestMinor: string };
+type Repay = { version: 1|2; action: 'repay'; loanId: string; payment: SavingsLoanPayment; principalMinor: string; interestMinor: string };
 type Automation = { version: 1; action: 'automation.set'; loanId: string; enabled: boolean; revision: number; acknowledgedStops: string[] };
 type LoanEvent = Issue | Repay | Automation;
 export interface SavingsLoanRow { issue: Issue; payments: SavingsLoanPayment[]; balance: SavingsLoanProjection; pendingReferences: number; autoRepayEnabled: boolean; autoRevision: number; automationStopIds: string[] }
@@ -48,7 +48,7 @@ export const isLoanOperation = (op: SyncOperation) => !!op?.payload && Object.ha
 function event(op: SyncOperation): LoanEvent {
   const p = object(op.payload, ['id', 'loanEvent']);
   const item = object(p.loanEvent, ['version', 'action', 'terms', 'purpose', 'executorDeviceId', 'autoRepay', 'releases', 'loanId', 'payment', 'principalMinor', 'interestMinor', 'enabled', 'revision', 'acknowledgedStops']);
-  if (item.version !== 1 || op.protocolVersion !== 1 || !Number.isSafeInteger(op.seq) || op.seq < 1 ||
+  if (!(item.version === 1 || item.version === 2 && item.action === 'repay') || op.protocolVersion !== 1 || !Number.isSafeInteger(op.seq) || op.seq < 1 ||
     typeof op.createdAtUtc !== 'string' || !Number.isFinite(Date.parse(op.createdAtUtc)) ||
     op.type !== 'workspace.update' || p.id !== op.entityId ||
     op.authorSubjectHash && op.authorSubjectHash !== op.ownerHash ||
@@ -70,7 +70,7 @@ function event(op: SyncOperation): LoanEvent {
       !Number.isFinite(Date.parse(`${p.effectiveDate}T12:00:00Z`)) || new Date(`${p.effectiveDate}T12:00:00Z`).toISOString().slice(0, 10) !== p.effectiveDate ||
       !zero(item.principalMinor) || !zero(item.interestMinor) || !zero(p.amountMinor) || p.amountMinor === '0' ||
       BigInt(item.principalMinor) + BigInt(item.interestMinor) !== BigInt(p.amountMinor) || p.loanId !== item.loanId) return fail();
-    return { version: 1, action: 'repay', loanId: identifier(item.loanId), payment: { id: identifier(p.id), loanId: identifier(p.loanId),
+    return { version: item.version, action: 'repay', loanId: identifier(item.loanId), payment: { id: identifier(p.id), loanId: identifier(p.loanId),
       effectiveDate: p.effectiveDate, amountMinor: p.amountMinor }, principalMinor: item.principalMinor, interestMinor: item.interestMinor };
   }
   if (item.action === 'automation.set') {
@@ -168,7 +168,7 @@ export function readSavingsLoans(state: Pick<DatabaseState, 'syncOperations' | '
     if (releaseTotal > BigInt(t.principalMinor) || !issue.releases.some(ref => !state.syncOperations.has(ref)) && releaseTotal !== BigInt(t.principalMinor)) return fail();
     const payments: Repay[] = [];
     for (const { repayment, op: repaymentOp } of repayments.values()) if (repayment.loanId === t.id) {
-      if (repaymentOp.ownerHash !== t.ownerHash || repaymentOp.entityId !== t.sourceWorkspaceId || repaymentOp.deviceId !== issue.executorDeviceId) return fail('LOAN_OWNER_MISMATCH');
+      if (repaymentOp.ownerHash !== t.ownerHash || repaymentOp.entityId !== t.sourceWorkspaceId || repayment.version === 1 && repaymentOp.deviceId !== issue.executorDeviceId) return fail('LOAN_OWNER_MISMATCH');
       payments.push(repayment);
     }
     if (op.deviceId !== issue.executorDeviceId) return fail('LOAN_OWNER_MISMATCH');
@@ -277,6 +277,10 @@ export async function issueSavingsLoan(db: LocalDatabase, input: NewSavingsLoan,
   } catch (error) { await db.rollbackTransaction(); throw error; }
 }
 
+export function canRepayFromLinkedDevice(db:LocalDatabase):boolean {
+  const live=db.getRawState().preferences.get('hisab-live-sync-v1'),binding=db.getRawState().preferences.get('hisab-supabase-recovery-v1');
+  return !!live&&!!binding&&live.customerId===binding.customerId&&live.datasetId===binding.datasetId&&/^[1-9][0-9]*$/.test(live.revision);
+}
 export async function repaySavingsLoan(db: LocalDatabase, loanId: string, requestId: string, amountMinor?: string, now = new Date(), automatic = false): Promise<string> {
   identifier(requestId);
   await db.beginTransaction();
@@ -285,7 +289,8 @@ export async function repaySavingsLoan(db: LocalDatabase, loanId: string, reques
     if (!row) return fail('LOAN_NOT_FOUND');
     const t = row.issue.terms;
     ownWorkspace(db, t.sourceWorkspaceId); ownWorkspace(db, t.borrowerWorkspaceId);
-    if (row.issue.executorDeviceId !== db.getDeviceId()) return fail('LOAN_EXECUTOR_REQUIRED');
+    const linkedManual=!automatic&&canRepayFromLinkedDevice(db);
+    if (row.issue.executorDeviceId !== db.getDeviceId()&&!linkedManual) return fail('LOAN_EXECUTOR_REQUIRED');
     const existing = row.payments.find(p => p.id === requestId);
     if (existing) {
       if (amountMinor !== undefined && amountMinor !== existing.amountMinor) return fail('LOAN_PAYMENT_CONFLICT');
@@ -313,7 +318,7 @@ export async function repaySavingsLoan(db: LocalDatabase, loanId: string, reques
     const payment: SavingsLoanPayment = { id: requestId, loanId, effectiveDate: day, amountMinor: amount.toString() };
     const balance = projectSavingsLoan(t, [...row.payments, payment], day);
     const paid = balance.payments.find(p => p.id === requestId)!;
-    const repayment: Repay = { version: 1, action: 'repay', loanId, payment, principalMinor: paid.principalMinor, interestMinor: paid.interestMinor };
+    const repayment: Repay = { version: row.issue.executorDeviceId !== db.getDeviceId()?2:1, action: 'repay', loanId, payment, principalMinor: paid.principalMinor, interestMinor: paid.interestMinor };
     if (BigInt(paid.interestMinor) > 0n) for (const [workspaceId, kind] of [[t.sourceWorkspaceId, 'income'], [t.borrowerWorkspaceId, 'expense']] as const) {
       const id = categoryId(workspaceId, kind), existingCategory = db.getRawState().categories.get(id);
       if (existingCategory && (existingCategory.workspaceId !== workspaceId || existingCategory.kind !== kind)) return fail('LOAN_LEDGER_CONFLICT');

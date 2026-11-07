@@ -116,7 +116,8 @@ export const AccountsTab: React.FC<{onOpenAllWallets:()=>void}> = ({onOpenAllWal
     finally { setAccountBusy(false); }
   };
 
-  const handleCreateAccountSubmit = (e: React.FormEvent) => {
+  const handleCreateAccountSubmit = async (e: React.FormEvent) => {
+    try {
     e.preventDefault();
     if (!newAccName.trim()) return;
 
@@ -129,7 +130,7 @@ export const AccountsTab: React.FC<{onOpenAllWallets:()=>void}> = ({onOpenAllWal
       }
     }
 
-    createAccount(
+    await createAccount(
       newAccName.trim(),
       newAccKind,
       openingMinor,
@@ -143,13 +144,15 @@ export const AccountsTab: React.FC<{onOpenAllWallets:()=>void}> = ({onOpenAllWal
     setNewAccAccountNumber('');
     setNewAccGroupId('');
     setShowAddAccountModal(false);
+    } catch { setAccountError(isEn?'Changes could not be saved. Retry.':'পরিবর্তন সংরক্ষণ হয়নি। আবার চেষ্টা করুন।'); }
   };
 
-  const handleSaveEditAccount = (e: React.FormEvent) => {
+  const handleSaveEditAccount = async (e: React.FormEvent) => {
+    try {
     e.preventDefault();
     if (!editingAccount || !editName.trim()) return;
 
-    updateAccount(editingAccount.id, {
+    await updateAccount(editingAccount.id, {
       name: editName.trim(),
       kind: editKind,
       accountNumberMasked: editAccountNumber.trim(),
@@ -157,13 +160,15 @@ export const AccountsTab: React.FC<{onOpenAllWallets:()=>void}> = ({onOpenAllWal
     });
 
     setEditingAccount(null);
+    } catch { setAccountError(isEn?'Changes could not be saved. Retry.':'পরিবর্তন সংরক্ষণ হয়নি। আবার চেষ্টা করুন।'); }
   };
 
-  const handleExecuteDeleteAccount = (e: React.FormEvent) => {
+  const handleExecuteDeleteAccount = async (e: React.FormEvent) => {
+    try {
     e.preventDefault();
     if (!deletingAccount || deleteConfirmationInput !== DELETE_CONFIRMATION) return;
 
-    const res = safeDeleteAccount(deletingAccount.id, deleteConfirmationInput);
+    const res = await safeDeleteAccount(deletingAccount.id, deleteConfirmationInput);
     if (res.success) {
       const msg =
         res.mode === 'archived'
@@ -182,25 +187,28 @@ export const AccountsTab: React.FC<{onOpenAllWallets:()=>void}> = ({onOpenAllWal
     } else {
       setDeleteFeedback(res.error || 'Failed to delete');
     }
+    } catch { setAccountError(isEn?'Changes could not be saved. Retry.':'পরিবর্তন সংরক্ষণ হয়নি। আবার চেষ্টা করুন।'); }
   };
 
-  const handleCreateOrUpdateGroup = (e: React.FormEvent) => {
+  const handleCreateOrUpdateGroup = async (e: React.FormEvent) => {
+    try {
     e.preventDefault();
     if (!groupName.trim()) return;
 
     if (editingGroup) {
-      updateAccountGroup(editingGroup.id, {
+      await updateAccountGroup(editingGroup.id, {
         name: groupName.trim(),
         description: groupDescription.trim() || undefined,
       });
       setEditingGroup(null);
     } else {
-      createAccountGroup(groupName.trim(), undefined, groupDescription.trim() || undefined);
+      await createAccountGroup(groupName.trim(), undefined, groupDescription.trim() || undefined);
       setShowAddGroupModal(false);
     }
 
     setGroupName('');
     setGroupDescription('');
+    } catch { setAccountError(isEn?'Changes could not be saved. Retry.':'পরিবর্তন সংরক্ষণ হয়নি। আবার চেষ্টা করুন।'); }
   };
 
   const getAccountIcon = (k: AccountKind) => {
@@ -592,7 +600,7 @@ export const AccountsTab: React.FC<{onOpenAllWallets:()=>void}> = ({onOpenAllWal
                           </button>
                           <button
                             type="button"
-                            onClick={() => archiveAccountGroup(group.id)}
+                            onClick={() => void archiveAccountGroup(group.id).catch(()=>setAccountError(isEn?'Changes could not be saved. Retry.':'পরিবর্তন সংরক্ষণ হয়নি। আবার চেষ্টা করুন।'))}
                             className="p-1.5 text-slate-500 hover:text-slate-800 hover:bg-slate-100 rounded-lg transition-colors min-h-[36px]"
                             title={isEn ? 'Archive Group' : 'গ্রুপ আর্কাইভ'}
                           >
@@ -633,7 +641,7 @@ export const AccountsTab: React.FC<{onOpenAllWallets:()=>void}> = ({onOpenAllWal
                               </div>
                               <button
                                 type="button"
-                                onClick={() => removeAccountFromGroup(acc.id)}
+                                onClick={() => void removeAccountFromGroup(acc.id).catch(()=>setAccountError(isEn?'Changes could not be saved. Retry.':'পরিবর্তন সংরক্ষণ হয়নি। আবার চেষ্টা করুন।'))}
                                 className="text-rose-600 hover:underline text-[11px] font-semibold px-2 py-1"
                               >
                                 {isEn ? 'Remove from Group' : 'গ্রুপ থেকে বাদ দিন'}

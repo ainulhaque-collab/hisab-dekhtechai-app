@@ -30,6 +30,7 @@ import { hasAccountCallback } from './auth/cloud/callbackLocation';
 import { offerFirstRunWelcome, rememberWelcomeSeen } from './appearance/welcome';
 import { mobileUiEnabled } from './appearance/mobileAppearance';
 import {useAutomaticRecovery} from './sync/recovery/runtime';
+import {useAutomaticLive} from './sync/live/runtime';
 const MobileWelcome=lazy(()=>import('./components/MobileWelcome'));
 const accountAuthEnabled=import.meta.env.VITE_SUPABASE_AUTH_ENABLED==='true';
 const AllWalletsPage=lazy(()=>import('./components/AllWalletsPage'));
@@ -86,8 +87,9 @@ class ErrorBoundary extends React.Component<ErrorBoundaryProps, ErrorBoundarySta
 }
 
 function MainApp() {
-  const { currentWorkspace, language, auth, signOut, db } = useApp();
+  const { currentWorkspace, language, auth, signOut, db,refreshState } = useApp();
   useAutomaticRecovery(db);
+  useAutomaticLive(db,refreshState);
   const [showWelcome,setShowWelcome]=useState(()=>!hasAccountCallback()&&offerFirstRunWelcome(db));
   useEffect(()=>{if(mobileUiEnabled)document.documentElement.lang=language;},[language]);
   const legacySignOut=useRef(signOut);

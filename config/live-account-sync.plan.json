@@ -1,0 +1,14 @@
+{
+  "projectId": "sfzitbasxrpmtmldujbm",
+  "scope": "Hisab owner Android live-sync candidate; reusable transport for later Web",
+  "privateTables": ["hisab_recovery.live_heads", "hisab_recovery.live_documents"],
+  "authenticatedRpc": ["public.hisab_live_head", "public.hisab_live_get", "public.hisab_live_put"],
+  "authorization": "Verified Supabase customer UUID; owner RLS and FORCE RLS; no anonymous RPC access",
+  "realtimePublicationAddition": "supabase_realtime: only hisab_recovery.live_heads (revision metadata, no ledger payload)",
+  "preserved": ["existing recovery snapshots", "all other application objects", "Auth configuration and callbacks", "local device identity and ledger namespace"],
+  "paidPlan": false,
+  "productionWebsiteChange": false,
+  "clientActivation": "Signed owner APK only after hosted isolation and retention checks",
+  "secondPhysicalPhoneAcceptance": "Owner has no second phone now; remains pending",
+  "limits": "Foreground online updates; conflicts preserve both sides and pause sync; no silent last-writer-wins"
+}

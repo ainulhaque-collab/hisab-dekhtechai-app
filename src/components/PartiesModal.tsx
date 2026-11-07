@@ -105,7 +105,8 @@ export const PartiesModal: React.FC<PartiesModalProps> = ({ isOpen, onClose }) =
     setIsAdding(true);
   };
 
-  const handleSave = (e: React.FormEvent) => {
+  const handleSave = async (e: React.FormEvent) => {
+    try {
     e.preventDefault();
     if (!name.trim()) {
       setError(isEn ? 'Name is required' : 'নাম লেখা আবশ্যক');
@@ -113,27 +114,30 @@ export const PartiesModal: React.FC<PartiesModalProps> = ({ isOpen, onClose }) =
     }
 
     if (editingPartyId) {
-      editParty(editingPartyId, {
+      await editParty(editingPartyId, {
         name: name.trim(),
         role,
         phone: phone.trim(),
         notes: notes.trim(),
       });
     } else {
-      createParty(name.trim(), role, phone.trim(), notes.trim());
+      await createParty(name.trim(), role, phone.trim(), notes.trim());
     }
 
     setIsAdding(false);
     setEditingPartyId(null);
+    } catch { setError(isEn?'Changes could not be saved. Retry.':'পরিবর্তন সংরক্ষণ হয়নি। আবার চেষ্টা করুন।'); }
   };
 
-  const handleDelete = (id: string, partyName: string) => {
+  const handleDelete = async (id: string, partyName: string) => {
+    try {
     const confirmMsg = isEn
       ? `Remove "${partyName}" from this ledger?`
       : `আপনি কি "${partyName}"-কে এই খাতা থেকে বাদ দিতে চান?`;
     if (window.confirm(confirmMsg)) {
-      deleteParty(id);
+      await deleteParty(id);
     }
+    } catch { setError(isEn?'Changes could not be saved. Retry.':'পরিবর্তন সংরক্ষণ হয়নি। আবার চেষ্টা করুন।'); }
   };
 
   return (

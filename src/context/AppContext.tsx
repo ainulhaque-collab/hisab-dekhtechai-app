@@ -75,30 +75,30 @@ interface AppContextType {
   refreshState: () => void;
   triggerManualSync: () => Promise<void>;
   createWorkspace: (name: string, kind: 'personal' | 'business', description?: string) => Promise<Workspace>;
-  archiveWorkspace: (id: UUID) => boolean;
-  restoreWorkspace: (id: UUID) => boolean;
+  archiveWorkspace: (id: UUID) => Promise<boolean>;
+  restoreWorkspace: (id: UUID) => Promise<boolean>;
   durabilityInfo: { type: string; isPersistent: boolean; warning?: string };
-  createCategory: (name: string, kind: Category['kind'], parentId?: UUID | null, nameEn?: string) => Category;
-  deleteCategory: (id: UUID) => void;
-  createAccount: (name: string, kind: Account['kind'], openingBalanceMinor?: string, accountNumberMasked?: string, classification?: Account['classification'], groupId?: UUID | null) => Account;
-  updateAccount: (id: UUID, updates: Partial<Pick<Account, 'name' | 'accountNumberMasked' | 'kind' | 'groupId'>>) => Account | null;
-  archiveAccount: (id: UUID) => boolean;
-  restoreAccount: (id: UUID) => boolean;
-  safeDeleteAccount: (id: UUID, confirmationText: string) => { success: boolean; mode: 'archived' | 'deleted'; error?: string };
-  createAccountGroup: (name: string, icon?: string, description?: string) => AccountGroup;
-  updateAccountGroup: (id: UUID, updates: Partial<Pick<AccountGroup, 'name' | 'icon' | 'description'>>) => AccountGroup | null;
-  archiveAccountGroup: (id: UUID) => boolean;
-  restoreAccountGroup: (id: UUID) => boolean;
-  addAccountToGroup: (accountId: UUID, groupId: UUID) => boolean;
-  removeAccountFromGroup: (accountId: UUID) => boolean;
+  createCategory: (name: string, kind: Category['kind'], parentId?: UUID | null, nameEn?: string) => Promise<Category>;
+  deleteCategory: (id: UUID) => Promise<void>;
+  createAccount: (name: string, kind: Account['kind'], openingBalanceMinor?: string, accountNumberMasked?: string, classification?: Account['classification'], groupId?: UUID | null) => Promise<Account>;
+  updateAccount: (id: UUID, updates: Partial<Pick<Account, 'name' | 'accountNumberMasked' | 'kind' | 'groupId'>>) => Promise<Account | null>;
+  archiveAccount: (id: UUID) => Promise<boolean>;
+  restoreAccount: (id: UUID) => Promise<boolean>;
+  safeDeleteAccount: (id: UUID, confirmationText: string) => Promise<{ success: boolean; mode: 'archived' | 'deleted'; error?: string }>;
+  createAccountGroup: (name: string, icon?: string, description?: string) => Promise<AccountGroup>;
+  updateAccountGroup: (id: UUID, updates: Partial<Pick<AccountGroup, 'name' | 'icon' | 'description'>>) => Promise<AccountGroup | null>;
+  archiveAccountGroup: (id: UUID) => Promise<boolean>;
+  restoreAccountGroup: (id: UUID) => Promise<boolean>;
+  addAccountToGroup: (accountId: UUID, groupId: UUID) => Promise<boolean>;
+  removeAccountFromGroup: (accountId: UUID) => Promise<boolean>;
   getAccountGroupSummary: (groupId: UUID) => AccountGroupSummary | null;
-  grantAccountPermission: (employeeEmail: string, employeeSubjectHash: string, accountIds: UUID[], role: EmployeeRole) => AccountPermissionGrant;
-  revokeAccountPermission: (grantId: UUID) => boolean;
+  grantAccountPermission: (employeeEmail: string, employeeSubjectHash: string, accountIds: UUID[], role: EmployeeRole) => Promise<AccountPermissionGrant>;
+  revokeAccountPermission: (grantId: UUID) => Promise<boolean>;
   soundPrefs: SoundPreferences;
   setSoundPrefs: (prefs: Partial<SoundPreferences>) => void;
-  createParty: (name: string, role: PartyRole, phone?: string, notes?: string) => BusinessParty;
-  deleteParty: (id: UUID) => void;
-  editParty: (id: UUID, updates: Partial<Pick<BusinessParty, 'name' | 'phone' | 'role' | 'notes'>>) => void;
+  createParty: (name: string, role: PartyRole, phone?: string, notes?: string) => Promise<BusinessParty>;
+  deleteParty: (id: UUID) => Promise<void>;
+  editParty: (id: UUID, updates: Partial<Pick<BusinessParty, 'name' | 'phone' | 'role' | 'notes'>>) => Promise<void>;
   deleteTransaction: (id: UUID, reason?: string) => Promise<void>;
   editTransaction: (id: UUID, cmd: any) => Promise<void>;
   signInWithGoogle: () => Promise<GoogleUserProfile>;
@@ -442,163 +442,32 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     catch (error) { await db.rollbackTransaction(); throw error; }
   };
 
-  const archiveWorkspace = (id: UUID) => {
-    const res = db.archiveWorkspace(id);
-    refreshState();
-    return res;
+  const mutate = async <T,>(work:()=>T):Promise<T> => {
+    await db.beginTransaction();
+    try {const value=work();await db.commitTransaction();refreshState();return value;}
+    catch(error){await db.rollbackTransaction();refreshState();throw error;}
   };
-
-  const restoreWorkspace = (id: UUID) => {
-    const res = db.restoreWorkspace(id);
-    refreshState();
-    return res;
-  };
-
-  const createCategory = (
-    name: string,
-    kind: Category['kind'],
-    parentId?: UUID | null,
-    nameEn?: string
-  ) => {
-    const cat = db.createCategory(currentWorkspaceId, name, kind, parentId, nameEn);
-    refreshState();
-    return cat;
-  };
-
-  const deleteCategory = (id: UUID) => {
-    db.deleteCategory(id);
-    refreshState();
-  };
-
-  const createParty = (name: string, role: PartyRole, phone?: string, notes?: string) => {
-    const p = db.createParty(currentWorkspaceId, name, role, phone, notes);
-    refreshState();
-    return p;
-  };
-
-  const deleteParty = (id: UUID) => {
-    db.deleteParty(id);
-    refreshState();
-  };
-
-  const editParty = (id: UUID, updates: Partial<Pick<BusinessParty, 'name' | 'phone' | 'role' | 'notes'>>) => {
-    db.editParty(id, updates);
-    refreshState();
-  };
-
-  const createAccount = (
-    name: string,
-    kind: Account['kind'],
-    openingBalanceMinor = '0',
-    accountNumberMasked = '',
-    classification: Account['classification'] = 'asset',
-    groupId?: UUID | null
-  ) => {
-    const acc = db.createAccount(
-      currentWorkspaceId,
-      name,
-      kind,
-      openingBalanceMinor,
-      accountNumberMasked,
-      classification,
-      groupId || null
-    );
-    refreshState();
-    return acc;
-  };
-
-  const updateAccount = (
-    id: UUID,
-    updates: Partial<Pick<Account, 'name' | 'accountNumberMasked' | 'kind' | 'groupId'>>
-  ) => {
-    const res = db.updateAccount(id, updates);
-    refreshState();
-    return res;
-  };
-
-  const archiveAccount = (id: UUID) => {
-    const res = db.archiveAccount(id);
-    refreshState();
-    return res;
-  };
-
-  const restoreAccount = (id: UUID) => {
-    const res = db.restoreAccount(id);
-    refreshState();
-    return res;
-  };
-
-  const safeDeleteAccount = (id: UUID, confirmationText: string) => {
-    const res = db.safeDeleteAccount(id, confirmationText);
-    refreshState();
-    return res;
-  };
-
-  const createAccountGroup = (name: string, icon?: string, description?: string) => {
-    const group = db.createAccountGroup(currentWorkspaceId, name, icon, description);
-    refreshState();
-    return group;
-  };
-
-  const updateAccountGroup = (
-    id: UUID,
-    updates: Partial<Pick<AccountGroup, 'name' | 'icon' | 'description'>>
-  ) => {
-    const res = db.updateAccountGroup(id, updates);
-    refreshState();
-    return res;
-  };
-
-  const archiveAccountGroup = (id: UUID) => {
-    const res = db.archiveAccountGroup(id);
-    refreshState();
-    return res;
-  };
-
-  const restoreAccountGroup = (id: UUID) => {
-    const res = db.restoreAccountGroup(id);
-    refreshState();
-    return res;
-  };
-
-  const addAccountToGroup = (accountId: UUID, groupId: UUID) => {
-    const res = db.addAccountToGroup(accountId, groupId);
-    refreshState();
-    return res;
-  };
-
-  const removeAccountFromGroup = (accountId: UUID) => {
-    const res = db.removeAccountFromGroup(accountId);
-    refreshState();
-    return res;
-  };
-
-  const getAccountGroupSummary = (groupId: UUID) => {
-    return db.getAccountGroupSummary(groupId);
-  };
-
-  const grantAccountPermission = (
-    employeeEmail: string,
-    employeeSubjectHash: string,
-    accountIds: UUID[],
-    role: EmployeeRole
-  ) => {
-    const grant = db.grantAccountPermission(
-      currentWorkspaceId,
-      employeeEmail,
-      employeeSubjectHash,
-      accountIds,
-      role
-    );
-    refreshState();
-    return grant;
-  };
-
-  const revokeAccountPermission = (grantId: UUID) => {
-    const res = db.revokeAccountPermission(grantId);
-    refreshState();
-    return res;
-  };
+  const archiveWorkspace=(id:UUID)=>mutate(()=>db.archiveWorkspace(id));
+  const restoreWorkspace=(id:UUID)=>mutate(()=>db.restoreWorkspace(id));
+  const createCategory=(name:string,kind:Category['kind'],parentId?:UUID|null,nameEn?:string)=>mutate(()=>db.createCategory(currentWorkspaceId,name,kind,parentId,nameEn));
+  const deleteCategory=(id:UUID)=>mutate(()=>{db.deleteCategory(id);});
+  const createParty=(name:string,role:PartyRole,phone?:string,notes?:string)=>mutate(()=>db.createParty(currentWorkspaceId,name,role,phone,notes));
+  const deleteParty=(id:UUID)=>mutate(()=>{db.deleteParty(id);});
+  const editParty=(id:UUID,updates:Partial<Pick<BusinessParty,'name'|'phone'|'role'|'notes'>>)=>mutate(()=>{db.editParty(id,updates);});
+  const createAccount=(name:string,kind:Account['kind'],openingBalanceMinor='0',accountNumberMasked='',classification:Account['classification']='asset',groupId?:UUID|null)=>mutate(()=>db.createAccount(currentWorkspaceId,name,kind,openingBalanceMinor,accountNumberMasked,classification,groupId||null));
+  const updateAccount=(id:UUID,updates:Partial<Pick<Account,'name'|'accountNumberMasked'|'kind'|'groupId'>>)=>mutate(()=>db.updateAccount(id,updates));
+  const archiveAccount=(id:UUID)=>mutate(()=>db.archiveAccount(id));
+  const restoreAccount=(id:UUID)=>mutate(()=>db.restoreAccount(id));
+  const safeDeleteAccount=(id:UUID,confirmationText:string)=>mutate(()=>db.safeDeleteAccount(id,confirmationText));
+  const createAccountGroup=(name:string,icon?:string,description?:string)=>mutate(()=>db.createAccountGroup(currentWorkspaceId,name,icon,description));
+  const updateAccountGroup=(id:UUID,updates:Partial<Pick<AccountGroup,'name'|'icon'|'description'>>)=>mutate(()=>db.updateAccountGroup(id,updates));
+  const archiveAccountGroup=(id:UUID)=>mutate(()=>db.archiveAccountGroup(id));
+  const restoreAccountGroup=(id:UUID)=>mutate(()=>db.restoreAccountGroup(id));
+  const addAccountToGroup=(accountId:UUID,groupId:UUID)=>mutate(()=>db.addAccountToGroup(accountId,groupId));
+  const removeAccountFromGroup=(accountId:UUID)=>mutate(()=>db.removeAccountFromGroup(accountId));
+  const getAccountGroupSummary=(groupId:UUID)=>db.getAccountGroupSummary(groupId);
+  const grantAccountPermission=(employeeEmail:string,employeeSubjectHash:string,accountIds:UUID[],role:EmployeeRole)=>mutate(()=>db.grantAccountPermission(currentWorkspaceId,employeeEmail,employeeSubjectHash,accountIds,role));
+  const revokeAccountPermission=(grantId:UUID)=>mutate(()=>db.revokeAccountPermission(grantId));
 
   const deleteTransaction = async (id: UUID, reason?: string) => {
     await db.deleteTransaction(id, reason);

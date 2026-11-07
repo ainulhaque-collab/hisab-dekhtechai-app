@@ -4,6 +4,7 @@
  * durable outbox, deduplication, and crash-resilient snapshots.
  */
 
+import {liveCore,mergeLive,recoveryData,LIVE_KEY,type LiveCore,type LiveCheckpoint,type BaseHashes} from '../sync/live/state';
 import {
   UUID,
   Workspace,
@@ -107,9 +108,11 @@ export class LocalDatabase {
   private state: DatabaseState;
   private storageKey: string;
   private inTransaction = false;
+  private backgroundWrite:Promise<void>|null=null;
   private snapshotBeforeTx: string | null = null;
   private driver: DurableStorageDriver | null = null;
   private changeListeners = new Set<() => void>();
+  private durableChangeListeners = new Set<() => void>();
   private journalListeners = new Set<(operationId: string) => void>();
   private notifiedPending = new Set<string>();
 
@@ -117,6 +120,7 @@ export class LocalDatabase {
     this.changeListeners.add(listener);
     return () => { this.changeListeners.delete(listener); };
   }
+  public subscribeToDurableChanges(listener:()=>void):()=>void {this.durableChangeListeners.add(listener);return()=>{this.durableChangeListeners.delete(listener);};}
 
   /** Optional side effects for newly committed local journals only. */
   public subscribeToCommittedJournals(listener: (operationId: string) => void): () => void {
@@ -127,6 +131,7 @@ export class LocalDatabase {
   public isTransactionInProgress(): boolean { return this.inTransaction; }
 
   private notifyCommittedChanges(ids = this.getPendingOutbox().map(op => op.operationId)): void {
+    for(const listener of this.durableChangeListeners){try{listener();}catch{/* Notification cannot undo committed records. */}}
     const changed = ids.some(id => !this.notifiedPending.has(id));
     this.notifiedPending = new Set(ids);
     if (changed) for (const listener of this.changeListeners) {
@@ -460,11 +465,13 @@ export class LocalDatabase {
 
   // --- Atomic Database Transactions ---
 
-  public async beginTransaction(): Promise<void> {
+  public async beginTransaction(background = false): Promise<void> {
+    if(!background&&this.backgroundWrite)await this.backgroundWrite;
     // The native connection must finish opening before taking the transaction lock.
     await this.init();
     // Strictly wait for all in-flight writes in the durability queue to settle before beginning transaction
     await this.writeQueuePromise.catch(() => {});
+    if(!background&&this.backgroundWrite)await this.backgroundWrite;
     if (this.inTransaction) {
       throw new Error('Transaction already in progress.');
     }
@@ -2010,6 +2017,36 @@ export class LocalDatabase {
 
   public async importBackupFile(text: string): Promise<void> {
     await this.restoreBackupData(await decodeBackup(text));
+  }
+
+  /** Local atomic merge + verified revision checkpoint; user Save waits only for
+   * this disk transaction, never for network. No call performs remote requests. */
+  public async applyLiveState(remote:LiveCore,expected:BaseHashes,checkpoint:LiveCheckpoint,binding:{customerId:string;datasetId:string;deviceId:string},active:()=>void,fresh=false):Promise<void>{
+    await this.waitForPendingWrites();active();
+    if(this.inTransaction||this.backgroundWrite)throw Error('LIVE_STORAGE_BUSY');
+    let release!:()=>void;this.backgroundWrite=new Promise<void>(resolve=>release=resolve);
+    let began=false;
+    try{
+      await this.beginTransaction(true);began=true;active();const current=this.toSerializable();
+      const old=current.preferences.find(([key]:[string,unknown])=>key==='hisab-supabase-recovery-v1')?.[1];
+      if(old&&(old.customerId!==binding.customerId||old.datasetId!==binding.datasetId))throw Error('LIVE_OTHER_DATASET');
+      if(fresh&&!this.hasOnlyUntouchedStarters())throw Error('LIVE_NOT_EMPTY');
+      const merged=fresh?remote:mergeLive(expected,liveCore(current),remote);
+      const next:Record<string,any>={...current,...merged,deviceIdentity:current.deviceIdentity};
+      for(const [,op] of merged.syncOperations)if(op.deviceId===next.deviceIdentity.deviceId){const counter=Math.max(next.deviceIdentity.counter,op.seq+1);if(!Number.isSafeInteger(counter))throw Error('LIVE_SEQUENCE');next.deviceIdentity={...next.deviceIdentity,counter};}
+      // Run the shared complete ledger/goal/loan/wallet validator before hydration.
+      mergeBackup({...recoveryData(merged,current.deviceIdentity)},recoveryData(merged,current.deviceIdentity));
+      next.preferences=current.preferences.filter(([key]:[string,unknown])=>key!==LIVE_KEY&&key!=='hisab-supabase-recovery-v1');
+      next.preferences.push([LIVE_KEY,checkpoint],['hisab-supabase-recovery-v1',old||binding]);
+      const accepted=new Map(remote.syncOperations);
+      next.syncOutbox=current.syncOutbox.filter(([id]:[string,unknown])=>!fresh||accepted.has(id)).map(([id,entry]:[string,any])=>{
+        const op=accepted.get(id),local=new Map(merged.syncOperations).get(id);
+        return[id,op&&local&&canonicalJson(op)===canonicalJson(local)?{...entry,uploadedStatus:'uploaded',remoteFileId:`supabase-live:${binding.datasetId}:${checkpoint.revision}`,lastError:null}:entry];
+      });
+      next.appliedOperations=[...new Set([...(fresh?[]:current.appliedOperations),...remote.syncOperations.map(([id])=>id)])];
+      active();await this.loadFromSerializable(next);active();await this.commitTransaction();began=false;
+    }catch(error){if(began)await this.rollbackTransaction();throw error;}
+    finally{this.backgroundWrite=null;release();}
   }
 
   /** Explicit recovery on a genuinely untouched installation. The verified cloud

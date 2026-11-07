@@ -4,7 +4,7 @@ import { useApp } from '../context/AppContext';
 import { formatBDT, parsePaisaString } from '../domain/money';
 import { generateUUID } from '../domain/journal';
 import type { NewSavingsLoan, SavingsLoanRow } from '../storage/loanBook';
-import { loanToday } from '../storage/loanBook';
+import { loanToday,canRepayFromLinkedDevice } from '../storage/loanBook';
 import { AppDateInput } from './AppDateInput';
 import { AppSelect } from './AppSelect';
 import { fieldClass, ModalShell, primaryButton, secondaryButton } from './ModalShell';
@@ -111,6 +111,7 @@ export function SavingsLoansModal({ onClose, initialGoalId }: { onClose: () => v
       {rows.map(row => {
         const t = row.issue.terms, b = row.balance;
         const onExecutor = row.issue.executorDeviceId === db.getDeviceId();
+        const canRepay=onExecutor||canRepayFromLinkedDevice(db);
         return <section key={t.id} className="space-y-3 rounded-2xl border border-slate-200 p-4">
           <div className="flex justify-between gap-3"><h3 className="text-sm font-bold break-words">{row.issue.purpose}</h3><span className="text-xs font-semibold text-slate-500">{b.status === 'paid' ? en ? 'Paid' : 'পরিশোধিত' : b.status === 'overdue' ? en ? 'Overdue' : 'মেয়াদ পেরিয়েছে' : en ? 'Open' : 'চলমান'}</span></div>
           <p className="text-xs text-slate-500">{db.getWorkspace(t.sourceWorkspaceId)?.name} → {db.getWorkspace(t.borrowerWorkspaceId)?.name}</p>
@@ -119,8 +120,8 @@ export function SavingsLoansModal({ onClose, initialGoalId }: { onClose: () => v
           <p className="text-xs text-slate-500">{en ? 'Automatic repayment' : 'অটো পরিশোধ'}: {!automaticRepaymentAvailable ? (en ? 'Unavailable in this version' : 'এই সংস্করণে চালু নেই') : row.autoRepayEnabled ? en ? 'Enabled on original device after sync' : 'তৈরির ডিভাইসে সিঙ্কের পরে চালু' : en ? 'Off' : 'বন্ধ'}</p>
           {b.status !== 'paid' && (automaticRepaymentAvailable || row.autoRepayEnabled) && <button type="button" className={secondaryButton} disabled={disabled || (!row.autoRepayEnabled && !onExecutor)} onClick={() => void commit(() => db.setLoanAutoRepayment(t.id, !row.autoRepayEnabled), () => {})}>{row.autoRepayEnabled ? en ? 'Turn off automatic repayment' : 'অটো পরিশোধ বন্ধ করুন' : en ? 'Enable automatic repayment' : 'অটো পরিশোধ চালু করুন'}</button>}
           {row.pendingReferences > 0 && <p role="status" className="text-xs text-amber-900">{loanError(new Error('LOAN_SYNC_INCOMPLETE'), en)}</p>}
-          {!onExecutor && b.status !== 'paid' && <p className="text-xs text-slate-500">{loanError(new Error('LOAN_EXECUTOR_REQUIRED'), en)}</p>}
-          {b.status !== 'paid' && <button type="button" className={primaryButton} disabled={disabled || !onExecutor || row.pendingReferences > 0} onClick={() => { setDraft(null); setError(''); setNotice(''); setRepay({ loanId: t.id, requestId: generateUUID(), amount: '' }); }}><ArrowDownLeft className="h-4 w-4" />{en ? 'Repay' : 'পরিশোধ করুন'}</button>}
+          {!canRepay && b.status !== 'paid' && <p className="text-xs text-slate-500">{loanError(new Error('LOAN_EXECUTOR_REQUIRED'), en)}</p>}
+          {b.status !== 'paid' && <button type="button" className={primaryButton} disabled={disabled || !canRepay || row.pendingReferences > 0} onClick={() => { setDraft(null); setError(''); setNotice(''); setRepay({ loanId: t.id, requestId: generateUUID(), amount: '' }); }}><ArrowDownLeft className="h-4 w-4" />{en ? 'Repay' : 'পরিশোধ করুন'}</button>}
           {repay?.loanId === t.id && <form className="space-y-3 rounded-xl bg-slate-50 p-3" onSubmit={event => { event.preventDefault(); const value = repay; void commit(() => db.repaySavingsLoan(value.loanId, value.requestId, value.amount.trim() ? parsePaisaString(value.amount).toString() : undefined), () => setRepay(null)); }}>
             <p className="text-xs leading-relaxed text-slate-600">{en ? 'Pay from the selected receiving wallet. Leave blank to repay as much spendable money as possible, up to the debt. Other savings stay protected.' : 'ঋণ গ্রহণের নির্বাচিত ওয়ালেট থেকে পরিশোধ হবে। খালি রাখলে বকেয়ার সীমার মধ্যে যত খরচযোগ্য টাকা আছে তত পরিশোধ হবে। অন্য সঞ্চয় অক্ষত থাকবে।'}</p>
             <label className="block text-xs font-medium">{en ? 'Amount · optional' : 'পরিমাণ · ঐচ্ছিক'}<input inputMode="decimal" className={fieldClass} disabled={disabled} value={repay.amount} onChange={e => setRepay({ ...repay, amount: e.target.value })} /></label>
