@@ -73,3 +73,43 @@ file backup before any owner acceptance step.
 Official references: [Auth getUser](https://supabase.com/docs/reference/javascript/auth-getuser),
 [RLS](https://supabase.com/docs/guides/database/postgres/row-level-security),
 [database functions](https://supabase.com/docs/guides/database/functions).
+
+## Observed delivery — 7 November 2026
+
+- Source `b254345f186cc201b7b88e4c79764dc6ef22b201`: lint, bundle and
+  419 app tests (418 pass, one existing native-only skip, zero failures).
+  [CI 114](https://github.com/ainulhaque-collab/hisab-dekhtechai-app/actions/runs/42342742700)
+  and [Android 126](https://github.com/ainulhaque-collab/hisab-dekhtechai-app/actions/runs/42342742722)
+  passed. Six focused recovery/SQL tests include a save during upload.
+- After the owner explicitly approved this exact project/scope, the migration
+  connector twice returned an expired confirmation. The identical reviewed SQL
+  was applied through the owner's authenticated Supabase SQL editor in one
+  transaction, recording migration `20261107051223_hisab_recovery_snapshots`.
+  No extra exposed-schema configuration, credential, paid resource or protection
+  change was used. Migration history stores the reviewed SQL.
+- Hosted rollback-only synthetic proof: own copy readback, duplicate idempotence,
+  foreign-owner rejection, anonymous denial and FORCE RLS passed. Synthetic rows
+  were rolled back. The pre-existing foreign table/RLS catalog fingerprint stayed
+  identical. No `hisab_recovery` security advisory was reported; inherited
+  other-application findings are not declared resolved. Direct anonymous HTTP
+  returned 401.
+- Signed `1.0.29-rc9/code30`, schema6, 8,465,031 bytes, AI off and recovery on.
+  APK SHA-256 `789E774E20779B31600FC948276AC2E74D12BE9D1A3C1872BEFA6A0AD5B69AE6`.
+  Existing permanent certificate and package were retained.
+- Owner phone updated in place. Fresh before/after-install and normal-init
+  finance/identity/preferences/outbox fingerprints matched exactly; original
+  first-install metadata/data directory stayed unchanged. No uninstall or data
+  clear was performed.
+- On the real phone, a backup was enabled and uploaded under the connected
+  verified account. Home displayed **Cloud backup verified**. A separate hosted
+  aggregate check confirmed a real copy, exact file/data SHA-256 and saved
+  transaction history, without returning financial records to chat.
+- A force-stop/normal cold launch automatically produced another verified status
+  (observed on the phone at 11:41 Bangladesh time). No second enable was needed.
+  This does not claim a real-phone uninstall test or live multi-device merging;
+  fresh-install recovery is covered by the isolated import/restore tests.
+
+Private before/after probe output, build logs and phone screenshots remain only
+in ignored local QA storage. Owner financial records/screenshots were not uploaded
+to GitHub. The one intentional post-enable local change is the customer/dataset/
+backup-device binding preference; no financial entry was created for acceptance.
