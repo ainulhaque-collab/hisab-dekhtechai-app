@@ -6,6 +6,7 @@ param(
     [switch]$BridgeTestOnly,
     [switch]$ManagedAIAccess,
     [switch]$WithoutAI,
+    [switch]$CloudRecovery,
     [string]$AIServiceOrigin = $env:VITE_AI_API_BASE_URL,
     [string]$LocalResourcesRoot
 )
@@ -89,6 +90,7 @@ if (!$BridgeTestOnly) {
     # The owner can ship core finance without mounting AI controls or making
     # permission/provider requests. Web/Admin deployments are unaffected.
     $variables.VITE_AI_FEATURES_ENABLED = if ($WithoutAI) { 'false' } else { 'true' }
+    $variables.VITE_CLOUD_RECOVERY_ENABLED = if ($CloudRecovery) { 'true' } else { 'false' }
     $variables.VITE_AI_API_BASE_URL = $nativeAIOrigin
     if ($ManagedAIAccess) {
         Push-Location $workspaceRoot
@@ -136,7 +138,7 @@ try {
         Invoke-BuildStep 'npx.cmd' @('tsx', '--test', '--test-concurrency=1', 'src/test/*.test.ts')
     } else { Invoke-BuildStep 'npm.cmd' @('test') }
     Invoke-BuildStep 'npm.cmd' @('run', 'build')
-    $nativeFeatures = @{ aiEnabled = !$WithoutAI }
+    $nativeFeatures = @{ aiEnabled = !$WithoutAI; cloudRecoveryEnabled = [bool]$CloudRecovery }
     $nativeFeatures | ConvertTo-Json | Set-Content -LiteralPath (Join-Path $workspaceRoot 'dist/native-features.json') -Encoding UTF8
     $nativeAIInBuild = Get-ChildItem -LiteralPath (Join-Path $workspaceRoot 'dist/assets') -Filter '*.js' |
         Where-Object { [IO.File]::ReadAllText($_.FullName).Contains($nativeAIOrigin) }
@@ -175,6 +177,7 @@ try {
         try { $packagedFeatures = $featureReader.ReadToEnd() | ConvertFrom-Json }
         finally { $featureReader.Dispose() }
         if ($packagedFeatures.aiEnabled -ne (!$WithoutAI)) { throw 'Signed APK AI mode does not match the requested build.' }
+        if ($packagedFeatures.cloudRecoveryEnabled -ne [bool]$CloudRecovery) { throw 'Signed APK cloud recovery mode does not match the requested build.' }
         $nativeAIInApk = $false
         foreach ($entry in $nativeApk.Entries) {
             if ($entry.FullName -match '^assets/public/assets/[^/]+\.js$') {
