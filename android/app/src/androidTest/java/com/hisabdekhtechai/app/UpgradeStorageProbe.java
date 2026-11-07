@@ -36,6 +36,12 @@ public final class UpgradeStorageProbe {
         byte[] digest=MessageDigest.getInstance("SHA-256").digest(canonical(value).getBytes(StandardCharsets.UTF_8));
         StringBuilder out=new StringBuilder();for(byte b:digest)out.append(String.format(java.util.Locale.ROOT,"%02x",b&255));return out.toString();
     }
+    private static JSONArray sortedEntries(JSONArray entries) throws Exception {
+        ArrayList<String> rows=new ArrayList<>();
+        if(entries!=null)for(int i=0;i<entries.length();i++)rows.add(canonical(entries.get(i)));
+        Collections.sort(rows);JSONArray result=new JSONArray();
+        for(String row:rows)result.put(new JSONArray(row));return result;
+    }
     public static Bundle read(Context context) throws Exception {
         File source=context.getDatabasePath("hisab_dekhtechai_dbSQLite.db");
         if(!source.isFile())throw new Exception("UPGRADE_STORAGE_MISSING");
@@ -49,6 +55,10 @@ public final class UpgradeStorageProbe {
                 finance.put(key,entries);result.putInt(key+"_count",entries.length());
             }
             finance.put("localIdentity",snapshot.opt("localIdentity"));
+            JSONObject ledger=new JSONObject(finance.toString());ledger.remove("preferences");
+            for(String key:new String[]{"workspaces","accounts","accountGroups","accountPermissions","categories","parties","journalTransactions","journalLines","budgets","recurringRules","recurringOccurrences","receiptBlobs","syncOperations"})
+                ledger.put(key,sortedEntries(snapshot.optJSONArray(key)));
+            result.putString("ledger_sha256",hash(ledger));
             for(String key:new String[]{"syncOperations","syncOutbox","appliedOperations","conflicts"}){
                 JSONArray entries=snapshot.optJSONArray(key);if(entries==null)entries=new JSONArray();
                 outbox.put(key,entries);result.putInt(key+"_count",entries.length());

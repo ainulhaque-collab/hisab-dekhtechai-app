@@ -27,6 +27,8 @@ import {walletFeatureEnabled} from './walletText';
 import {personalWalletHome} from '../storage/walletBook';
 import {recoveryEnabled} from '../sync/recovery/runtime';
 import {CloudRecoveryStatus} from './CloudRecoveryStatus';
+import {liveSyncEnabled} from '../sync/live/runtime';
+import {LiveSyncPanel} from './LiveSyncPanel';
 
 interface DashboardTabProps {
   onNavigateToAdd: () => void;
@@ -97,7 +99,7 @@ export const DashboardTab: React.FC<DashboardTabProps> = ({
     <div className="space-y-4 pb-20 animate-in fade-in">
       {walletFeatureEnabled&&currentWorkspace?.id===personalWalletHome(db.getRawState().workspaces.values(),db.getIdentity()?.ownerSubjectHash||'local-owner')?.id&&<button type="button" onClick={onOpenAllWallets} className="flex min-h-14 w-full items-center gap-3 rounded-2xl border border-blue-100 bg-blue-50 p-4 text-left"><span className="flex h-10 w-10 items-center justify-center rounded-xl bg-white text-blue-700"><Banknote className="h-5 w-5"/></span><span className="min-w-0 flex-1"><strong className="block text-sm text-slate-900">{language==='en'?'All wallets':'সব ওয়ালেট'}</strong><span className="mt-1 block text-xs text-slate-600">{language==='en'?'See total cash and each workspace’s share':'মোট টাকা ও প্রতিটি খাতার বরাদ্দ দেখুন'}</span></span><ChevronRight className="h-4 w-4 text-blue-700"/></button>}
       {/* Offline or Pending Sync Notice */}
-      {recoveryEnabled&&<CloudRecoveryStatus/>}
+      {liveSyncEnabled?<LiveSyncPanel compact/>:recoveryEnabled&&<CloudRecoveryStatus/>}
       {!recoveryEnabled&&(!isOnline || syncStatus.pendingOutboxCount > 0 || syncStatus.state === 'conflict') && (
         <div
           onClick={onOpenSyncModal}

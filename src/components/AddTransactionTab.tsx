@@ -220,7 +220,8 @@ export const AddTransactionTab: React.FC<AddTransactionTabProps> = ({ onSuccess 
   };
 
   // Clean, single-field Category / Sub-Category creation
-  const handleCreateCategory = (e: React.FormEvent) => {
+  const handleCreateCategory = async (e: React.FormEvent) => {
+    try {
     e.preventDefault();
     const trimmed = singleCatName.trim();
     if (!trimmed) return;
@@ -230,30 +231,33 @@ export const AddTransactionTab: React.FC<AddTransactionTabProps> = ({ onSuccess 
     if (categoryModalMode === 'subcategory') {
       // Sub-category attaches automatically to the current parent category!
       const parentId = categoryId || availableParentCategories[0]?.id || null;
-      const newCat = createCategory(trimmed, kind, parentId);
+      const newCat = await createCategory(trimmed, kind, parentId);
       setSubCategoryId(newCat.id);
     } else {
       // Main Category: The category ITSELF is the top-level parent!
-      const newCat = createCategory(trimmed, kind, null);
+      const newCat = await createCategory(trimmed, kind, null);
       setCategoryId(newCat.id);
       setSubCategoryId('');
     }
 
     setSingleCatName('');
     setCategoryModalMode(null);
+    } catch {setErrorMsg(isEn?'Category could not be saved. Retry.':'খাত সংরক্ষণ হয়নি। আবার চেষ্টা করুন।');}
   };
 
   // Quick Party / Member creation
-  const handleCreateParty = (e: React.FormEvent) => {
+  const handleCreateParty = async (e: React.FormEvent) => {
+    try {
     e.preventDefault();
     if (!newPartyName.trim()) return;
 
-    const party = createParty(newPartyName.trim(), newPartyRole, newPartyPhone.trim());
+    const party = await createParty(newPartyName.trim(), newPartyRole, newPartyPhone.trim());
     setPartyId(party.id);
     setNewPartyName('');
     setNewPartyPhone('');
     setNewPartyRole('partner');
     setShowAddPartyModal(false);
+    } catch { setErrorMsg(isEn?'Changes could not be saved. Retry.':'পরিবর্তন সংরক্ষণ হয়নি। আবার চেষ্টা করুন।'); }
   };
 
   const handleSubmit = async (e: React.FormEvent) => {

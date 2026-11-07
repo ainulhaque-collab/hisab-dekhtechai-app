@@ -119,7 +119,7 @@ export const ReportsTab: React.FC<{ onSelectTransaction?: (tx: JournalTransactio
     URL.revokeObjectURL(url);
   };
 
-  const handleSaveBudget = (e: React.FormEvent) => {
+  const handleSaveBudget = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!selectedCatId || !budgetLimit) return;
     try {
@@ -133,7 +133,8 @@ export const ReportsTab: React.FC<{ onSelectTransaction?: (tx: JournalTransactio
         alertThresholds: [80, 100],
         updatedAt: new Date().toISOString(),
       };
-      db.setBudget(budget);
+      await db.beginTransaction();
+      try {db.setBudget(budget);await db.commitTransaction();}catch(error){await db.rollbackTransaction();throw error;}
       refreshState();
       setBudgetLimit('');
       setShowAddBudgetModal(false);
@@ -142,7 +143,7 @@ export const ReportsTab: React.FC<{ onSelectTransaction?: (tx: JournalTransactio
     }
   };
 
-  const handleSaveRecurring = (e: React.FormEvent) => {
+  const handleSaveRecurring = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!recName.trim() || !recAmount) return;
     try {
@@ -162,7 +163,8 @@ export const ReportsTab: React.FC<{ onSelectTransaction?: (tx: JournalTransactio
         generation: 1,
         createdAt: new Date().toISOString(),
       };
-      db.setRecurringRule(rule);
+      await db.beginTransaction();
+      try {db.setRecurringRule(rule);await db.commitTransaction();}catch(error){await db.rollbackTransaction();throw error;}
       refreshState();
       setRecName('');
       setRecAmount('');

@@ -13,6 +13,8 @@ import { mobileUiEnabled } from '../appearance/mobileAppearance';
 import { useServiceIdentity } from '../access/useServiceIdentity';
 import { aiFeaturesEnabled } from '../ai/availability';
 import {recoveryEnabled} from '../sync/recovery/runtime';
+import {liveSyncEnabled} from '../sync/live/runtime';
+const LiveSyncPanel=lazy(()=>import('./LiveSyncPanel').then(m=>({default:m.LiveSyncPanel})));
 const CloudRecoveryPanel=lazy(()=>import('./CloudRecoveryPanel').then(m=>({default:m.CloudRecoveryPanel})));
 const CustomerAccessPanel=lazy(()=>import('./CustomerAccessPanel').then(module=>({default:module.CustomerAccessPanel})));
 const AccountSettingsPanel=lazy(()=>import('./AccountSettingsPanel'));
@@ -66,6 +68,7 @@ export function SettingsModal({ isOpen, onClose, initialSection='home', onOpenPr
       {section === 'data' && <DataHealthPanel key={`${db.getIdentity()?.ownerSubjectHash || 'local'}:${currentWorkspace?.id}`} onOpenSync={()=>navigate(onOpenSyncModal)} onOpenBackup={()=>navigate(onOpenSnapshotModal)} />}
       {section === 'security' && <SecuritySettings language={language} />}
       {section === 'backup' && <>
+        {liveSyncEnabled&&<Suspense fallback={<p role="status">{en?'Opening sync…':'সিঙ্ক খুলছে…'}</p>}><LiveSyncPanel/></Suspense>}
         {recoveryEnabled&&<Suspense fallback={<p role="status">{en?'Opening cloud backup…':'ক্লাউড ব্যাকআপ খুলছে…'}</p>}><CloudRecoveryPanel/></Suspense>}
         {!accountAuthEnabled && row(<Cloud className="h-4 w-4" />, en ? 'Google Drive sync' : 'গুগল ড্রাইভ সিঙ্ক', en ? 'Connect your account and check pending changes' : 'অ্যাকাউন্ট সংযুক্ত করুন ও অপেক্ষমাণ পরিবর্তন দেখুন', () => navigate(onOpenSyncModal))}
         {row(<Download className="h-4 w-4" />, en ? 'Backup files & restore' : 'ব্যাকআপ ফাইল ও রিস্টোর', en ? 'Save a local copy, import a backup or restore a recovery point' : 'নিজের কাছে কপি রাখুন, ব্যাকআপ আমদানি বা রিকভারি পয়েন্ট থেকে ফিরিয়ে আনুন', () => navigate(onOpenSnapshotModal))}
