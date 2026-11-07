@@ -25,6 +25,17 @@ async function post(db: LocalDatabase, amount = '12345') {
   return journal;
 }
 
+test('Permanent account deletion survives older file import and durable reload without hiding a later financial posting',async()=>{
+ const {db,driver,key}=await database();const account=db.createAccount('ws-personal-default','Synthetic deleted account','cash','0');await db.waitForPendingWrites();
+ for(const entry of db.getRawState().syncOutbox.values())entry.uploadedStatus='uploaded';await db.persist();
+ const old=await db.exportBackupFile();assert.equal(db.safeDeleteAccount(account.id,'DELETE').mode,'deleted');await db.waitForPendingWrites();
+ await db.importBackupFile(old);assert.equal(db.getAccount(account.id),undefined);
+ const reloaded=new LocalDatabase(key,driver);await reloaded.init();assert.equal(reloaded.getAccount(account.id),undefined);
+ const data=await decodeBackup(old),opId=generateUUID();const journal=buildIncomeJournal({workspaceId:'ws-personal-default',assetAccountId:account.id,revenueCategoryId:'cat-salary',amountMinor:'100',effectiveDate:'2026-11-07',opId});
+ data.journalTransactions.push([journal.transaction.id,{...journal.transaction,lines:journal.lines}]);for(const line of journal.lines)data.journalLines.push([line.id,line]);
+ const before=canonicalJson(db.toSerializable());await assert.rejects(db.importBackupFile(await encodeBackup(data)),/ACCOUNT_DELETE_FINANCIAL_CONFLICT/);assert.equal(canonicalJson(db.toSerializable()),before);
+});
+
 test('Downloaded Drive backup imports after the same owner logs in and restores cloud records', async () => {
   SimulatedGoogleDriveTransport.clearSharedCloud();
   const profile = { subjectId: 'backup-restore-qa', subjectHash: await computeOwnerSubjectHash('backup-restore-qa'),

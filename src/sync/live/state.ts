@@ -1,5 +1,6 @@
 import {canonicalJson,computeSha256Sync} from '../canonical';
 import {mergeBackup} from '../../storage/backup';
+import {deletedAccountIds,retainAccountDeletions} from '../../storage/accountDeletion';
 
 export const LIVE_KEY='hisab-live-sync-v1';
 export const CORE_MAPS=['workspaces','accounts','accountGroups','accountPermissions','categories','parties',
@@ -17,6 +18,7 @@ export function liveCore(data:Record<string,any>):LiveCore {
     if(key==='syncOperations'){const digest=computeSha256Sync(canonicalJson(clone.payload));if(clone.contentSha256&&clone.contentSha256!==digest)throw Error('LIVE_CHECKSUM');clone.contentSha256=digest;}
     return[id,clone];
   }).sort(([a],[b])=>a<b?-1:a>b?1:0);}
+  core.accounts=[...retainAccountDeletions(new Map(core.accounts),new Map<string,any>(core.syncOperations).values(),core.localIdentity?.ownerSubjectHash||null,new Map<string,any>(core.journalLines).values())];
   return core;
 }
 export function coreHash(core:LiveCore):string{return computeSha256Sync(canonicalJson(core));}
@@ -44,8 +46,10 @@ export function mergeLive(base:BaseHashes,local:LiveCore,remote:LiveCore):LiveCo
     }
   }
   const result:any={schemaVersion:6,localIdentity:remote.localIdentity};const conflicts:string[]=[];
+  const deleted=deletedAccountIds([...new Map([...local.syncOperations,...remote.syncOperations]).values()],local.localIdentity?.ownerSubjectHash||null);
   for(const key of CORE_MAPS){const l=new Map(local[key]),r=new Map(remote[key]),merged=new Map<string,any>();
     for(const id of new Set([...l.keys(),...r.keys(),...Object.keys(base[key]||{})])){
+      if(key==='accounts'&&deleted.has(id))continue;
       const lv=l.get(id),rv=r.get(id),lh=l.has(id)?computeSha256Sync(canonicalJson(lv)):undefined,rh=r.has(id)?computeSha256Sync(canonicalJson(rv)):undefined,bh=base[key]?.[id];
       let value:any;
       if(lh===rh)value=lv;else if(lh===bh)value=rv;else if(rh===bh)value=lv;else{conflicts.push(`${key}/${id}`);continue;}

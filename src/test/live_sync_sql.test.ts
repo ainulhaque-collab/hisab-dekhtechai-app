@@ -6,6 +6,7 @@ test('live SQL: atomic CAS, owner isolation, stable retries and immutable money 
  const db=new PGlite();t.after(()=>db.close());const file=(name:string)=>readFile(new URL('../../'+name,import.meta.url),'utf8');
  await db.exec("set hisab.bootstrap_mode='isolated-stock'");await db.exec(await file('db/adapters/stock-postgres.sql'));await db.exec(await file('server/recovery/001_snapshots.sql'));
  const sql=await file('server/recovery/002_live_state.sql');assert.equal(sql,await file('supabase/migrations/20261107055443_hisab_live_account_state.sql'));await db.exec(sql);
+ const deletionGuard=await file('server/recovery/003_deletion_guard.sql');assert.equal(deletionGuard,await file('supabase/migrations/20261107115625_hisab_deletion_guards.sql'));await db.exec(deletionGuard);
  const a=generateUUID(),b=generateUUID(),dataset=generateUUID();await db.query('insert into auth.users(id) values($1),($2)',[a,b]);
  const actor=async<T>(who:string,work:()=>Promise<T>,role='authenticated')=>{await db.exec('begin');try{await db.exec(`set local role ${role}`);await db.query("select set_config('hisab.actor_id',$1,true)",[who]);const r=await work();await db.exec('commit');return r;}catch(e){await db.exec('rollback');throw e;}};
  const call=async(name:string,args:unknown[]=[])=>{return(await db.query<{r:any}>(`select public.hisab_live_${name}(${args.map((_,i)=>'$'+(i+1)).join(',')}) as r`,args)).rows[0].r;};
@@ -24,5 +25,8 @@ test('live SQL: atomic CAS, owner isolation, stable retries and immutable money 
  const fractional=structuredClone(withJournal);fractional.journalTransactions[0][1].lines[0].debitMinor='12080.5';await assert.rejects(actor(a,()=>call('put',[dataset,'2',canonicalJson(fractional),coreHash(fractional)])),/LIVE_LEDGER/);
  await assert.rejects(actor(a,()=>call('put',[dataset,'2',text,hash])),/LIVE_IMMUTABLE/);
  assert.equal((await actor(a,()=>call('get'))).core_text,j);assert.equal((await actor(a,()=>call('head'))).revision,'2');
+ const resurrected=structuredClone(withJournal);resurrected.accounts=[['deleted-account',{id:'deleted-account'}]];resurrected.syncOperations=[['delete-op',{type:'account.delete',entityId:'deleted-account',payload:{id:'deleted-account'}}]];
+ await assert.rejects(actor(a,()=>call('put',[dataset,'2',canonicalJson(resurrected),coreHash(resurrected)])),/LIVE_DELETED_ACCOUNT/);
+ assert.equal((await actor(a,()=>call('get'))).core_text,j);
 });
 import {computeSha256Sync as computeSha256SyncForTest} from '../sync/canonical';
