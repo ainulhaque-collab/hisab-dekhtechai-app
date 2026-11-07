@@ -44,3 +44,14 @@ Hosted rollback-only fixtures passed compare-and-swap, readback, idempotent retr
 Automated tests use two independently durable SQLite databases and exercise discovery, bidirectional journal changes, offline concurrent additions, lost acknowledgements, wallet metadata, conflicts, transaction barriers, failed commits/restart, stale logout responses, goals and cross-workspace loan repayment. Portable Postgres tests execute the actual migration and check ownership, CAS and immutable balanced postings.
 
 The owner has no second physical phone available now. Two-real-phone acceptance remains pending. Signed APK installation, retention, live connection and hosted owner readback evidence are recorded separately in local QA receipts; do not infer their completion from the architecture or fixture tests.
+
+### Delivered owner candidate — 2026-11-07
+
+Executable source: `093fb23973ecbfffaead5c369f0c0a9ef6137e27`, Draft PR #22 stacked on #21. Signed `1.0.30-rc10 / code31`, same permanent package/certificate, schema6; AI off, recovery and live sync on. APK size 8,473,080 bytes; SHA-256 `5D593A50BDC07DE17FC160A2BA91C682F6BA3A3415AE22F6D5130B5959EC37BD`.
+
+- Full suite: 427 total, 426 passed, one existing native-only skip, no failures. Lint, bundle, signed release/R8 and packaged feature checks passed. [CI #116](https://github.com/ainulhaque-collab/hisab-dekhtechai-app/actions/runs/42347894310) and [Android #128](https://github.com/ainulhaque-collab/hisab-dekhtechai-app/actions/runs/42347894289) passed at the executable source.
+- Installed in place over code30. All immediate pre/post-install data fingerprints matched; original install time and data directory remained unchanged. The ledger and operation-history fingerprint also matched after sync, native UI checks and cold restart. New checkpoints and genuine outbox acknowledgements intentionally change local preferences/outbox.
+- Agent inspected the actual phone: Home showed `Account data synced`; details showed `Live connection active` and `Cloud copy verified`. Cold restart returned to synced status. The real owner's canonical document readback checksum matched; the latest recovery snapshot retained the same live checkpoint and its file checksum matched.
+- APK copied to phone Downloads as `Hisab-1.0.30-rc10.apk`, with matching checksum. Local export: `build/exports/Hisab-Live-Sync-1.0.30-rc10` in the main workspace. Detailed retention receipts and private screenshots remain ignored local QA files.
+
+The phone was briefly disconnected during the first install attempt; reconnecting completed the update. No uninstall, data clear, downgrade, account switch, new financial Save or public release occurred. Owner workflow acceptance and a second physical phone remain pending; do not equate the two durable SQLite clients with two physical devices.
